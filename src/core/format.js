@@ -1,0 +1,135 @@
+/**
+ * Number, currency and date formatting.
+ * brand-guidelines.html §5.7 (locale), §8.3 (numerals), §15.2 (performance figures).
+ *
+ * Hard rules implemented here so no renderer can break them:
+ *  - true minus sign U+2212, never a hyphen
+ *  - explicit "+" on every positive return
+ *  - pt-BR uses 1.234,56 ; en uses 1,234.56 — never mixed inside one document
+ *  - currency symbol always explicit (R$, US$, EUR) — never a bare "$"
+ *  - percentages 2 decimals; currency 0 decimals above a thousand
+ */
+
+export const MINUS = '−';
+
+const CURRENCY_PREFIX = { BRL: 'R$', USD: 'US$', EUR: '€', GBP: '£' };
+
+function groupDigits(intStr, thousands) {
+  return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, thousands);
+}
+
+/** Split a number into sign + grouped integer + decimal, locale-aware. */
+function parts(value, decimals, locale) {
+  const ptBR = locale === 'pt-BR';
+  const thousands = ptBR ? '.' : ',';
+  const decimal = ptBR ? ',' : '.';
+  const neg = value < 0;
+  const fixed = Math.abs(value).toFixed(decimals);
+  const [i, d] = fixed.split('.');
+  return { neg, body: groupDigits(i, thousands) + (d ? decimal + d : '') };
+}
+
+/**
+ * Currency. Above R$1.000 the brand fixes zero decimals (§8.3); below it, two.
+ * `decimals` overrides that default when a column needs a fixed precision.
+ */
+export function money(value, { currency = 'BRL', locale = 'pt-BR', decimals = null, signed = false } = {}) {
+  if (value == null || !Number.isFinite(value)) return 'DATA UNAVAILABLE';
+  const dp = decimals != null ? decimals : Math.abs(value) >= 1000 ? 0 : 2;
+  const { neg, body } = parts(value, dp, locale);
+  const sym = CURRENCY_PREFIX[currency] || currency + ' ';
+  const sign = neg ? MINUS : signed ? '+' : '';
+  return `${sign}${sym}${sym.endsWith('$') || sym === '€' ? ' ' : ''}${body}`;
+}
+
+/** Percent from a decimal fraction (0.0173 -> "+1,73%"). Always signed unless told otherwise. */
+export function percent(fraction, { locale = 'pt-BR', decimals = 2, signed = true } = {}) {
+  if (fraction == null || !Number.isFinite(fraction)) return 'DATA UNAVAILABLE';
+  const { neg, body } = parts(fraction * 100, decimals, locale);
+  const sign = neg ? MINUS : signed ? '+' : '';
+  return `${sign}${body}%`;
+}
+
+/** Percentage points — §8.3: a change in a rate is p.p., a change in a value is %. */
+export function pp(fraction, { locale = 'pt-BR', decimals = 2, signed = true } = {}) {
+  if (fraction == null || !Number.isFinite(fraction)) return 'DATA UNAVAILABLE';
+  const { neg, body } = parts(fraction * 100, decimals, locale);
+  const sign = neg ? MINUS : signed ? '+' : '';
+  return `${sign}${body} p.p.`;
+}
+
+/** A plain weight/allocation figure — unsigned, two decimals. */
+export function weight(fraction, { locale = 'pt-BR', decimals = 2 } = {}) {
+  if (fraction == null || !Number.isFinite(fraction)) return 'DATA UNAVAILABLE';
+  const { body } = parts(Math.abs(fraction) * 100, decimals, locale);
+  return `${body}%`;
+}
+
+export function num(value, { locale = 'pt-BR', decimals = 2, signed = false } = {}) {
+  if (value == null || !Number.isFinite(value)) return 'DATA UNAVAILABLE';
+  const { neg, body } = parts(value, decimals, locale);
+  return `${neg ? MINUS : signed ? '+' : ''}${body}`;
+}
+
+const MONTHS_PT = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const MONTHS_EN = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+const MONTHS_EN_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** ISO date -> "31 de agosto de 2026" (pt-BR) or "31 Aug 2026" (en). */
+export function dateLong(iso, locale = 'pt-BR') {
+  if (!iso) return 'DATA UNAVAILABLE';
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return String(iso);
+  return locale === 'pt-BR'
+    ? `${d} de ${MONTHS_PT[m - 1]} de ${y}`
+    : `${String(d).padStart(2, '0')} ${MONTHS_EN_SHORT[m - 1]} ${y}`;
+}
+
+/** "2026-08" -> "agosto de 2026" / "August 2026". */
+export function monthLabel(ym, locale = 'pt-BR') {
+  if (!ym) return 'DATA UNAVAILABLE';
+  const [y, m] = String(ym).split('-').map(Number);
+  return locale === 'pt-BR' ? `${MONTHS_PT[m - 1]} de ${y}` : `${MONTHS_EN[m - 1]} ${y}`;
+}
+
+export function shortDate(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return `${String(d).padStart(2, '0')} ${MONTHS_EN_SHORT[m - 1]} ${y}`;
+}
+
+/** Direction glyph — §7.10: colour is never the only signal. */
+export function arrow(value) {
+  if (value == null || !Number.isFinite(value) || value === 0) return '→';
+  return value > 0 ? '↑' : '↓';
+}
+
+export function toneOf(value) {
+  if (value == null || !Number.isFinite(value) || value === 0) return 'flat';
+  return value > 0 ? 'gain' : 'loss';
+}
+
+export function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+/** Previous calendar month relative to a reference date. Returns "YYYY-MM". */
+export function previousMonth(refIso) {
+  const d = new Date(`${String(refIso).slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export function monthBounds(ym) {
+  const [y, m] = String(ym).split('-').map(Number);
+  const start = new Date(Date.UTC(y, m - 1, 1));
+  const end = new Date(Date.UTC(y, m, 0));
+  const iso = (d) => d.toISOString().slice(0, 10);
+  // the last trading day of the prior month is the valuation anchor for a monthly return
+  const prevEnd = new Date(Date.UTC(y, m - 1, 0));
+  return { start: iso(start), end: iso(end), priorEnd: iso(prevEnd) };
+}

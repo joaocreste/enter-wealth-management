@@ -1,0 +1,30 @@
+{
+  "name": "enter-wealth-advisor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Enter Asset Management \u2014 AI-assisted advisory portal. Rivet-orchestrated monthly client reporting on Cloudflare.",
+  "scripts": {
+    "build:graph": "node rivet/build-graph.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "demo": "node scripts/demo.mjs",
+    "deploy": "wrangler deploy",
+    "deploy:worker": "node scripts/deploy-worker.mjs",
+    "dev": "wrangler dev --local --port 8788",
+    "migrate": "wrangler d1 migrations apply enter-wealth --local",
+    "migrate:remote": "wrangler d1 migrations apply enter-wealth --remote",
+    "predeploy": "node scripts/build-web.mjs && node rivet/build-graph.mjs",
+    "predev": "node scripts/build-web.mjs",
+    "run:overview": "node scripts/run-rivet.mjs overview",
+    "run:report": "node scripts/run-rivet.mjs report",
+    "seed": "curl -s -X POST http://127.0.0.1:8788/api/admin/seed -H 'content-type: application/json' -d '{}'",
+    "verify": "node scripts/verify.mjs",
+    "verify:live": "node scripts/verify.mjs --live"
+  },
+  "dependencies": {
+    "@ironclad/rivet-node": "1.25.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.85.0"
+  }
+}

@@ -1,0 +1,153 @@
+/**
+ * Enter Asset Management — design tokens.
+ * Extracted verbatim from brand-guidelines.html §16 (Design tokens).
+ * This file is the single machine-readable source of truth for every surface:
+ * advisor portal, client portal, HTML email, PDF letter and charts.
+ *
+ * Rules encoded here that the renderers must respect:
+ *  §7.1  chroma is reserved for data — Yield/Drawdown never appear as brand colour
+ *  §7.10 colour is never the only signal: explicit "+" and true minus U+2212
+ *  §8.3  tabular lining figures, locale-correct separators
+ *  §9.4  radius 0 for anything containing data, 2px for controls, no shadows
+ *  §10.2 portfolio line in ink, benchmark in benchmark blue dashed — never green
+ *  §15.3 disclosures at 11pt minimum in ink-2, never grey, never an image
+ */
+
+export const color = {
+  paper: '#F5F6F5', paper2: '#FFFFFF', paper3: '#ECEEED',
+  ink: {
+    50: '#F1F4F5', 100: '#E7EBED', 150: '#D8DDE0', 200: '#C4CACE',
+    300: '#9FA7AD', 400: '#7C858B', 500: '#5C6469', 600: '#434A50',
+    700: '#2E3439', 800: '#1F2427', 900: '#14171A', 950: '#0B0D0E',
+  },
+  yield: {
+    25: '#F3F8F4', 50: '#E6F2EA', 100: '#CFE6D7', 150: '#BCDCC7',
+    200: '#A6D0B4', 300: '#82BC96', 400: '#5FA57A', 500: '#438E60',
+    600: '#33754D', 700: '#285E3F', 800: '#204B33', 900: '#193A28', 950: '#0F2318',
+  },
+  drawdown: {
+    25: '#FCF5F4', 50: '#F9E9E7', 100: '#F2D4D0', 150: '#EAC2BD',
+    200: '#E0ADA7', 300: '#D18B84', 400: '#C06962', 500: '#AE4F48',
+    600: '#943A34', 700: '#7A2E29', 800: '#632521', 900: '#4E1D1A', 950: '#2F110F',
+  },
+  vault: { 600: '#275A88', 700: '#1A4269', 800: '#12314F', 900: '#0E1F33' },
+  brass: { 100: '#EADFC4', 300: '#CDB077', 400: '#B5934A', 500: '#9A7B34' },
+  amber: {
+    50: '#FBF3E2', 100: '#F5E5C2', 200: '#EDD49B', 300: '#DFBB6A',
+    400: '#CBA043', 500: '#B0862C', 600: '#8F6B1F', 700: '#705319',
+  },
+  benchmark: {
+    50: '#EAF0F6', 100: '#D3E0EC', 200: '#B0C7DC', 300: '#85A7C6',
+    400: '#5C87AC', 500: '#3E6B92', 600: '#2F5476', 700: '#26445F',
+    800: '#1D3549', 900: '#142432',
+  },
+  /** §7.8 fixed order — the reader learns the order across documents. Never reordered. */
+  categorical: ['#12314F', '#24756C', '#A8623A', '#5E4270', '#7A9463', '#6A7885', '#9A7B34', '#93526A'],
+  cvdSafe: { gain: '#1E6FA8', loss: '#BE5A21' },
+  rule: '#D3D8DA', rule2: '#E4E8E9',
+};
+
+/** §7.9 — reference these, never the raw scale steps. */
+export const semantic = {
+  light: {
+    gainText: color.yield[700], gainGraphic: color.yield[500],
+    gainFill: color.yield[100], gainWash: color.yield[25],
+    lossText: color.drawdown[600], lossGraphic: color.drawdown[500],
+    lossFill: color.drawdown[100], lossWash: color.drawdown[25],
+    flat: color.ink[400], benchmark: color.benchmark[600],
+    caution: color.amber[600], structure: color.vault[800],
+  },
+  dark: {
+    gainText: color.yield[300], gainGraphic: color.yield[400],
+    gainFill: color.yield[900], gainWash: color.yield[950],
+    lossText: color.drawdown[300], lossGraphic: color.drawdown[400],
+    lossFill: color.drawdown[900], lossWash: color.drawdown[950],
+    flat: color.ink[400], benchmark: color.benchmark[300],
+    caution: color.amber[300], structure: color.benchmark[200],
+  },
+};
+
+export const type = {
+  sans: "'Archivo',system-ui,-apple-system,'Segoe UI',sans-serif",
+  serif: "'Newsreader',Georgia,'Times New Roman',serif",
+  mono: "'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace",
+  /** §8.2 scale — size / line-height */
+  scale: {
+    display: [44, 0.94], editorial: [28, 1.14], heading: [20, 1.2],
+    subhead: [15.5, 1.3], bodySans: [16, 1.55], bodySerif: [18, 1.62],
+    data: [13, 1.4], caption: [12, 1.4], disclosure: [11, 1.45],
+  },
+};
+
+/** §9.1 — 4pt base, 8pt rhythm. Nothing between these values. */
+export const space = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128];
+export const radius = { data: 0, control: 2 };
+export const motion = { state: 120, reveal: 200, page: 320, ease: 'cubic-bezier(.2,0,0,1)' };
+
+export const brandRules = {
+  brassMaxCoverage: 0.05,
+  chromaReservedFor: 'data',
+  colourNeverSoleSignal: true,
+  localeInvertsDirection: ['zh-CN', 'zh-TW', 'ja-JP', 'ko-KR'],
+  minusSign: '−',
+  disclosureMinPt: 11,
+};
+
+/**
+ * §6.1 the open bracket — two opposing corners with the return arrow inside.
+ * Reproduced as path data so every surface draws the identical mark.
+ * Construction: 100-unit box, 8-unit inset, stroke 7, corner arms 22 units, arrowhead 45 degrees.
+ */
+export const LOGO_SYMBOL_VIEWBOX = '0 0 100 100';
+export const LOGO_SYMBOL_PATHS = [
+  // top-left bracket corner
+  'M8 30 L8 8 L30 8',
+  // bottom-right bracket corner
+  'M92 70 L92 92 L70 92',
+  // return arrow: shaft in from the right, turn down-left, arrowhead
+  'M72 34 L72 56 L36 56',
+  'M48 44 L36 56 L48 68',
+];
+
+/** Inline SVG for the full lockup. `variant`: 'ink' | 'paper' | 'vault'. */
+export function logoSvg({ variant = 'ink', height = 28, withDescriptor = true } = {}) {
+  const fg = variant === 'ink' ? color.ink[950] : '#FFFFFF';
+  const sub = variant === 'ink' ? color.ink[500] : 'rgba(255,255,255,.72)';
+  const s = height;
+  const paths = LOGO_SYMBOL_PATHS.map(
+    (d) => `<path d="${d}" fill="none" stroke="${fg}" stroke-width="7" stroke-linecap="square" stroke-linejoin="miter"/>`
+  ).join('');
+  const wordSize = s * 0.86;
+  const descSize = wordSize * 0.26;
+  return `<span class="lockup" style="display:inline-flex;align-items:center;gap:${(s * 0.34).toFixed(1)}px">
+<svg viewBox="${LOGO_SYMBOL_VIEWBOX}" width="${s}" height="${s}" role="img" aria-label="Enter Asset Management">${paths}</svg>
+<span style="display:flex;flex-direction:column;line-height:1">
+<span style="font-family:${type.sans};font-weight:600;font-size:${wordSize.toFixed(1)}px;letter-spacing:-0.045em;color:${fg}">enter</span>
+${withDescriptor ? `<span style="font-family:${type.sans};font-weight:500;font-size:${descSize.toFixed(1)}px;letter-spacing:.17em;color:${sub};margin-top:${(s * 0.13).toFixed(1)}px">Asset Management</span>` : ''}
+</span></span>`;
+}
+
+/** Full CSS custom-property block, emitted into every HTML surface. */
+export function cssVariables() {
+  const lines = [];
+  lines.push(`--paper:${color.paper};--paper-2:${color.paper2};--paper-3:${color.paper3};`);
+  for (const [k, v] of Object.entries(color.ink)) lines.push(`--ink-${k}:${v};`);
+  for (const [k, v] of Object.entries(color.yield)) lines.push(`--g-${k}:${v};`);
+  for (const [k, v] of Object.entries(color.drawdown)) lines.push(`--r-${k}:${v};`);
+  for (const [k, v] of Object.entries(color.vault)) lines.push(`--vault-${k}:${v};`);
+  for (const [k, v] of Object.entries(color.brass)) lines.push(`--brass-${k}:${v};`);
+  for (const [k, v] of Object.entries(color.amber)) lines.push(`--a-${k}:${v};`);
+  for (const [k, v] of Object.entries(color.benchmark)) lines.push(`--b-${k}:${v};`);
+  color.categorical.forEach((c, i) => lines.push(`--cat-${i + 1}:${c};`));
+  const L = semantic.light;
+  lines.push(
+    `--gain-text:${L.gainText};--gain-graphic:${L.gainGraphic};--gain-fill:${L.gainFill};--gain-wash:${L.gainWash};`,
+    `--loss-text:${L.lossText};--loss-graphic:${L.lossGraphic};--loss-fill:${L.lossFill};--loss-wash:${L.lossWash};`,
+    `--flat:${L.flat};--benchmark:${L.benchmark};--caution:${L.caution};--structure:${L.structure};`,
+    `--rule:${color.rule};--rule-2:${color.rule2};`,
+    `--font-sans:${type.sans};--font-serif:${type.serif};--font-mono:${type.mono};`,
+    `--s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:24px;--s-6:32px;--s-7:48px;--s-8:64px;--s-9:96px;--s-10:128px;`,
+    `--radius-data:0;--radius-control:2px;--ease:${motion.ease};`
+  );
+  return lines.join('');
+}

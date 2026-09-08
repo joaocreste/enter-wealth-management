@@ -1,0 +1,67 @@
+# Publishes the portal to GitHub Pages.
+#
+# Only web/ is published. The API, the database and the report artefacts live in
+# the Cloudflare Worker; the origin split is handled by web/shared/config.js,
+# which resolves the API base from the hostname at runtime.
+name: Deploy portal to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'src/core/format.js'
+      - 'src/core/brand.js'
+      - 'scripts/build-web.mjs'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --omit=optional
+
+      - name: Refresh the shared modules the browser imports
+        run: npm run build:web
+
+      - name: Fail if a stale API placeholder would ship
+        run: |
+          if grep -q 'WORKERS_SUBDOMAIN' web/shared/config.js; then
+            echo "web/shared/config.js still contains the WORKERS_SUBDOMAIN placeholder."
+            echo "Run: npm run deploy:worker   (it rewrites the placeholder with the real Worker URL)"
+            exit 1
+          fi
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

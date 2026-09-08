@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Enter Asset Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,300;6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/app.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%230B0D0E' stroke-width='9'%3E%3Cpath d='M8 30 L8 8 L30 8'/%3E%3Cpath d='M92 70 L92 92 L70 92'/%3E%3Cpath d='M72 34 L72 56 L36 56'/%3E%3Cpath d='M48 44 L36 56 L48 68'/%3E%3C/g%3E%3C/svg%3E">
+</head>
+<body>
+<main class="login-wrap" id="root"></main>
+<script type="module">
+import { h, mount, api, auth, logo, advisorUrl, clientUrl } from './shared/ui.js';
+
+const DEMO = [
+  { role: 'Assessor', name: 'Antonio Bicudo', email: 'antonio.bicudo@enteram.com.br', password: 'enter2026' },
+  { role: 'Cliente', name: 'Albert da Silva', email: 'albert.dasilva@exemplo.com.br', password: 'albert2026' },
+  { role: 'Cliente', name: 'Beatriz Nakamura', email: 'beatriz.nakamura@exemplo.com.br', password: 'beatriz2026' },
+];
+
+const root = document.getElementById('root');
+const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', placeholder: 'voce@enteram.com.br' });
+const password = h('input', { type: 'password', id: 'password', autocomplete: 'current-password' });
+const error = h('div.err', { style: { display: 'none', marginTop: '12px' } });
+const submit = h('button.btn.primary', { type: 'submit', text: 'entrar' });
+
+async function go(e) {
+  e?.preventDefault();
+  error.style.display = 'none';
+  submit.disabled = true;
+  submit.textContent = 'entrando…';
+  try {
+    const s = await api('/api/auth/login', { email: email.value, password: password.value });
+    auth.token = s.token;
+    location.href = s.user.role === 'client' ? clientUrl() : advisorUrl();
+  } catch (err) {
+    error.textContent = 'Credenciais inválidas. Verifique o e-mail e a senha.';
+    error.style.display = 'block';
+    submit.disabled = false;
+    submit.textContent = 'entrar';
+  }
+}
+
+mount(root, h('section.login', {},
+  logo({ size: 30 }),
+  h('h1', { text: 'Portal de investimentos' }),
+  h('p.lede', { text: 'Acesso para assessores e clientes. As áreas são separadas: um assessor vê apenas os clientes sob sua responsabilidade, e um cliente vê apenas os próprios dados.' }),
+  h('form', { onsubmit: go },
+    h('div.field', {}, h('label', { for: 'email', text: 'E-mail' }), email),
+    h('div.field', {}, h('label', { for: 'password', text: 'Senha' }), password),
+    submit),
+  error,
+  h('div.demo', {},
+    h('div', { style: { marginBottom: '6px' }, text: 'Acessos de demonstração' }),
+    DEMO.map((d) => h('button', {
+      type: 'button',
+      text: `${d.role} · ${d.name} — ${d.email}`,
+      onclick: () => { email.value = d.email; password.value = d.password; go(); },
+    })),
+    h('p.note', { style: { marginTop: '10px' }, text: 'Em produção este login fica atrás do Cloudflare Access; o par e-mail/senha existe para que a demonstração rode sem um tenant configurado.' }))));
+
+if (auth.token) {
+  api('/api/auth/me').then((me) => { location.href = me.user.role === 'client' ? clientUrl() : advisorUrl(); }).catch(() => auth.clear());
+}
+</script>
+</body>
+</html>

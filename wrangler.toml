@@ -1,0 +1,44 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "enter-wealth-advisor"
+main = "worker/src/index.js"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Advisor portal, client portal and the report viewer are served from the same
+# Worker so the authorization boundary is enforced in one place (§24).
+[assets]
+directory = "web"
+binding = "ASSETS"
+
+[observability]
+enabled = true
+
+# ── D1: the relational record (§24, §25) ────────────────────────────────────
+[[d1_databases]]
+binding = "DB"
+database_name = "enter-wealth"
+database_id = "00000000-0000-0000-0000-000000000000"   # replace after `wrangler d1 create enter-wealth`
+migrations_dir = "worker/migrations"
+
+# ── R2: immutable generated artefacts — PDFs, HTML snapshots, charts ────────
+[[r2_buckets]]
+binding = "REPORTS"
+bucket_name = "enter-wealth-reports"
+
+# ── KV: cached provider responses and low-latency reference data ────────────
+# Never the authoritative store for a portfolio record.
+[[kv_namespaces]]
+binding = "MARKET_CACHE"
+id = "00000000000000000000000000000000"                # replace after `wrangler kv namespace create MARKET_CACHE`
+
+[vars]
+ENVIRONMENT = "development"
+# Origins permitted to call this API from a browser. The portal is served from
+# GitHub Pages, so every portal request is cross-origin. Never a wildcard.
+ALLOWED_ORIGINS = "https://joaocreste.github.io"
+REPORT_LOCALE = "pt-BR"
+BASE_CURRENCY = "BRL"
+# Set with: wrangler secret put ANTHROPIC_API_KEY
+# ANTHROPIC_MODEL is a plain var so the model in use is visible in the audit trail.
+ANTHROPIC_MODEL = "claude-opus-5"
+LLM_PROMPT_VERSION = "letter-2026-09-a"

@@ -26,7 +26,8 @@ npm run demo                                      # the whole §37 journey, narr
 ```
 
 Then open **http://127.0.0.1:8788/** — or the deployed portal at
-**https://joaocreste.github.io/enter-wealth-management/**
+**https://joaocreste.github.io/enter-wealth-management/**, which runs against the
+deployed Worker rather than your local one.
 
 | | |
 |---|---|
@@ -186,10 +187,16 @@ which level it needed. The contribution chart is the last thing to go.
 The portal and the API live on different origins by design: static files on
 **GitHub Pages**, everything with state on a **Cloudflare Worker** with D1, R2 and KV.
 
-```
-https://joaocreste.github.io/enter-wealth-management/   the two portals, static
-https://enter-wealth-advisor.<subdomain>.workers.dev    the API, D1, R2, KV
-```
+**Live:**
+
+| | |
+|---|---|
+| Portal | **https://joaocreste.github.io/enter-wealth-management/** |
+| API | https://enter-wealth-advisor.joaocreste-8da.workers.dev |
+
+Advisor `antonio.bicudo@enteram.com.br` / `enter2026` · client
+`albert.dasilva@exemplo.com.br` / `albert2026`. The demo dataset is seeded and
+August 2026 is published, priced from live providers.
 
 `web/shared/config.js` resolves which API to call from the hostname at runtime, so
 the same committed files work under `wrangler dev` (same origin) and on Pages
@@ -282,4 +289,7 @@ password path stays as the local fallback. The advisor/client boundary is enforc
 - TradingView is used through its public scanner endpoint. A licensed feed would
   replace `src/adapters/tradingview.js` behind the same interface.
 - Email is rendered and stored, not sent. Adding a provider is one adapter.
+- `PBKDF2_ITERATIONS` is 100,000, the Cloudflare Workers ceiling. The local
+  emulator does not enforce that cap, so a higher value passes every local test
+  and fails only on a real deploy.
 - `docs/implementation-report.md` covers what one more month would buy.

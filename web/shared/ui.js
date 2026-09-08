@@ -515,6 +515,49 @@ export function lineChart(series, { title = null, caption = null, width = 560, h
   return h('figure', {}, title && h('figcaption.chart-title', { text: title }), svg, tip, caption && h('figcaption.chart-caption', { text: caption }));
 }
 
+/**
+ * A sparkline: one price series in ink, a hairline at the window's opening close so
+ * the eye reads above or below it, and a hover reading of date and close. The
+ * variation itself is typeset next to it, so the line carries no colour (§7.1).
+ * `points` are { date, close }; `format` renders a close for the tooltip.
+ */
+export function sparkline(points, { width = 100, height = 28, format = (v) => String(v), dateLabel = (d) => d } = {}) {
+  if (!points || points.length < 2) return null;
+  const vals = points.map((p) => p.close);
+  const lo = Math.min(...vals); const hi = Math.max(...vals);
+  const span = Math.max(1e-9, hi - lo);
+  const pad = 2;
+  const sx = (i) => (i / (points.length - 1)) * width;
+  const sy = (v) => pad + (1 - (v - lo) / span) * (height - pad * 2);
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${sx(i).toFixed(2)},${sy(p.close).toFixed(2)}`).join(' ');
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', class: 'spark', 'aria-hidden': 'true' });
+  const y0 = sy(points[0].close).toFixed(2);
+  svg.append(svgEl('line', { x1: 0, y1: y0, x2: width, y2: y0, class: 'spark-base', 'vector-effect': 'non-scaling-stroke' }));
+  svg.append(svgEl('path', { d, class: 'spark-line', 'vector-effect': 'non-scaling-stroke' }));
+  const cursor = svgEl('line', { y1: 0, y2: height, class: 'spark-cursor', 'vector-effect': 'non-scaling-stroke', style: 'display:none' });
+  svg.append(cursor);
+
+  const wrap = h('div.spark-wrap', {}, svg);
+  const tip = h('div.chart-tip');
+  wrap.append(tip);
+  const hide = () => { cursor.style.display = 'none'; tip.style.display = 'none'; };
+  wrap.addEventListener('mousemove', (e) => {
+    const r = svg.getBoundingClientRect();
+    const i = Math.max(0, Math.min(points.length - 1, Math.round(((e.clientX - r.left) / r.width) * (points.length - 1))));
+    const x = sx(i).toFixed(2);
+    cursor.setAttribute('x1', x); cursor.setAttribute('x2', x); cursor.style.display = '';
+    tip.replaceChildren(h('b', { text: dateLabel(points[i].date) }), h('span', { text: format(points[i].close) }));
+    const px = (i / (points.length - 1)) * r.width;
+    tip.style.display = 'block';
+    tip.style.left = `${px}px`;
+    tip.style.top = '-6px';
+    tip.style.transform = px > r.width * 0.55 ? 'translate(calc(-100% - 8px), -100%)' : 'translate(8px, -100%)';
+  });
+  wrap.addEventListener('mouseleave', hide);
+  return wrap;
+}
+
 // ── the daily agents: progress ────────────────────────────────────────────
 export const DAILY_AGENTS = [
   { step: 1, key: 'dados', title: 'Agente 1 · Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },

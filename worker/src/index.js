@@ -27,6 +27,7 @@ import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
 import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
 import { makeSource } from '../../src/core/sources.js';
 import * as A from './agents.js';
+import * as S from './series.js';
 export { OverviewAgents } from './agents.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
@@ -86,6 +87,10 @@ export default {
   async scheduled(event, env, ctx) {
     const advisors = await all(env.DB, 'SELECT a.*, u.name, u.email FROM advisors a JOIN users u ON u.id = a.user_id');
     for (const advisor of advisors) await A.startOverviewRun(env, ctx, { advisor, trigger: 'cron' });
+    // The indicator histories in R2 pick up yesterday's close now, so the first
+    // advisor of the day reads the strip from the store instead of waiting on Yahoo.
+    P.attachKv(env);
+    try { console.log('series store', JSON.stringify(await S.warmSeriesStore(env))); } catch (err) { console.error('series store', err?.stack || err); }
   },
 
   async fetch(request, env, ctx) {
@@ -223,6 +228,19 @@ async function route(request, env, url, ctx) {
   if (path === '/api/advisor/correlations') {
     if (session.role === 'client') return bad(403, 'advisor surface');
     return ok(await advisorCorrelations(env, url.searchParams.get('window') || '6m'));
+  }
+
+  // The monitored indicators over any window, from the daily histories kept in R2 (worker/src/series.js).
+  if (path === '/api/advisor/indicators/series') {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    const r = await S.indicatorSeries(env, { window: url.searchParams.get('window') || '30d', from: url.searchParams.get('from'), to: url.searchParams.get('to') });
+    return r.error ? bad(400, r.error) : ok(r);
+  }
+
+  if (path === '/api/advisor/indicators/series/rebuild' && method === 'POST') {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    await audit(db, { entity: 'series_store', entity_id: 'indicators', action: 'rebuild_requested', actor_id: session.user_id });
+    return ok(await S.warmSeriesStore(env, { force: true }));
   }
 
   // ── client-scoped ────────────────────────────────────────────────────────

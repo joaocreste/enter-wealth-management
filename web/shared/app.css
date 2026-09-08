@@ -416,6 +416,24 @@ table.d.matters .talk{color:var(--ink-900)}
 .strip .v{font-size:18px;font-weight:600;letter-spacing:-0.025em;display:block;line-height:1;white-space:nowrap}
 .strip .c{font-size:11.5px;font-family:var(--mono);margin-top:8px;display:block;white-space:nowrap}
 .strip .cell.na .v{color:var(--ink-300);font-size:12px;font-weight:400;letter-spacing:0}
+.strip .cell{position:relative}
+.strip .cell .src{font-size:11px;color:var(--ink-400);margin-top:10px;display:block;line-height:1.4;overflow-wrap:anywhere}
+.strip .cell .c{white-space:normal;line-height:1.4}
+.strip .cell .c.muted{color:var(--ink-400)}
+.strip.busy .cell{opacity:.55;transition:opacity var(--dur) var(--ease)}
+.spark-wrap{position:relative;margin-top:10px;height:28px}
+.spark{display:block;width:100%;height:28px;overflow:visible}
+.spark-line{fill:none;stroke:var(--ink-950);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.spark-base{stroke:var(--ink-300);stroke-width:1;stroke-dasharray:2 3}
+.spark-cursor{stroke:var(--ink-400);stroke-width:1}
+.spark-wrap .chart-tip{top:auto}
+
+/* the window toggles over the indicator strip, and the custom range */
+.win{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.win .btn.sm{padding:4px 9px;font-family:var(--sans);font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.range{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:-8px 0 16px;font-size:12.5px;color:var(--ink-600)}
+.range input[type=date]{padding:5px 9px;font-size:12.5px;font-variant-numeric:tabular-nums}
+.range .err{padding:5px 9px;font-size:12px}
 
 /* ─── triggers ───────────────────────────────────────────────────────── */
 .trg{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:14px;align-items:start;padding:12px 0;border-bottom:1px solid var(--rule-2)}

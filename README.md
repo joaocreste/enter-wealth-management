@@ -224,6 +224,26 @@ portal reads the last completed run rather than recomputing on a page view.
 reports it. The model path needs `npx wrangler secret put ANTHROPIC_API_KEY`;
 `/api/health` says which path is active.
 
+### The indicator histories
+
+**Indicadores monitorados** reads its variation from daily price histories the
+Worker keeps in R2 (`worker/src/series.js`), one object per indicator under
+`series/indicators/<key>.json`: unadjusted and adjusted closes from Yahoo Finance,
+the source record for the whole history, and when it was refreshed. The first
+request backfills five years; after that a refresh fetches only the last sessions
+and merges them, and a custom range that starts earlier than the stored history
+extends it backwards and keeps what it learned. The Selic target and the monthly
+IPCA have no daily price and are listed as excluded, not dropped.
+
+`GET /api/advisor/indicators/series?window=5d|30d|ytd|1y|5y` returns every
+indicator's start and end close, variation, high, low and a downsampled series for
+the sparkline; `window=custom&from=YYYY-MM-DD&to=YYYY-MM-DD` takes any range back
+to 1990. Variation is measured on the unadjusted close, the price the strip shows,
+so a dividend restatement never makes merged history inconsistent. Every response
+carries the source record of each series. `POST /api/advisor/indicators/series/rebuild`
+downloads every history again; the daily cron refreshes the store after it starts
+the overview runs.
+
 ### The portal's design
 
 `web/shared/app.css` is the brand book applied to a screen: an ink rail, a paper

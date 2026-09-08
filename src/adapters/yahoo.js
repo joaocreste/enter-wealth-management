@@ -16,9 +16,10 @@ const TTL_QUOTE = 300;
 
 const iso = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 10);
 
-async function chart(symbol, query) {
+async function chart(symbol, query, ttl = null) {
   const cacheKey = `yahoo:${symbol}:${query}`;
-  const cached = await cacheGet(cacheKey, query.includes('range=') ? TTL_QUOTE : TTL_SERIES);
+  const ttlSeconds = ttl ?? (query.includes('range=') ? TTL_QUOTE : TTL_SERIES);
+  const cached = await cacheGet(cacheKey, ttlSeconds);
   if (cached) return { ...cached, fromCache: true };
 
   let lastErr = null;
@@ -29,20 +30,24 @@ async function chart(symbol, query) {
       const json = await getJson(url, { retries: 2, timeout: 14000 });
       if (json?.chart?.error) throw new Error(json.chart.error.description || 'provider error');
       const payload = { json, host: HOSTS[i], hostIndex: i };
-      await cacheSet(cacheKey, payload, query.includes('range=') ? TTL_QUOTE : TTL_SERIES);
+      await cacheSet(cacheKey, payload, ttlSeconds);
       return payload;
     } catch (err) { lastErr = err; }
   }
   throw lastErr || new Error('yahoo unavailable');
 }
 
-/** Daily series for one symbol over an inclusive date window. */
-export async function dailySeries(symbol, fromIso, toIsoDate) {
+/**
+ * Daily series for one symbol over an inclusive date window.
+ * `cacheTtl` overrides the adapter cache for callers that need the newest close
+ * sooner than a six-hour cache allows (the series store refreshing today's row).
+ */
+export async function dailySeries(symbol, fromIso, toIsoDate, { cacheTtl = null } = {}) {
   const period1 = Math.floor(Date.parse(`${fromIso}T00:00:00Z`) / 1000);
   const period2 = Math.floor(Date.parse(`${toIsoDate}T23:59:59Z`) / 1000);
   const range = `${fromIso}..${toIsoDate}`;
   try {
-    const { json, hostIndex, fromCache } = await chart(symbol, `period1=${period1}&period2=${period2}&interval=1d&events=div%2Csplit`);
+    const { json, hostIndex, fromCache } = await chart(symbol, `period1=${period1}&period2=${period2}&interval=1d&events=div%2Csplit`, cacheTtl);
     const r = json?.chart?.result?.[0];
     if (!r?.timestamp?.length) throw new Error('empty series');
 

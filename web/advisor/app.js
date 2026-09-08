@@ -10,7 +10,7 @@ import {
   pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix,
   progressCard, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
-  barChart, allocationBar, bandChart, lineChart, sourcesBlock, sourceLine,
+  barChart, allocationBar, bandChart, lineChart, sparkline, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
 } from '../shared/ui.js';
 
@@ -155,17 +155,8 @@ async function viewOverview() {
         h('p.note', { style: { marginTop: '14px' }, text: 'Cada linha é um ponto de conversa, não uma ordem. Nenhuma operação é executada a partir desta tela.' }))
         : h('div.empty', { text: 'Nenhum evento do período toca as carteiras sob sua responsabilidade.' })),
 
-    // ── indicators ──────────────────────────────────────────────────────
-    h('section.section', {},
-      h('div.section-h', {}, h('h2', { text: 'Indicadores monitorados' }), h('span.meta', { text: 'variação no mês corrente' })),
-      Object.entries(indicatorGroups).map(([group, items]) => h('div.strip-group', {},
-        h('div.kicker', { text: groupPt(group) }),
-        h('div.strip', {}, items.map((i) => i.unavailable
-          ? h('div.cell.na', {}, h('span.k', { text: i.label }), h('span.v', { text: 'DATA UNAVAILABLE' }), h('span.c.muted', { text: i.reason?.slice(0, 40) || '' }))
-          : h('div.cell', { title: i.source ? sourceLine(i.source) : '' },
-            h('span.k', { text: i.label }),
-            h('span.v', { text: formatIndicator(i) }),
-            h('span.c', { class: toneClass(i.mtdPct), text: i.mtdPct == null ? (i.asOf || '') : `${percent(i.mtdPct, { locale: L, decimals: 1 })} no mês` }))))))),
+    // ── indicators, over the window the advisor picks ───────────────────
+    indicatorsSection(o),
 
     // ── triggers + drift, as bars ───────────────────────────────────────
     h('section.section', {},
@@ -281,6 +272,147 @@ const SHORT = {
 };
 const WINDOWS = [['3m', '3 meses'], ['6m', '6 meses'], ['1y', '12 meses']];
 
+// ── indicators over a window ──────────────────────────────────────────────
+// The strip reads the daily histories the Worker keeps in R2 (Yahoo Finance);
+// the level of each indicator comes from the overview run until the series
+// arrives, then the close at the end of the window takes over.
+const INDICATOR_WINDOWS = [
+  ['5d', '5D', 'as últimas 5 sessões'], ['30d', '30D', 'os últimos 30 dias'], ['ytd', 'YTD', 'desde o último fechamento do ano passado'],
+  ['1y', '1A', 'os últimos 12 meses'], ['5y', '5A', 'os últimos 5 anos'], ['custom', 'Período', 'escolher as datas'],
+];
+const EARLIEST_SERIES = '1990-01-01';
+const dmy = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : '—');
+const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '');
+
+function indicatorsSection(o) {
+  const groups = {};
+  for (const i of o.indicators) (groups[i.group || 'Outros'] ||= []).push(i);
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const meta = h('span.meta', { text: 'variação no período' });
+  const strips = h('div');
+  const foot = h('div');
+  const rangeErr = h('span.err', { style: { display: 'none' } });
+  const fromIn = h('input', { type: 'date', min: EARLIEST_SERIES, max: todayIso, 'aria-label': 'data inicial' });
+  const toIn = h('input', { type: 'date', min: EARLIEST_SERIES, max: todayIso, 'aria-label': 'data final' });
+  const onEnter = (e) => { if (e.key === 'Enter') load('custom'); };
+  fromIn.addEventListener('keydown', onEnter); toIn.addEventListener('keydown', onEnter);
+  const range = h('div.range', { style: { display: 'none' } },
+    h('span', { text: 'de' }), fromIn, h('span', { text: 'até' }), toIn,
+    h('button.btn.sm', { text: 'aplicar', onclick: () => load('custom') }), rangeErr);
+  const buttons = h('div.win', { role: 'group', 'aria-label': 'janela de variação' },
+    INDICATOR_WINDOWS.map(([k, label, title]) => h('button.btn.sm', { dataset: { k }, text: label, title, onclick: () => (k === 'custom' ? openRange() : load(k)) })));
+
+  let data = null;       // the last series response
+  let loading = false;
+  let seq = 0;
+
+  const fmtFor = (i) => (v) => formatIndicator({ ...i, price: v });
+
+  function cell(i, s) {
+    const later = !s && data?.excluded?.find((x) => x.key === i.key && x.first); // a series that begins after the window
+    if (later) {
+      return h('div.cell', { title: later.reason },
+        h('span.k', { text: i.label }), h('span.v', { text: '—' }),
+        h('span.c.muted', { text: `série começa em ${dmy(later.first)}` }),
+        h('span.src', { text: `Yahoo Finance · ${later.symbol}` }));
+    }
+    const src = s?.source || i.source;
+    const title = src ? sourceLine(src) : '';
+    if (!s && i.unavailable) {
+      return h('div.cell.na', { title }, h('span.k', { text: i.label }), h('span.v', { text: 'DATA UNAVAILABLE' }), h('span.c.muted', { text: i.reason?.slice(0, 40) || '' }));
+    }
+    const fmt = fmtFor(i);
+    let c;
+    if (s) {
+      const when = s.partial ? `desde ${dmy(s.start.date)}` : data.window.key === 'custom' ? `${dmy(s.start.date)} a ${dmy(s.end.date)}` : data.window.label;
+      c = h('span.c', { class: toneClass(s.change_pct), text: `${percent(s.change_pct, { locale: L, decimals: 1 })} · ${when}` });
+    } else if (loading && !data) c = h('span.c.muted', { text: 'carregando a série…' });
+    else if (data) c = h('span.c.muted', { text: 'sem série diária' });
+    else c = h('span.c.muted', { text: i.asOf ? dmy(i.asOf) : '' });
+    return h('div.cell', { title },
+      h('span.k', { text: i.label }),
+      h('span.v', { text: fmt(s ? s.end.close : i.price) }),
+      c,
+      s ? sparkline(s.points, { format: fmt, dateLabel: dmy }) : null,
+      src ? h('span.src', { text: `${src.provider} · ${src.identifier} · até ${dmy(s ? s.end.date : i.asOf)}` }) : null);
+  }
+
+  function paint() {
+    const byKey = new Map((data?.indicators || []).map((s) => [s.key, s]));
+    mount(strips, Object.entries(groups).map(([group, items]) => h('div.strip-group', {},
+      h('div.kicker', { text: groupPt(group) }),
+      h('div.strip', { class: loading ? 'busy' : '' }, items.map((i) => cell(i, byKey.get(i.key)))))));
+  }
+
+  function paintFoot(d) {
+    const noSeries = (d.excluded || []).filter((x) => !x.first);
+    const later = (d.excluded || []).filter((x) => x.first);
+    const excluded = (noSeries.length ? ` · sem série diária: ${noSeries.map((x) => x.label).join(', ')}` : '')
+      + (later.length ? ` · começam depois do período: ${later.map((x) => `${x.label} (${dmy(x.first)})`).join(', ')}` : '');
+    mount(foot,
+      h('p.chart-caption', {},
+        `${d.basis[0].toUpperCase()}${d.basis.slice(1)}. `,
+        `Fonte: Yahoo Finance, fechamentos diários; séries mantidas em R2 pelo Worker (${d.store.objects} indicadores, atualizadas em ${dmy(d.store.refreshed_at)} às ${hhmm(d.store.refreshed_at)})`,
+        excluded, '. Passe o mouse sobre a linha para ler um fechamento.'),
+      sourcesBlock(d.sources, 'Ver fontes das séries'));
+  }
+
+  function openRange() {
+    for (const b of buttons.querySelectorAll('button')) b.classList.toggle('on', b.dataset.k === 'custom');
+    const first = data?.indicators?.reduce((a, s) => (a && a < s.start.date ? a : s.start.date), null);
+    if (!fromIn.value) fromIn.value = data?.window.key === 'custom' ? data.window.from : first || todayIso.replace(/^\d{4}/, (y) => String(Number(y) - 1));
+    if (!toIn.value) toIn.value = data?.window.key === 'custom' ? data.window.to : todayIso;
+    range.style.display = '';
+    fromIn.focus();
+  }
+
+  async function load(k) {
+    const my = ++seq;
+    let query = `window=${k}`;
+    if (k === 'custom') {
+      const from = fromIn.value; const to = toIn.value;
+      const problem = !from || !to ? 'informe as duas datas'
+        : from < EARLIEST_SERIES ? `a série começa, no máximo, em ${dmy(EARLIEST_SERIES)}`
+          : from >= to ? 'a data inicial precisa ser anterior à final' : null;
+      rangeErr.textContent = problem || '';
+      rangeErr.style.display = problem ? '' : 'none';
+      if (problem) return;
+      query += `&from=${from}&to=${to}`;
+    } else {
+      range.style.display = 'none';
+      rangeErr.style.display = 'none';
+    }
+    for (const b of buttons.querySelectorAll('button')) { b.classList.toggle('on', b.dataset.k === k); b.disabled = true; }
+    loading = true;
+    paint();
+    try {
+      const d = await api(`/api/advisor/indicators/series?${query}`);
+      if (my !== seq) return;
+      data = d;
+      const first = d.indicators.reduce((a, s) => (a && a < s.start.date ? a : s.start.date), null);
+      meta.textContent = d.indicators.length ? `${dateLong(first, L)} a ${dateLong(d.as_of, L)}` : 'sem séries no período';
+      paintFoot(d);
+    } catch (err) {
+      if (my !== seq) return;
+      if (k === 'custom') { rangeErr.textContent = err.message; rangeErr.style.display = ''; }
+      else mount(foot, h('div.err', { text: `Não foi possível carregar as séries: ${err.message}` }));
+    } finally {
+      if (my === seq) {
+        loading = false;
+        for (const b of buttons.querySelectorAll('button')) b.disabled = false;
+        paint();
+      }
+    }
+  }
+
+  paint();
+  load('30d');
+  return h('section.section', {},
+    h('div.section-h', {}, h('h2', { text: 'Indicadores monitorados' }), h('div.split', {}, meta, buttons)),
+    range, strips, foot);
+}
+
 /** The matrix loads after the page: sixteen daily series take a few seconds cold. */
 function correlationSection() {
   const box = h('div.card');
@@ -318,7 +450,7 @@ function triggerOrder(a, b) {
 function formatIndicator(i) {
   if (i.price == null) return '—';
   if (['%', '% a.a.', '% a.m.'].includes(i.unit)) return `${num(i.price, 2)}%`;
-  if (i.unit === 'USD' || i.unit === 'USD/oz') return `US$ ${num(i.price, 0)}`;
+  if (i.unit === 'USD' || i.unit === 'USD/oz') return `US$ ${num(i.price, i.price < 10 ? 4 : 0)}`;
   if (i.unit === 'USD/bbl' || i.unit === 'USD/lb') return `US$ ${num(i.price, 2)}`;
   if (i.unit === 'BRL') return `R$ ${num(i.price, 4)}`;
   return num(i.price, i.price > 1000 ? 0 : 2);

@@ -32,7 +32,10 @@ binding = "MARKET_CACHE"
 id = "00000000000000000000000000000000"                # replace after `wrangler kv namespace create MARKET_CACHE`
 
 [vars]
-ENVIRONMENT = "development"
+# Safe by default. `development` relaxes the CORS allowlist to localhost and lets
+# /api/admin/seed run without a token, so it must never be the deployed value —
+# .dev.vars overrides this to "development" for `wrangler dev` only.
+ENVIRONMENT = "production"
 # Origins permitted to call this API from a browser. The portal is served from
 # GitHub Pages, so every portal request is cross-origin. Never a wildcard.
 ALLOWED_ORIGINS = "https://joaocreste.github.io"

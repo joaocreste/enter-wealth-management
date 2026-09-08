@@ -25,7 +25,8 @@ curl -X POST localhost:8788/api/admin/seed -d '{}' -H 'content-type: application
 npm run demo                                      # the whole §37 journey, narrated
 ```
 
-Then open **http://127.0.0.1:8788/**
+Then open **http://127.0.0.1:8788/** — or the deployed portal at
+**https://joaocreste.github.io/enter-wealth-management/**
 
 | | |
 |---|---|
@@ -180,18 +181,57 @@ which level it needed. The contribution chart is the last thing to go.
 
 ---
 
-## Deploying to Cloudflare
+## Deploying
 
-```bash
-npx wrangler d1 create enter-wealth                 # paste database_id into wrangler.toml
-npx wrangler kv namespace create MARKET_CACHE       # paste id into wrangler.toml
-npx wrangler r2 bucket create enter-wealth-reports
-npx wrangler secret put SERVICE_TOKEN               # the token the Rivet runner uses
-npm run migrate:remote
-npm run deploy
+The portal and the API live on different origins by design: static files on
+**GitHub Pages**, everything with state on a **Cloudflare Worker** with D1, R2 and KV.
+
+```
+https://joaocreste.github.io/enter-wealth-management/   the two portals, static
+https://enter-wealth-advisor.<subdomain>.workers.dev    the API, D1, R2, KV
 ```
 
-Put the Worker behind a Cloudflare Access application and the portal picks the
+`web/shared/config.js` resolves which API to call from the hostname at runtime, so
+the same committed files work under `wrangler dev` (same origin) and on Pages
+(cross origin). Nothing is injected at build time.
+
+```bash
+npx wrangler login            # as the account that should own the resources
+npm run setup:cloudflare      # creates D1, KV and R2, sets the secrets, migrates
+npm run deploy:worker         # deploys, and writes the Worker URL into the portal
+git add web/shared/config.js wrangler.toml && git commit -m "point the portal at the Worker" && git push
+```
+
+The push triggers `.github/workflows/pages.yml`, which publishes `web/`. That
+workflow refuses to publish while `config.js` still holds the `WORKERS_SUBDOMAIN`
+placeholder — a portal pointing at an API that does not exist is worse than no
+portal.
+
+Then seed the deployed database once, with the `SEED_TOKEN` the setup script printed:
+
+```bash
+curl -X POST https://<worker>/api/admin/seed -H 'content-type: application/json' \
+  -d '{"token":"<SEED_TOKEN>"}'
+```
+
+### Cross-origin details worth knowing
+
+**CORS is an allowlist, never a wildcard.** `ALLOWED_ORIGINS` in `wrangler.toml`
+names the Pages origin. `*` would let any site on the internet call the API with a
+token it had obtained and would make the browser's own origin check worthless.
+
+**Artefacts use signed links.** A PDF opened in a new tab and an HTML preview in an
+iframe are browser navigations: they cannot send an `Authorization` header, and the
+session cookie does not travel to another origin. So the API mints a short-lived
+HMAC-signed URL per artefact when it returns the report metadata. The signature
+covers the report, the artefact kind and the expiry, and is only ever issued to a
+caller that already passed the scope check.
+
+**`ENVIRONMENT` defaults to `production`.** Development relaxes CORS to localhost and
+lets `/api/admin/seed` run without a token, so the deployed value must never be
+`development`. `.dev.vars` overrides it locally and is gitignored.
+
+Putting the Worker behind a Cloudflare Access application makes the portal pick the
 identity up from `Cf-Access-Authenticated-User-Email` automatically; the email and
 password path stays as the local fallback. The advisor/client boundary is enforced in
 `resolveClientScope` — one function, every client-scoped route.
@@ -210,7 +250,8 @@ password path stays as the local fallback. The advisor/client boundary is enforc
 | `npm run run:overview` | run the daily overview graph |
 | `npm run verify` | 30 checks on the engine: formatting rules, return methods, the guardrail, report validation, the PDF |
 | `npm run verify:live` | the above plus the live provider chain and the running API |
-| `npm run deploy` | publish to Cloudflare |
+| `npm run setup:cloudflare` | create D1, KV and R2, set the secrets, migrate |
+| `npm run deploy:worker` | deploy the API and point the portal at it |
 
 ---
 

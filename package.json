@@ -18,6 +18,7 @@
     "run:overview": "node scripts/run-rivet.mjs overview",
     "run:report": "node scripts/run-rivet.mjs report",
     "seed": "curl -s -X POST http://127.0.0.1:8788/api/admin/seed -H 'content-type: application/json' -d '{}'",
+    "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:live": "node scripts/verify.mjs --live"
   },

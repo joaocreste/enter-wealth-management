@@ -27,6 +27,7 @@ import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
 import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
 import { makeSource } from '../../src/core/sources.js';
 import * as A from './agents.js';
+export { OverviewAgents } from './agents.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 

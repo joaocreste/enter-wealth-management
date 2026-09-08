@@ -19,6 +19,14 @@ enabled = true
 [triggers]
 crons = ["0 10 * * *"]
 
+# The agents themselves run as a Workflow: one durable step per agent, so a run
+# that takes minutes (a model, a news scan) is not cut off the way background
+# work started from an HTTP request is, and it survives the advisor closing the tab.
+[[workflows]]
+name = "enter-wealth-overview-agents"
+binding = "OVERVIEW_AGENTS"
+class_name = "OverviewAgents"
+
 # ── D1: the relational record (§24, §25) ────────────────────────────────────
 [[d1_databases]]
 binding = "DB"

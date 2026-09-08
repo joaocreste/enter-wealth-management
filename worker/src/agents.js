@@ -16,7 +16,16 @@
  * Progress is written to overview_runs after every meaningful sub-step so the
  * person waiting sees what is happening. A manual refresh replaces the day's
  * result; the portal always reads the last completed run.
+ *
+ * The pipeline runs as a Cloudflare Workflow — one durable step per agent —
+ * because work started from an HTTP request is cut off after thirty seconds,
+ * and a day's run with a model and a news scan takes longer than that. The
+ * Workflow survives the advisor closing the tab; the cron and the button both
+ * start one. Without the binding (a local run without it) the same three
+ * functions run in-process.
  */
+import { WorkflowEntrypoint } from 'cloudflare:workers';
+import { NonRetryableError } from 'cloudflare:workflows';
 import { all, first, run, id, json, nowIso, audit, currentSnapshot, snapshotPositions, currentPolicy } from './db.js';
 import * as P from './pipeline.js';
 import * as LLM from './llm.js';
@@ -79,29 +88,66 @@ export async function startOverviewRun(env, ctx, { advisor, trigger, actorId = n
   await run(db,
     'INSERT INTO overview_runs (id, advisor_id, date, trigger, status, step, progress, message, actor_id, started_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
     runId, advisor.id, today(), trigger, 'running', 0, 0, 'Na fila', actorId, nowIso());
-  const job = runOverviewPipeline(env, runId).catch((err) => console.error('overview run failed', err?.stack || err));
-  if (ctx?.waitUntil) ctx.waitUntil(job); else await job;
+  if (env.OVERVIEW_AGENTS) {
+    await env.OVERVIEW_AGENTS.create({ id: runId, params: { runId } });
+  } else {
+    const job = runOverviewPipeline(env, runId).catch((err) => console.error('overview run failed', err?.stack || err));
+    if (ctx?.waitUntil) ctx.waitUntil(job); else await job;
+  }
   return runView(await first(db, 'SELECT * FROM overview_runs WHERE id = ?', runId));
 }
 
+/** The Workflow: three durable steps. Each agent records its own failure, so a step that throws is not retried. */
+export class OverviewAgents extends WorkflowEntrypoint {
+  async run(event, step) {
+    const { runId } = event.payload;
+    const guard = (fn) => async () => {
+      try { return await fn(); } catch (err) { throw new NonRetryableError(String(err?.message || err)); }
+    };
+    const opts = { timeout: '10 minutes', retries: { limit: 0, delay: '1 second' } };
+    const s1 = await step.do('dados', opts, guard(() => agentDados(this.env, runId)));
+    if (!s1) return;
+    const s2 = await step.do('inferencia', opts, guard(() => agentInferencia(this.env, runId, s1)));
+    if (!s2) return;
+    await step.do('gatilhos', opts, guard(() => agentGatilhos(this.env, runId, s2)));
+  }
+}
+
+/** The same three agents, in-process, for a runtime without the Workflow binding. */
 export async function runOverviewPipeline(env, runId) {
-  const db = env.DB;
+  const s1 = await agentDados(env, runId);
+  if (!s1) return;
+  const s2 = await agentInferencia(env, runId, s1);
+  if (!s2) return;
+  await agentGatilhos(env, runId, s2);
+}
+
+// ── the run's bookkeeping ─────────────────────────────────────────────────────
+async function loadRun(db, runId) {
   const row = await first(db, 'SELECT * FROM overview_runs WHERE id = ?', runId);
-  if (!row) return;
+  if (!row) throw new Error(`run ${runId} not found`);
   const advisor = await first(db, 'SELECT a.*, u.name, u.email FROM advisors a JOIN users u ON u.id = a.user_id WHERE a.id = ?', row.advisor_id);
-  const date = today();
-  const log = [];
+  const log = json(row.log_json, []);
   const report = async (step, progress, message, detail = null) => {
     log.push({ at: nowIso(), step, message, detail });
     await run(db, 'UPDATE overview_runs SET step = ?, progress = ?, message = ?, log_json = ? WHERE id = ?',
       step, Math.round(progress), message, JSON.stringify(log.slice(-80)), runId);
   };
+  const fail = async (err) => {
+    console.error('overview pipeline', err?.stack || err);
+    await run(db, 'UPDATE overview_runs SET status = ?, error = ?, finished_at = ?, log_json = ? WHERE id = ?',
+      'failed', String(err?.message || err), nowIso(), JSON.stringify(log.slice(-80)), runId);
+  };
+  return { row, advisor, log, report, fail };
+}
 
+/** 1 · Dados — everything the day rests on, each with a source record. */
+async function agentDados(env, runId) {
+  const db = env.DB;
+  const { row, advisor, report, fail } = await loadRun(db, runId);
+  const date = today();
   try {
     P.attachKv(env);
-    const modelOn = LLM.llmAvailable(env);
-
-    // ── 1 · Dados ───────────────────────────────────────────────────────────
     const indicators = [];
     for (let i = 0; i < INDICATORS.length; i += 1) {
       const ind = INDICATORS[i];
@@ -132,13 +178,24 @@ export async function runOverviewPipeline(env, runId) {
     const events = dedupeEvents([...curated, ...generated, ...newsEvents]);
     const triggerEvals = await P.evaluateTriggers(env, indicators, advisor.id);
     const sources = [...indicators.filter((i) => i.source).map((i) => i.source), ...newsSources];
+    return { date, advisorId: advisor.id, actorId: row.actor_id, trigger: row.trigger, indicators, retrieved, events, clients, portfolios, triggerEvals, sources, news };
+  } catch (err) {
+    await fail(err);
+    return null;
+  }
+}
 
-    // ── 2 · Inferência ──────────────────────────────────────────────────────
+/** 2 · Inferência — what matters for this book today, written in Portuguese. */
+async function agentInferencia(env, runId, s) {
+  const db = env.DB;
+  const { report, fail } = await loadRun(db, runId);
+  try {
+    const modelOn = LLM.llmAvailable(env);
     await report(2, 52, modelOn
-      ? `Agente 2 · Inferência — o modelo lê ${events.length} eventos, ${retrieved} indicadores e ${portfolios.length} carteiras e decide o que importa hoje`
-      : `Agente 2 · Inferência — sem modelo configurado: ordenando ${events.length} eventos por relevância e exposição`);
-    const baseRows = P.buildWhatMattersTable(events, indicators, portfolios);
-    const facts = inferenceFacts({ date, indicators, triggers: triggerEvals, events, portfolios, baseRows });
+      ? `Agente 2 · Inferência — o modelo lê ${s.events.length} eventos, ${s.retrieved} indicadores e ${s.portfolios.length} carteiras e decide o que importa hoje`
+      : `Agente 2 · Inferência — sem modelo configurado: ordenando ${s.events.length} eventos por relevância e exposição`);
+    const baseRows = P.buildWhatMattersTable(s.events, s.indicators, s.portfolios);
+    const facts = inferenceFacts({ date: s.date, indicators: s.indicators, triggers: s.triggerEvals, events: s.events, portfolios: s.portfolios, baseRows });
     let inference; let mode = 'deterministic_template'; let model = null; let promptVersion = null;
     if (modelOn) {
       try {
@@ -153,20 +210,30 @@ export async function runOverviewPipeline(env, runId) {
       inference = LLM.deterministicDailyInference(facts);
     }
     await report(2, 74, 'Agente 2 · Inferência — escrevendo o resumo do dia e a tabela do que importa');
-    const whatMatters = mergeInference(baseRows, inference, events);
-    const worldView = await upsertWorldView(db, advisor.id, date, inference, { mode, model, promptVersion, news, sources });
+    const whatMatters = mergeInference(baseRows, inference, s.events);
+    const worldView = await upsertWorldView(db, s.advisorId, s.date, inference, { mode, model, promptVersion, news: s.news, sources: s.sources });
+    return { ...s, whatMatters, worldView, inference: { mode, model, prompt_version: promptVersion, fallback_reason: inference.fallback_reason ?? null } };
+  } catch (err) {
+    await fail(err);
+    return null;
+  }
+}
 
-    // ── 3 · Gatilhos ────────────────────────────────────────────────────────
-    await report(3, 82, `Agente 3 · Gatilhos — avaliando ${triggerEvals.length} limiares de mercado contra ${portfolios.length} carteiras`);
-    const exposures = portfolios.map((p) => ({ client_id: p.client_id, client_name: p.client_name, exposures: p.portfolio.exposures }));
-    const triggers = P.mapTriggersToClients(triggerEvals, exposures).map((t) => ({
+/** 3 · Gatilhos — thresholds and drift, with a proximity, and the finished payload. */
+async function agentGatilhos(env, runId, s) {
+  const db = env.DB;
+  const { advisor, log, report, fail } = await loadRun(db, runId);
+  try {
+    await report(3, 82, `Agente 3 · Gatilhos — avaliando ${s.triggerEvals.length} limiares de mercado contra ${s.portfolios.length} carteiras`);
+    const exposures = s.portfolios.map((p) => ({ client_id: p.client_id, client_name: p.client_name, exposures: p.portfolio.exposures }));
+    const triggers = P.mapTriggersToClients(s.triggerEvals, exposures).map((t) => ({
       ...t, proximity: triggerProximity(t), action_due: t.status === 'BREACHED',
     }));
     await report(3, 90, 'Agente 3 · Gatilhos — medindo os desvios de alocação contra a política de cada cliente');
     const driftAlerts = [];
-    for (const c of clients) {
+    for (const c of s.clients) {
       const policy = await currentPolicy(db, c.id);
-      const p = portfolios.find((x) => x.client_id === c.id);
+      const p = s.portfolios.find((x) => x.client_id === c.id);
       if (!policy || !p) continue;
       const thresholdPp = policy.rebalance_trigger ?? 0.05;
       for (const d of P.driftTriggers(p.portfolio.exposures, policy.target_allocation, thresholdPp)) {
@@ -176,27 +243,28 @@ export async function runOverviewPipeline(env, runId) {
     const breached = triggers.filter((t) => t.status === 'BREACHED').length;
     await report(3, 96, `Agente 3 · Gatilhos — ${breached} ${breached === 1 ? 'limiar rompido' : 'limiares rompidos'}, ${driftAlerts.length} ${driftAlerts.length === 1 ? 'desvio' : 'desvios'} além do gatilho de rebalanceamento`);
 
+    const news = s.news;
     const result = {
-      date,
+      date: s.date,
       advisor: { id: advisor.id, name: advisor.name, code: advisor.advisor_code, team: advisor.team },
-      world_view: worldView,
-      indicators: indicators.map(compactIndicator),
+      world_view: s.worldView,
+      indicators: s.indicators.map(compactIndicator),
       triggers,
       drift_alerts: driftAlerts,
-      what_matters: whatMatters,
-      clients_count: clients.length,
-      sources,
+      what_matters: s.whatMatters,
+      clients_count: s.clients.length,
+      sources: s.sources,
       news: { mode: news.mode, model: news.model ?? null, reason: news.reason ?? null, searches: news.searches ?? 0, kept: news.items?.length ?? 0, dropped: news.dropped ?? [] },
-      inference: { mode, model, prompt_version: promptVersion, fallback_reason: inference.fallback_reason ?? null },
-      events_count: events.length,
+      inference: s.inference,
+      events_count: s.events.length,
     };
     await run(db, 'UPDATE overview_runs SET status = ?, step = 4, progress = 100, message = ?, result_json = ?, finished_at = ?, log_json = ? WHERE id = ?',
       'completed', 'Concluído', JSON.stringify(result), nowIso(), JSON.stringify([...log, { at: nowIso(), step: 4, message: 'Concluído' }].slice(-80)), runId);
-    await audit(db, { entity: 'overview_run', entity_id: runId, action: 'completed', actor_id: row.actor_id, detail: { trigger: row.trigger, inference: mode, news: news.mode, breached, drifts: driftAlerts.length } });
+    await audit(db, { entity: 'overview_run', entity_id: runId, action: 'completed', actor_id: s.actorId, detail: { trigger: s.trigger, inference: s.inference.mode, news: news.mode, breached, drifts: driftAlerts.length } });
+    return { ok: true };
   } catch (err) {
-    console.error('overview pipeline', err?.stack || err);
-    await run(db, 'UPDATE overview_runs SET status = ?, error = ?, finished_at = ?, log_json = ? WHERE id = ?',
-      'failed', String(err?.message || err), nowIso(), JSON.stringify(log.slice(-80)), runId);
+    await fail(err);
+    return null;
   }
 }
 

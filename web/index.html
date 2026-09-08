@@ -24,6 +24,14 @@ const DEMO = [
 ];
 
 const root = document.getElementById('root');
+const REASONS = {
+  idle: 'Sua sessão foi encerrada por inatividade. Entre novamente.',
+  expired: 'Sua sessão expirou. Entre novamente.',
+  'signed-out': 'Você saiu em outra aba. Entre novamente para continuar.',
+};
+const reason = new URLSearchParams(location.search).get('reason');
+const notice = REASONS[reason] ? h('div.notice', { role: 'status', text: REASONS[reason] }) : null;
+const resume = h('div.resume', { hidden: true });
 const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', placeholder: 'voce@enteram.com.br', required: true });
 const password = h('input', { type: 'password', id: 'password', autocomplete: 'current-password', placeholder: '••••••••', required: true });
 const error = h('div.err', { style: { display: 'none' }, role: 'alert' });
@@ -35,8 +43,10 @@ async function go(e) {
   submit.disabled = true;
   submit.firstChild.textContent = 'entrando…';
   try {
+    // Signing in replaces whatever session this browser holds, everywhere.
+    if (auth.token) await auth.logout({ redirect: false });
     const s = await api('/api/auth/login', { email: email.value, password: password.value });
-    auth.token = s.token;
+    auth.start(s);
     location.href = s.user.role === 'client' ? clientUrl() : advisorUrl();
   } catch (err) {
     error.textContent = 'Credenciais inválidas. Verifique o e-mail e a senha.';
@@ -65,6 +75,8 @@ mount(root,
     h('div.login', {},
       h('h1', { text: 'Entrar' }),
       h('p.lede', { text: 'Assessores e clientes entram pela mesma porta. Um assessor vê apenas os clientes sob sua responsabilidade; um cliente vê apenas os próprios dados.' }),
+      notice,
+      resume,
       h('form', { onsubmit: go, novalidate: true },
         h('div.field', {}, h('label', { for: 'email', text: 'E-mail' }), email),
         h('div.field', {}, h('label', { for: 'password', text: 'Senha' }), password),
@@ -78,9 +90,30 @@ mount(root,
         }, avatar(d.name), h('span', {}, h('b', { text: d.name }), h('small', { text: `${d.role} · ${d.email}` })), icon('arrow', { size: 15 })))),
         h('p.note', { text: 'Em produção este login fica atrás do Cloudflare Access; o par e-mail/senha existe para que a demonstração rode sem um tenant configurado.' })))));
 
-if (auth.token) {
-  api('/api/auth/me').then((me) => { location.href = me.user.role === 'client' ? clientUrl() : advisorUrl(); }).catch(() => auth.clear());
+// A session already open in this browser is offered, never assumed: the page
+// shows who is signed in and lets you continue or switch accounts.
+async function offerResume() {
+  const s = await auth.discover();
+  if (!s) { resume.hidden = true; return; }
+  let me;
+  try { me = await api('/api/auth/me'); } catch { auth.clear({ broadcast: false }); resume.hidden = true; return; }
+  const dest = me.user.role === 'client' ? clientUrl() : advisorUrl();
+  mount(resume,
+    h('div.kicker', { text: 'Sessão ativa neste navegador' }),
+    h('div.resume-row', {}, avatar(me.user.name),
+      h('span', {}, h('b', { text: me.user.name }), h('small', { text: `${me.user.role === 'client' ? 'Cliente' : 'Assessor'} · ${me.user.email}` }))),
+    h('div.split', {},
+      h('a.btn.primary', { href: dest }, h('span', { text: `continuar como ${me.user.name.split(' ')[0]}` }), icon('arrow', { size: 15 })),
+      h('button.btn', { type: 'button', text: 'entrar com outra conta', onclick: async (e) => {
+        e.currentTarget.disabled = true;
+        await auth.logout({ redirect: false });
+        resume.hidden = true;
+        email.focus();
+      } })));
+  resume.hidden = false;
 }
+offerResume();
+auth.subscribe((m) => { if (m.type === 'session' || m.type === 'logout') offerResume(); });
 </script>
 </body>
 </html>

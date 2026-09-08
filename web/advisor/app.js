@@ -7,7 +7,7 @@
  */
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
-  pageHead, railBrand, navItem, railFoot, icon, greeting, dateWithWeekday,
+  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, dateWithWeekday,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
@@ -41,7 +41,7 @@ const groupPt = (g) => GROUP_PT[String(g || '').toLowerCase()] || g || 'Outros';
 // ═══ chrome ════════════════════════════════════════════════════════════════
 function renderRail() {
   const alerts = CLIENTS.reduce((a, c) => a + (c.alerts?.length || 0), 0);
-  const logout = async () => { await api('/api/auth/logout', {}); auth.clear(); location.href = loginUrl(); };
+  const logout = () => auth.logout();
   mount(rail,
     railBrand('Portal do assessor'),
     h('nav.rail-nav', {},
@@ -919,11 +919,13 @@ function renderCanonicalSummary(c) {
 
 // ═══ boot ══════════════════════════════════════════════════════════════════
 (async function boot() {
+  if (!(await auth.discover())) { location.href = loginUrl(); return; }
   try {
     ME = await api('/api/auth/me');
   } catch { location.href = loginUrl(); return; }
   if (ME.user.role === 'client') { location.href = clientUrl(); return; }
   try { CLIENTS = (await api('/api/advisor/clients')).clients; } catch { CLIENTS = []; }
+  installSessionGuard();
   renderRail();
 
   router([

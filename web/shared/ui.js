@@ -44,25 +44,137 @@ export function mount(root, ...children) {
   return root;
 }
 
-// ── API ───────────────────────────────────────────────────────────────────
-const TOKEN_KEY = 'ew_token';
+// ── session ───────────────────────────────────────────────────────────────
+// The session lives in sessionStorage, so it ends with the browser window. A new
+// tab asks the open ones for it over a BroadcastChannel, so the portal is signed
+// in wherever you already are and signed out wherever you are not. Activity is
+// shared the same way, so an idle tab cannot end a session in use elsewhere.
+// Idle for IDLE_MS, past the token's expiry, or signed out in any tab, and every
+// tab signs out together.
+const SESSION_KEY = 'ew_session';
+const LEGACY_TOKEN_KEY = 'ew_token'; // earlier builds kept the token in localStorage, outliving the window
+export const IDLE_MS = 15 * 60 * 1000;
+export const IDLE_WARN_MS = 60 * 1000;
+const bus = typeof BroadcastChannel === 'function' ? new BroadcastChannel('ew-session') : null;
+const post = (msg) => { try { bus?.postMessage(msg); } catch { /* channel closed */ } };
+try { localStorage.removeItem(LEGACY_TOKEN_KEY); } catch { /* storage unavailable */ }
+
+const readSession = () => { try { const raw = sessionStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; } };
+const writeSession = (s) => { try { s ? sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)) : sessionStorage.removeItem(SESSION_KEY); } catch { /* storage unavailable */ } };
+let lastActivity = Date.now();
+const remote = { logout: null, session: null, any: null };
+const isLoginPage = () => !/\/(advisor|client)\//.test(location.pathname);
+
+bus?.addEventListener('message', (e) => {
+  const m = e.data || {};
+  const mine = readSession();
+  if (m.type === 'who-has-session' && mine) post({ type: 'session', session: mine, lastActivity });
+  else if (m.type === 'activity') lastActivity = Math.max(lastActivity, m.at || 0);
+  else if (m.type === 'logout' && mine) { writeSession(null); remote.logout?.(); }
+  else if (m.type === 'session' && m.session && mine && m.session.token !== mine.token) { writeSession(m.session); remote.session?.(); }
+  remote.any?.(m);
+});
+
 export const auth = {
-  get token() { return localStorage.getItem(TOKEN_KEY); },
-  set token(v) { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); },
-  clear() { localStorage.removeItem(TOKEN_KEY); },
+  get session() { return readSession(); },
+  get token() { return readSession()?.token || null; },
+  /** Adopt a session from a login response. Other open tabs follow. */
+  start(s) {
+    const session = { token: s.token, expires_at: s.expires_at || null, user: s.user || null };
+    writeSession(session);
+    lastActivity = Date.now();
+    post({ type: 'session', session, lastActivity });
+  },
+  /** Forget the session in this tab and, unless told otherwise, in every other one. */
+  clear({ broadcast = true } = {}) {
+    writeSession(null);
+    if (broadcast) post({ type: 'logout' });
+  },
+  /** End the session server-side and client-side, then go to the login page. */
+  async logout({ reason = null, redirect = true } = {}) {
+    if (auth.token) { try { await api('/api/auth/logout', {}); } catch { /* the token may already be dead */ } }
+    auth.clear();
+    if (redirect) location.href = loginUrl() + (reason ? `?reason=${reason}` : '');
+  },
+  /** The session in this tab, or one handed over by another open tab; null when nobody is signed in. */
+  discover({ wait = 250 } = {}) {
+    const mine = readSession();
+    if (mine || !bus) return Promise.resolve(mine);
+    return new Promise((resolve) => {
+      let timer;
+      const onMsg = (e) => {
+        if (e.data?.type !== 'session' || !e.data.session) return;
+        writeSession(e.data.session);
+        lastActivity = Math.max(lastActivity, e.data.lastActivity || 0);
+        done(e.data.session);
+      };
+      const done = (v) => { bus.removeEventListener('message', onMsg); clearTimeout(timer); resolve(v); };
+      bus.addEventListener('message', onMsg);
+      timer = setTimeout(() => done(null), wait);
+      post({ type: 'who-has-session' });
+    });
+  },
+  /** Observe session messages from other tabs (the login page uses this). */
+  subscribe(fn) { remote.any = fn; },
 };
 
+/**
+ * Idle and expiry guard for a signed-in page. Activity in any tab keeps the
+ * session alive; a banner counts down the last minute; then every tab signs out.
+ */
+export function installSessionGuard({ idleMs = IDLE_MS, warnMs = IDLE_WARN_MS } = {}) {
+  const banner = h('div.session-warn', { role: 'status', hidden: true });
+  const count = h('b');
+  mount(banner, h('span', {}, 'Sua sessão encerra em ', count, ' por inatividade.'),
+    h('button.btn.sm', { type: 'button', text: 'continuar conectado', onclick: () => touch(true) }));
+  document.body.append(banner);
+
+  let lastPost = 0;
+  let warned = false;
+  function touch(force = false) {
+    lastActivity = Date.now();
+    if (warned) { warned = false; banner.hidden = true; }
+    if (force || lastActivity - lastPost > 5000) { lastPost = lastActivity; post({ type: 'activity', at: lastActivity }); }
+  }
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll']) window.addEventListener(ev, () => touch(), { passive: true });
+
+  function check() {
+    const s = readSession();
+    if (!s) return;
+    const now = Date.now();
+    if (s.expires_at && now > Date.parse(s.expires_at)) { stop(); auth.logout({ reason: 'expired' }); return; }
+    const idle = now - lastActivity;
+    if (idle >= idleMs) { stop(); auth.logout({ reason: 'idle' }); return; }
+    if (idle >= idleMs - warnMs) {
+      warned = true;
+      count.textContent = `${Math.ceil((idleMs - idle) / 1000)} s`;
+      banner.hidden = false;
+    } else if (warned) { warned = false; banner.hidden = true; }
+  }
+  const ticker = setInterval(check, 1000);
+  const stop = () => clearInterval(ticker);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+  remote.logout = () => { stop(); location.href = `${loginUrl()}?reason=signed-out`; };
+  remote.session = () => location.reload(); // another tab signed in as someone else
+  return { stop };
+}
+
+// ── API ───────────────────────────────────────────────────────────────────
 export async function api(path, body, method) {
   // Bearer rather than a cookie: the portal and the API are on different origins
   // when the site is served from GitHub Pages, and a cross-site cookie would need
-  // SameSite=None on a third-party domain. A token in localStorage is simpler and
+  // SameSite=None on a third-party domain. A token held by the page is simpler and
   // does not depend on the browser's third-party cookie policy.
   const res = await fetch(`${API_BASE}${path}`, {
     method: method || (body ? 'POST' : 'GET'),
     headers: { 'content-type': 'application/json', ...(auth.token ? { authorization: `Bearer ${auth.token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) { auth.clear(); location.href = loginUrl(); throw new Error('session expired'); }
+  if (res.status === 401) {
+    auth.clear();
+    if (!isLoginPage()) location.href = `${loginUrl()}?reason=expired`;
+    throw new Error('session expired');
+  }
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }

@@ -8,7 +8,7 @@
  */
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
-  pageHead, railBrand, navItem, railFoot, icon, greeting,
+  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, lineChart, sourcesBlock,
   apiUrl, loginUrl, advisorUrl,
@@ -32,7 +32,7 @@ const cls = (k) => CLASS_PT[k] || k || '';
 
 function renderRail() {
   const adv = SUMMARY?.advisor;
-  const logout = async () => { await api('/api/auth/logout', {}); auth.clear(); location.href = loginUrl(); };
+  const logout = () => auth.logout();
   mount(rail,
     railBrand('Meus investimentos'),
     h('nav.rail-nav', {},
@@ -284,10 +284,12 @@ function notPublished() {
 
 // ═══ boot ══════════════════════════════════════════════════════════════════
 (async function boot() {
+  if (!(await auth.discover())) { location.href = loginUrl(); return; }
   try { ME = await api('/api/auth/me'); } catch { location.href = loginUrl(); return; }
   if (ME.user.role !== 'client') { location.href = advisorUrl(); return; }
   CLIENT_ID = ME.client_id;
   SUMMARY = await api(`/api/clients/${CLIENT_ID}`);
+  installSessionGuard();
   renderRail();
 
   router([

@@ -501,6 +501,20 @@ iframe.doc{width:100%;border:1px solid var(--rule);background:#fff;display:block
 .login input{width:100%;font-size:15px;padding:12px 14px}
 .login .btn.primary{width:100%;margin-top:8px;padding:13px 16px;font-size:14px}
 .login .err{margin-top:14px}
+.notice{border-left:2px solid var(--ink-950);background:var(--paper-3);padding:10px 14px;font-size:13px;color:var(--ink-800);line-height:1.5;margin-bottom:20px}
+.resume{border:1px solid var(--ink-950);background:var(--paper-2);padding:16px;margin-bottom:24px}
+.resume .kicker{margin-bottom:12px}
+.resume-row{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;align-items:center;margin-bottom:14px}
+.resume-row b{display:block;font-size:13.5px;font-weight:600;line-height:1.3}
+.resume-row small{display:block;font-size:11.5px;color:var(--ink-500);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resume .avatar{background:var(--ink-950);color:var(--paper-2)}
+.resume .split{gap:8px}
+.session-warn{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:14px;
+  background:var(--ink-950);color:var(--paper-2);padding:10px 12px 10px 16px;font-size:12.5px;line-height:1.4;max-width:calc(100vw - 32px);
+  animation:rise var(--dur-reveal) var(--ease) both}
+.session-warn b{font-weight:600}
+.session-warn .btn{background:transparent;color:var(--paper-2);border-color:rgba(255,255,255,.35);white-space:nowrap}
+.session-warn .btn:hover{border-color:currentColor;color:var(--paper-2)}
 .demo{margin-top:36px;border-top:1px solid var(--rule);padding-top:20px}
 .demo .kicker{margin-bottom:10px}
 .demo-list{border:1px solid var(--rule);background:var(--paper-2)}

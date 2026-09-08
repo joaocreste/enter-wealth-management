@@ -12,7 +12,10 @@
  */
 import { first, run, nowIso } from './db.js';
 
-const PBKDF2_ITERATIONS = 120_000;
+// 100,000 is the Cloudflare Workers ceiling for PBKDF2 — the runtime rejects
+// anything above it. The local emulator does not enforce the cap, so this only
+// surfaces on a deployed Worker.
+const PBKDF2_ITERATIONS = 100_000;
 const SESSION_HOURS = 12;
 const enc = new TextEncoder();
 

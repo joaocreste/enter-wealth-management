@@ -14,7 +14,7 @@
  */
 
 /** Set by `npm run deploy:worker`; the placeholder is replaced with the real URL. */
-const WORKER_API = 'https://enter-wealth-advisor.WORKERS_SUBDOMAIN.workers.dev';
+const WORKER_API = 'https://enter-wealth-advisor.joaocreste-8da.workers.dev';
 
 const isStaticHost = /\.github\.io$/.test(location.hostname) || /\.pages\.dev$/.test(location.hostname);
 

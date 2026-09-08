@@ -17,7 +17,7 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "enter-wealth"
-database_id = "00000000-0000-0000-0000-000000000000"   # replace after `wrangler d1 create enter-wealth`
+database_id = "86ef1e84-12df-41a3-b23b-e8791c9906d6"
 migrations_dir = "worker/migrations"
 
 # ── R2: immutable generated artefacts — PDFs, HTML snapshots, charts ────────
@@ -29,7 +29,7 @@ bucket_name = "enter-wealth-reports"
 # Never the authoritative store for a portfolio record.
 [[kv_namespaces]]
 binding = "MARKET_CACHE"
-id = "00000000000000000000000000000000"                # replace after `wrangler kv namespace create MARKET_CACHE`
+id = "092ceadc9f7b4b89b4fae38c42f17d77"
 
 [vars]
 # Safe by default. `development` relaxes the CORS allowlist to localhost and lets

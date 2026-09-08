@@ -98,8 +98,11 @@ else {
 let toml = await readFile(TOML, 'utf8');
 toml = toml.replace(/(\[\[d1_databases\]\][\s\S]*?database_id = ")[^"]*(")/, `$1${dbId}$2`);
 toml = toml.replace(/(\[\[kv_namespaces\]\][\s\S]*?id = ")[^"]*(")/, `$1${kvId}$2`);
-toml = toml.replace(/# replace after `wrangler d1 create enter-wealth`\n?/, '');
-toml = toml.replace(/\s*# replace after `wrangler kv namespace create MARKET_CACHE`/, '');
+// Strip the placeholder comments without touching the line endings around them:
+// swallowing the newline after database_id produced an invalid TOML document.
+toml = toml.replace(/[ \t]*# replace after `wrangler d1 create enter-wealth`/g, '');
+toml = toml.replace(/[ \t]*# replace after `wrangler kv namespace create MARKET_CACHE`/g, '');
+toml = toml.replace(/[ \t]+$/gm, '');
 await writeFile(TOML, toml);
 say('wrangler  ids written into wrangler.toml');
 

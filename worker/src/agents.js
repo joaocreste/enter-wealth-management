@@ -365,7 +365,7 @@ function levelText(price, unit) {
   if (['%', '% a.a.', '% a.m.'].includes(unit)) return `${num(price, { decimals: 2 })}%${unit === '% a.a.' ? ' a.a.' : unit === '% a.m.' ? ' a.m.' : ''}`;
   if (unit === 'USD' || unit === 'USD/oz') return `US$ ${num(price, { decimals: 0 })}`;
   if (unit === 'USD/bbl' || unit === 'USD/lb') return `US$ ${num(price, { decimals: 2 })}`;
-  if (unit === 'BRL') return `R$ ${num(price, { decimals: 4 })}`;
+  if (unit === 'BRL') return `R$ ${num(price, { decimals: Number.isInteger(price * 100) ? 2 : 4 })}`; // a quote keeps four decimals; a round threshold does not pretend to
   return num(price, { decimals: price >= 1000 ? 0 : 2 });
 }
 

@@ -55,8 +55,9 @@ npm run run:overview
 
 ### Optional: connect a language model
 
-Without a key the narrative is produced by a deterministic Portuguese renderer and
-the report records `narrative_mode: "deterministic_template"`. To use a model:
+Without a key the narrative is produced by a deterministic Portuguese renderer,
+the report records `narrative_mode: "deterministic_template"`, and the daily
+agents skip the news scan and rank events by rule. To use a model:
 
 ```bash
 echo 'ANTHROPIC_API_KEY = "sk-ant-..."' >> .dev.vars     # local
@@ -202,6 +203,26 @@ August 2026 is published, priced from live providers.
 `web/shared/config.js` resolves which API to call from the hostname at runtime, so
 the same committed files work under `wrangler dev` (same origin) and on Pages
 (cross origin). Nothing is injected at build time.
+
+### The daily agents
+
+The World Overview is rebuilt by three agents that run in sequence inside the
+Worker — every day at 07:00 São Paulo time (a Cloudflare cron trigger, so
+nothing depends on anyone's machine) and whenever an advisor presses
+**atualizar dados de mercado**, which pops up a progress card and shows what
+each agent is doing while it runs.
+
+| | Agent | What it does | With a model | Without |
+|---|---|---|---|---|
+| 1 | **Dados** | Retrieves every monitored indicator (Yahoo Finance, Banco Central, CoinGecko), the curated events and the events generated from significant moves — each with a source record. With Claude, also scans the web for today's news: every item must carry the URL of a search result, and the code drops any item whose URL was not actually among the results. | Claude with web search, citations verified | indicators and curated events only |
+| 2 | **Inferência** | Reads what agent 1 gathered plus every client's exposure by asset class, decides what matters for *this* book today, ranks it, and writes the day's summary and the What Matters rows in Portuguese. The code keeps the exposure arithmetic; the model never gets to write a number that is not in the facts. | Claude (`ANTHROPIC_MODEL`) | a Portuguese template ranked by rule |
+| 3 | **Gatilhos** | Evaluates every configured threshold and every client's allocation drift against their policy, with a *proximity* (1.0 = at the threshold) so the portal draws each as a bar and says plainly when an action is due. | pure code | pure code |
+
+Runs are recorded in `overview_runs` with their progress log and result; the
+portal reads the last completed run rather than recomputing on a page view.
+`POST /api/advisor/refresh` starts a run and `GET /api/advisor/refresh/:id`
+reports it. The model path needs `npx wrangler secret put ANTHROPIC_API_KEY`;
+`/api/health` says which path is active.
 
 ### The portal's design
 

@@ -90,6 +90,27 @@ export function evaluateTrigger(trigger, reading) {
   };
 }
 
+/**
+ * How far a reading has travelled towards its trigger, on a scale where 1.0
+ * is the threshold itself: 0.93 is approaching, 1.08 is past it. Works for
+ * "above" and "below" triggers alike, and for negative thresholds such as a
+ * month-to-date fall, so the portal can draw every trigger as the same bar.
+ * null when there is no reading.
+ */
+export function triggerProximity({ observed, threshold, comparator }) {
+  if (observed == null || !Number.isFinite(observed) || threshold == null || threshold === 0) return null;
+  const v = observed; const t = threshold;
+  if (comparator === 'abs_gt') return Math.abs(v) / Math.abs(t);
+  const below = comparator === 'lt' || comparator === 'lte';
+  if (t > 0) {
+    if (!below) return Math.max(0, v / t);
+    return v <= 0 ? 2 : t / v;
+  }
+  // negative threshold: "down more than 4%" fires when v <= t
+  if (below) return v >= 0 ? 0 : v / t;
+  return v <= 0 ? 0 : 2;
+}
+
 /** Which of the advisor's clients each fired trigger actually touches. */
 export function mapTriggersToClients(evaluations, clientExposures) {
   return evaluations.map((e) => {

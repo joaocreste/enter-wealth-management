@@ -26,6 +26,7 @@ import { dailySeries } from '../../src/adapters/yahoo.js';
 import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
 import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
 import { makeSource } from '../../src/core/sources.js';
+import * as A from './agents.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 
@@ -80,6 +81,12 @@ const ok = (data, init = {}) => new Response(JSON.stringify(data), { status: 200
 const bad = (status, error, extra = {}) => new Response(JSON.stringify({ error, ...extra }), { status, headers: JSON_HEADERS });
 
 export default {
+  /** The daily cron (wrangler.toml [triggers]): rebuild the World Overview for every advisor. */
+  async scheduled(event, env, ctx) {
+    const advisors = await all(env.DB, 'SELECT a.*, u.name, u.email FROM advisors a JOIN users u ON u.id = a.user_id');
+    for (const advisor of advisors) await A.startOverviewRun(env, ctx, { advisor, trigger: 'cron' });
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const { pathname } = url;
@@ -92,7 +99,7 @@ export default {
     }
 
     try {
-      return withCors(await route(request, env, url), request, env);
+      return withCors(await route(request, env, url, ctx), request, env);
     } catch (err) {
       console.error('unhandled', err?.stack || err);
       return withCors(bad(500, err?.message || 'internal error', { stack: env.ENVIRONMENT === 'development' ? String(err?.stack || '') : undefined }), request, env);
@@ -100,7 +107,7 @@ export default {
   },
 };
 
-async function route(request, env, url) {
+async function route(request, env, url, ctx) {
   const db = env.DB;
   const path = url.pathname.replace(/\/+$/, '') || '/api';
   const method = request.method;
@@ -169,7 +176,25 @@ async function route(request, env, url) {
   // ── advisor surfaces ─────────────────────────────────────────────────────
   if (path === '/api/advisor/overview') {
     if (session.role === 'client') return bad(403, 'advisor surface');
-    return ok(await advisorOverview(env, session, url.searchParams.get('refresh') === '1'));
+    return ok(await advisorOverview(env, ctx, session));
+  }
+
+  // The daily agents, on demand. Returns the run at once; the portal polls it.
+  if (path === '/api/advisor/refresh' && method === 'POST') {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    const advisor = await advisorFor(env, session);
+    if (!advisor) return bad(404, 'no advisor record');
+    await audit(db, { entity: 'overview_run', entity_id: advisor.id, action: 'refresh_requested', actor_id: session.user_id });
+    return ok({ run: await A.startOverviewRun(env, ctx, { advisor, trigger: 'manual', actorId: session.user_id }) });
+  }
+
+  const runMatch = path.match(/^\/api\/advisor\/refresh\/([^/]+)$/);
+  if (runMatch) {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    const advisor = await advisorFor(env, session);
+    const row = await first(db, 'SELECT * FROM overview_runs WHERE id = ?', runMatch[1]);
+    if (!row || (advisor && row.advisor_id !== advisor.id && session.role !== 'service')) return bad(404, 'run not found');
+    return ok({ run: A.runView(row) });
   }
 
   if (path === '/api/advisor/clients') {
@@ -240,104 +265,29 @@ async function advisorFor(env, session) {
     : first(env.DB, 'SELECT a.*, u.name, u.email FROM advisors a JOIN users u ON u.id = a.user_id WHERE a.user_id = ?', session.user_id);
 }
 
-async function advisorOverview(env, session, refresh = false) {
+/**
+ * The World Overview is whatever the daily agents last produced. Nothing is
+ * recomputed on a page view: a fresh deploy with no run yet starts one and
+ * tells the portal to wait for it.
+ */
+async function advisorOverview(env, ctx, session) {
   const db = env.DB;
   const advisor = await advisorFor(env, session);
   if (!advisor) throw new Error('no advisor record');
-  const today = new Date().toISOString().slice(0, 10);
-
-  const indicators = await P.fetchIndicators(env, INDICATORS);
-  const triggers = await P.evaluateTriggers(env, indicators, advisor.id);
-  const curated = await P.loadMarketEvents(env, { since: addDays(today, -21), limit: 20 });
-  const generated = P.eventsFromIndicatorMoves(indicators);
-  const events = dedupeEvents([...curated, ...generated]);
-
-  // Every client's exposure, so a market event can be mapped to the book
-  const clients = await all(db, 'SELECT * FROM clients WHERE advisor_id = ?', advisor.id);
-  const portfolios = [];
-  for (const c of clients) {
-    const snap = await currentSnapshot(db, c.id);
-    if (!snap) continue;
-    const positions = await snapshotPositions(db, snap.id);
-    const total = positions.reduce((a, p) => a + (p.market_value || 0), 0) || 1;
-    const exposures = {};
-    for (const p of positions) exposures[p.asset_class] = (exposures[p.asset_class] ?? 0) + (p.market_value || 0) / total;
-    portfolios.push({
-      client_id: c.id,
-      client_name: c.full_name,
-      portfolio: {
-        exposures,
-        base_currency: c.base_currency,
-        positions: positions.map((p) => ({ ticker: p.ticker, asset_id: p.asset_id, asset_class: p.asset_class, weight: (p.market_value || 0) / total, currency: p.currency })),
-      },
-    });
-  }
-
-  const whatMatters = P.buildWhatMattersTable(events, indicators, portfolios);
-  const triggersWithClients = P.mapTriggersToClients(triggers, portfolios.map((p) => ({ client_id: p.client_id, client_name: p.client_name, exposures: p.portfolio.exposures })));
-
-  // Portfolio drift is a portfolio trigger, evaluated per client
-  const driftAlerts = [];
-  for (const c of clients) {
-    const policy = await currentPolicy(db, c.id);
-    const p = portfolios.find((x) => x.client_id === c.id);
-    if (!policy || !p) continue;
-    for (const d of P.driftTriggers(p.portfolio.exposures, policy.target_allocation, policy.rebalance_trigger ?? 0.05)) {
-      driftAlerts.push({ ...d, client_id: c.id, client_name: c.full_name });
-    }
-  }
-
-  let worldView = await first(db, 'SELECT * FROM world_overviews WHERE advisor_id = ? AND date = ?', advisor.id, today);
-  if ((!worldView || refresh)) {
-    const facts = {
-      date: today,
-      indicators: indicators.map(compactIndicator),
-      triggers: triggersWithClients.filter((t) => t.status !== 'NO_DATA').map((t) => ({ label: t.label, status: t.status, observed: t.observed, threshold: t.threshold, unit: t.unit, clients_affected: t.affected_clients?.length ?? 0 })),
-      curated_events: curated.map((e) => ({ id: e.id, title: e.title, category: e.category, summary: e.summary, importance: e.importance })),
-      macro_vintage: (await import('../../seed/market.mjs')).MACRO_VINTAGE,
-      asset_classes: ['Cash', 'Fixed Income', 'Equities BR', 'Equities Global', 'Alternatives', 'Real Estate', 'Commodities', 'Digital Assets'],
+  const last = await A.latestRun(db, advisor.id, { status: 'completed' });
+  const running = await A.latestRun(db, advisor.id, { status: 'running' });
+  const active = running ? A.runView(running) : null;
+  if (!last) {
+    const started = active && active.status === 'running' ? active : await A.startOverviewRun(env, ctx, { advisor, trigger: 'bootstrap', actorId: session.user_id });
+    const clients = await all(db, 'SELECT id FROM clients WHERE advisor_id = ?', advisor.id);
+    return {
+      pending: true, run: started, date: new Date().toISOString().slice(0, 10),
+      advisor: { id: advisor.id, name: advisor.name, code: advisor.advisor_code, team: advisor.team },
+      clients_count: clients.length,
     };
-    let generatedView;
-    let mode = 'deterministic_template';
-    let model = null;
-    if (LLM.llmAvailable(env)) {
-      try {
-        const r = await LLM.runPrompt(env, 'advisor_world_view', facts, { maxTokens: 1800 });
-        generatedView = r.data; mode = 'model'; model = r.model;
-      } catch (err) {
-        generatedView = LLM.deterministicWorldView(facts);
-        generatedView.fallback_reason = err.message;
-      }
-    } else {
-      generatedView = LLM.deterministicWorldView(facts);
-    }
-
-    const wvId = worldView?.id || id('wov');
-    const payload = { ...generatedView, mode, model, generated_at: nowIso() };
-    if (worldView) {
-      await run(db, 'UPDATE world_overviews SET generated_summary = ?, briefing_json = ?, stance_json = ?, sources_json = ? WHERE id = ?',
-        generatedView.headline || '', JSON.stringify(payload), JSON.stringify(generatedView.stance_by_asset_class || {}),
-        JSON.stringify(indicators.filter((i) => i.source).map((i) => i.source)), worldView.id);
-    } else {
-      await run(db, 'INSERT INTO world_overviews (id, advisor_id, date, generated_summary, briefing_json, stance_json, approval_status, sources_json) VALUES (?,?,?,?,?,?,?,?)',
-        wvId, advisor.id, today, generatedView.headline || '', JSON.stringify(payload),
-        JSON.stringify(generatedView.stance_by_asset_class || {}), 'draft',
-        JSON.stringify(indicators.filter((i) => i.source).map((i) => i.source)));
-    }
-    worldView = await first(db, 'SELECT * FROM world_overviews WHERE id = ?', wvId);
   }
-
-  return {
-    date: today,
-    advisor: { id: advisor.id, name: advisor.name, code: advisor.advisor_code, team: advisor.team },
-    world_view: worldView ? { ...worldView, briefing: json(worldView.briefing_json, {}), stance: json(worldView.stance_json, {}) } : null,
-    indicators: indicators.map(compactIndicator),
-    triggers: triggersWithClients,
-    drift_alerts: driftAlerts,
-    what_matters: whatMatters,
-    clients_count: clients.length,
-    sources: indicators.filter((i) => i.source).map((i) => i.source),
-  };
+  const result = json(last.result_json, {});
+  return { ...result, run: A.runView(last), active_run: active && active.status === 'running' ? active : null };
 }
 
 /**
@@ -398,30 +348,6 @@ async function advisorCorrelations(env, windowKey) {
   await cacheSet(cacheKey, result, 3600);
   return result;
 }
-
-function compactIndicator(i) {
-  return {
-    key: i.key, label: i.label, group: INDICATORS.find((x) => x.key === i.key)?.group ?? null,
-    unit: i.unit, price: i.price ?? null, changePct: i.changePct ?? null, mtdPct: i.mtdPct ?? null,
-    asOf: i.asOf ?? null, name: i.name ?? null,
-    unavailable: !!i.unavailable, reason: i.reason ?? null,
-    providers_attempted: i.providers_attempted ?? null,
-    source: i.source ?? null,
-    asset_classes: INDICATORS.find((x) => x.key === i.key)?.asset_classes ?? [],
-  };
-}
-
-function dedupeEvents(events) {
-  const seen = new Map();
-  for (const e of events) {
-    const key = `${e.indicator_key || ''}|${e.category}`;
-    const existing = seen.get(key);
-    if (!existing || rank(e.importance) < rank(existing.importance)) seen.set(key, e);
-    if (!e.indicator_key) seen.set(e.id, e);
-  }
-  return [...new Set([...seen.values()])];
-}
-const rank = (i) => ({ high: 0, medium: 1, low: 2 }[i] ?? 1);
 
 async function advisorClients(env, session) {
   const db = env.DB;

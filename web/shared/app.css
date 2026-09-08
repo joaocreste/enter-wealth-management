@@ -342,6 +342,53 @@ table.d.matters td{vertical-align:top}
 table.d.matters .why{color:var(--ink-700)}
 table.d.matters .talk{color:var(--ink-900)}
 
+/* ─── the daily agents: progress card ────────────────────────────────── */
+.veil{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--paper) 82%,transparent);animation:page var(--dur-reveal) var(--ease) both}
+.progress-card{width:min(480px,100%);background:var(--paper-2);border:1px solid var(--ink-950);padding:28px;animation:rise var(--dur-page) var(--ease) both}
+.phead{display:grid;grid-template-columns:96px minmax(0,1fr);gap:20px;align-items:center;margin-bottom:22px}
+.phead h3{font-size:var(--t-heading);letter-spacing:-0.02em;margin-bottom:8px}
+.pmsg{font-size:13px;color:var(--ink-900);line-height:1.45;min-height:2.9em}
+.pstate{font-size:12px;color:var(--ink-500);margin-top:6px;line-height:1.45}
+.donut .track{fill:none;stroke:var(--ink-100);stroke-width:8}
+.donut .arc{fill:none;stroke:var(--ink-950);stroke-width:8;stroke-linecap:butt;transition:stroke-dashoffset var(--dur-page) var(--ease)}
+.donut .pct{font-family:var(--sans);font-size:22px;font-weight:600;fill:var(--ink-950);letter-spacing:-0.03em}
+.agents{list-style:none;margin:0;padding:0;border-top:1px solid var(--rule);display:flex;flex-direction:column}
+.agents li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--rule-2);color:var(--ink-400);transition:color var(--dur) var(--ease)}
+.agents li b{display:block;font-size:13.5px;font-weight:600;color:inherit;line-height:1.3}
+.agents li small{display:block;font-size:11.5px;color:var(--ink-400);margin-top:2px}
+.agents .idx{width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--rule);color:var(--ink-400);font-size:12px;border-radius:var(--radius-control)}
+.agents .idx .ic{display:none}
+.agents li.active{color:var(--ink-950)}
+.agents li.active .idx{border-color:var(--ink-950);color:var(--ink-950);animation:pulse 1.2s var(--ease) infinite}
+.agents li.done{color:var(--ink-900)}
+.agents li.done .idx{background:var(--ink-950);border-color:var(--ink-950);color:var(--paper-2)}
+.agents li.done .idx b{display:none}
+.agents li.done .idx .ic{display:block}
+.agents li.failed .idx{border-color:var(--loss-graphic);color:var(--loss-text)}
+@keyframes pulse{0%,100%{outline:2px solid transparent;outline-offset:2px}50%{outline:2px solid var(--ink-950);outline-offset:2px}}
+.pfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;font-size:12px}
+
+/* ─── bars: thresholds and drift ─────────────────────────────────────── */
+.trg.bars{grid-template-columns:8px minmax(0,1fr) 220px;align-items:center}
+@media (max-width:700px){.trg.bars{grid-template-columns:8px minmax(0,1fr)}.trg.bars .barcol{grid-column:2}}
+.barcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+.barcol .vals{font-family:var(--mono);font-size:11px;color:var(--ink-500);display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 8px}
+.bullet .track{position:relative;height:10px;background:var(--paper-3);overflow:visible}
+.bullet .fill{position:absolute;left:0;top:0;height:100%;background:var(--ink-300);transition:width var(--dur-page) var(--ease)}
+.bullet.approaching .fill{background:var(--ink-600)}
+.bullet.breached .fill{background:var(--caution)}
+.bullet .mark{position:absolute;top:-3px;width:2px;height:16px;background:var(--ink-950)}
+.diverge .track{position:relative;height:10px;background:var(--paper-3)}
+.diverge .zero{position:absolute;left:50%;top:-3px;width:1px;height:16px;background:var(--ink-950)}
+.diverge .tol{position:absolute;top:0;width:1px;height:100%;background:var(--ink-400)}
+.diverge .fill{position:absolute;top:0;height:100%;background:var(--caution)}
+.trg .lab .chip{margin-left:8px;vertical-align:1px}
+.trg .due{color:var(--ink-950)}
+.trg .due b{font-weight:600}
+.src-link{display:inline-flex;align-items:center;gap:4px;color:var(--ink-600)}
+.src-link:hover{color:var(--ink-950);text-decoration:underline;text-underline-offset:3px}
+.src-link .ic{width:12px;height:12px}
+
 /* ─── correlation matrix ─────────────────────────────────────────────── */
 .corr{border-collapse:separate;border-spacing:2px;table-layout:fixed;width:100%;min-width:780px;font-size:11.5px}
 .corr th{font-weight:500;color:var(--ink-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color var(--dur) var(--ease)}

@@ -123,6 +123,116 @@ Return STRICT JSON with this exact shape and nothing else:
 {{facts}}`,
   },
 
+  /**
+   * Daily agent 1 — the news scan. The only prompt allowed to state a market
+   * fact that is not in FACTS, and only because every item must carry the URL
+   * of a search result the code then verifies. An item without a verifiable
+   * source is dropped before anyone reads it.
+   */
+  daily_news_scan: {
+    id: 'daily_news_scan',
+    title: 'Scan today\'s market news with cited sources',
+    language_out: 'pt-BR',
+    system: `You are the data-gathering agent of a regulated investment-advisory system at Enter Asset Management. You use web search to find what happened in markets today.
+
+Absolute rules:
+1. Report only what a page you retrieved actually says. Every item carries the exact URL of one search result as source_url. If you cannot point to a URL, do not report the item.
+2. Never write a number that is not in the cited page. Prefer describing the direction of a move over quoting a level.
+3. Prefer primary and established financial sources: central banks, statistical offices, exchanges, Reuters, Bloomberg, Valor, Folha, Estadão, InfoMoney, the Financial Times, the Wall Street Journal.
+4. Do not report rumours, opinion pieces or forecasts as events.
+5. Short sentences. Plain language for a financial advisor, not an economist.`,
+    template: `# Task: find today's market events that could matter to a Brazilian wealth-management book
+
+Today is {{date}}. Search for market news from the last two trading days on these themes: Brazil (Copom and the Selic rate, IPCA, fiscal news, the real), United States (Fed, Treasury yields, inflation), global equities (S&P 500, Nasdaq, Ibovespa), credit, FX (USD/BRL, dollar index), commodities (Brent, WTI, gold, copper), digital assets (Bitcoin, Ether). Use at most six searches.
+
+## Output
+
+After searching, return STRICT JSON — an array of at most 8 items — and nothing else after it:
+
+[{
+  "title": "under 80 characters, English, states the finding",
+  "title_pt": "the same in Brazilian Portuguese",
+  "summary": "1 to 2 sentences in English, only what the cited page says",
+  "summary_pt": "the same in Brazilian Portuguese",
+  "date": "YYYY-MM-DD, the date of the event",
+  "category": "equities | rates | credit | fx | commodities | macro | geopolitics | crypto",
+  "direction": "positive | negative | mixed — for the asset classes listed",
+  "indicator_key": "one of FACTS.indicator_keys, or null",
+  "asset_classes": ["from FACTS.asset_classes"],
+  "importance": "high | medium | low",
+  "impact_note_pt": "1 sentence: the mechanism by which this reaches a client portfolio, in Portuguese",
+  "discussion_prompt_pt": "one question an advisor can put to a client, in Portuguese. Never an instruction to trade.",
+  "source_url": "the exact URL of the search result this rests on",
+  "source_title": "the title of that page"
+}]
+
+## FACTS
+
+{{facts}}`,
+  },
+
+  /**
+   * Daily agent 2 — the inference. Reads what agent 1 gathered and decides
+   * what matters for this advisor's book today, in Portuguese.
+   */
+  advisor_daily_inference: {
+    id: 'advisor_daily_inference',
+    title: 'Decide what matters today for this book',
+    language_out: 'pt-BR',
+    system: SYSTEM_GUARDRAIL,
+    template: `# Task: decide what matters today for this advisor's clients
+
+You are given today's retrieved indicator levels and moves, the thresholds that fired, the events gathered by the data agent (curated, generated from moves, and news with cited sources), and the exposure of every client portfolio by asset class.
+
+## What to produce
+
+Return STRICT JSON with this exact shape and nothing else:
+
+{
+  "headline_pt": "one sentence, under 90 characters, stating what actually matters today for this book",
+  "summary_pt": "3 to 4 sentences. What happened, why it matters for these portfolios, and the single thing to watch. Portuguese.",
+  "briefing": {
+    "equities_pt": "2 to 3 sentences",
+    "rates_credit_pt": "2 to 3 sentences",
+    "fx_commodities_pt": "2 to 3 sentences",
+    "macro_political_pt": "2 to 3 sentences",
+    "main_risk_or_opportunity_pt": "2 to 3 sentences naming the single thing to watch"
+  },
+  "what_matters": [
+    {
+      "event_id": "an id from FACTS.events",
+      "importance": "high | medium | low",
+      "why_it_matters_pt": "1 to 2 sentences for an advisor: why this event matters for the portfolios it touches",
+      "advisor_action_pt": "one concrete conversation to have with the exposed clients. Never an instruction to trade.",
+      "source_ids": ["source ids from FACTS this rests on"]
+    }
+  ],
+  "stance_by_asset_class": {
+    "Equities BR": "constructive | neutral | cautious",
+    "Equities Global": "constructive | neutral | cautious",
+    "Fixed Income": "constructive | neutral | cautious",
+    "Alternatives": "constructive | neutral | cautious",
+    "Real Estate": "constructive | neutral | cautious",
+    "Commodities": "constructive | neutral | cautious",
+    "Cash": "constructive | neutral | cautious"
+  },
+  "stance_rationale_pt": "3 sentences explaining the stances above, referencing the data they rest on"
+}
+
+## Rules specific to this task
+
+- Rank by what matters for THESE portfolios: FACTS.book gives each client's exposure by asset class and FACTS.candidates says which clients each event touches. An event nobody is exposed to is dropped unless it is high importance for the market as a whole.
+- Keep at most 8 events, ordered by importance. Merge events that share one cause by keeping the one with the better source.
+- Quote levels and moves only from FACTS.indicators. For a news event, say only what its summary says.
+- Every source id you cite must exist in FACTS. Never invent one.
+- A fired threshold in FACTS.triggers is always worth an event when one exists for its indicator.
+- Write everything in Brazilian Portuguese. True minus sign − for negatives. Brazilian number format 1.234,56.
+
+## FACTS
+
+{{facts}}`,
+  },
+
   /** Rationale lines that sit next to each recommendation row. */
   recommendation_rationale: {
     id: 'recommendation_rationale',
@@ -198,7 +308,9 @@ export function renderPrompt(key, facts) {
   if (!p) throw new Error(`unknown prompt ${key}`);
   return {
     system: p.system,
-    user: p.template.replace('{{facts}}', typeof facts === 'string' ? facts : JSON.stringify(facts, null, 2)),
+    user: p.template
+      .replace('{{date}}', typeof facts === 'object' && facts?.date ? facts.date : new Date().toISOString().slice(0, 10))
+      .replace('{{facts}}', typeof facts === 'string' ? facts : JSON.stringify(facts, null, 2)),
     prompt_version: PROMPT_VERSION,
     prompt_id: p.id,
     language_out: p.language_out,

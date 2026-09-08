@@ -13,6 +13,12 @@ binding = "ASSETS"
 [observability]
 enabled = true
 
+# The daily agents run here, on Cloudflare, so nothing depends on anyone's
+# machine: every day at 10:00 UTC (07:00 in São Paulo) the Worker's scheduled
+# handler rebuilds the World Overview for every advisor.
+[triggers]
+crons = ["0 10 * * *"]
+
 # ── D1: the relational record (§24, §25) ────────────────────────────────────
 [[d1_databases]]
 binding = "DB"

@@ -16,24 +16,36 @@ export function llmAvailable(env) {
   return !!(env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY);
 }
 
-export async function complete(env, { system, user, maxTokens = 2000, temperature = 0.3 }) {
+/**
+ * One Messages API request over HTTP. The Worker has no npm SDK on purpose:
+ * it keeps the bundle to one file and the call is a single POST. Claude Opus 5
+ * runs adaptive thinking by default and rejects sampling parameters, so none
+ * are sent.
+ */
+async function anthropicMessages(env, body, { timeoutMs = 120000 } = {}) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = await res.json();
+  if (data.stop_reason === 'refusal') throw new Error(`Anthropic declined the request${data.stop_details?.category ? ` (${data.stop_details.category})` : ''}`);
+  return data;
+}
+
+const textOf = (data) => (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+
+export async function complete(env, { system, user, maxTokens = 2000 }) {
   if (env.ANTHROPIC_API_KEY) {
     const model = env.ANTHROPIC_MODEL || 'claude-opus-5';
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model, max_tokens: maxTokens, temperature, system,
-        messages: [{ role: 'user', content: user }],
-      }),
-    });
-    if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const data = await res.json();
-    return { text: (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(''), model, provider: 'anthropic' };
+    const data = await anthropicMessages(env, { model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
+    return { text: textOf(data), model, provider: 'anthropic', usage: data.usage };
   }
 
   if (env.OPENAI_API_KEY) {
@@ -42,7 +54,7 @@ export async function complete(env, { system, user, maxTokens = 2000, temperatur
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${env.OPENAI_API_KEY}` },
       body: JSON.stringify({
-        model, max_tokens: maxTokens, temperature,
+        model, max_tokens: maxTokens,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       }),
     });
@@ -89,7 +101,58 @@ export async function runPrompt(env, promptKey, facts, { maxTokens = 2400 } = {}
   const out = await complete(env, { system: p.system, user: p.user, maxTokens });
   const parsed = parseJsonBlock(out.text);
   if (!parsed) throw new Error(`model returned no parsable JSON for ${promptKey}`);
-  return { data: parsed, model: out.model, provider: out.provider, prompt_version: p.prompt_version };
+  return { data: parsed, model: out.model, provider: out.provider, prompt_version: p.prompt_version, usage: out.usage };
+}
+
+/**
+ * Daily agent 1 — the news scan. Claude searches the web (server-side tool),
+ * returns items each pointing at a URL, and the code keeps only the items whose
+ * URL was actually among the search results or citations: an uncited claim
+ * never reaches the advisor. Requires the Anthropic API; there is no fallback
+ * because a news item without a verifiable source is worse than no news.
+ */
+export async function scanNews(env, facts, { maxSearches = 6 } = {}) {
+  if (!env.ANTHROPIC_API_KEY) throw new Error('the news scan needs the Anthropic API');
+  const p = renderPrompt('daily_news_scan', facts);
+  const model = env.ANTHROPIC_MODEL || 'claude-opus-5';
+  const tools = [{
+    type: 'web_search_20260209', name: 'web_search', max_uses: maxSearches,
+    user_location: { type: 'approximate', country: 'BR', timezone: 'America/Sao_Paulo' },
+  }];
+  let messages = [{ role: 'user', content: p.user }];
+  const found = new Map(); // url → { title, page_age }
+  let data = null; let searches = 0;
+  // A search-heavy turn can pause; resend the assistant content unchanged to resume.
+  for (let turn = 0; turn < 4; turn += 1) {
+    data = await anthropicMessages(env, { model, max_tokens: 8000, system: p.system, messages, tools }, { timeoutMs: 180000 });
+    for (const block of data.content || []) {
+      if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
+        for (const r of block.content) if (r.type === 'web_search_result' && r.url) found.set(normaliseUrl(r.url), { url: r.url, title: r.title, page_age: r.page_age });
+      }
+      if (block.type === 'text') for (const c of block.citations || []) if (c.url) found.set(normaliseUrl(c.url), { url: c.url, title: c.title, cited_text: c.cited_text });
+    }
+    searches += data.usage?.server_tool_use?.web_search_requests || 0;
+    if (data.stop_reason !== 'pause_turn') break;
+    messages = [...messages, { role: 'assistant', content: data.content }];
+  }
+  const parsed = parseJsonBlock(textOf(data));
+  const items = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.events) ? parsed.events : [];
+  const kept = []; const dropped = [];
+  for (const it of items) {
+    const key = it?.source_url ? normaliseUrl(it.source_url) : null;
+    const hit = key ? found.get(key) : null;
+    if (!hit) { dropped.push({ title: it?.title || '(sem título)', reason: 'fonte não verificável entre os resultados da busca' }); continue; }
+    kept.push({ ...it, source_url: hit.url, source_title: it.source_title || hit.title || hit.url });
+  }
+  return { items: kept, dropped, searches, model, urls: [...found.values()].map((f) => f.url), usage: data.usage };
+}
+
+function normaliseUrl(u) {
+  try {
+    const url = new URL(String(u).trim());
+    url.hash = ''; url.search = '';
+    return `${url.hostname.replace(/^www\./, '')}${url.pathname.replace(/\/+$/, '')}`.toLowerCase();
+  } catch { return String(u).trim().toLowerCase(); }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -206,6 +269,55 @@ export function deterministicWorldView(facts) {
       Alternatives: 'neutral', 'Real Estate': 'neutral', Commodities: 'neutral', Cash: 'neutral',
     },
     stance_rationale: 'Generated without a language model. Stances default to neutral and must be set by the advisor before this world view is used in a client conversation.',
+    generated_without_model: true,
+  };
+}
+
+/** The daily inference without a model: Portuguese, from the same facts, stances neutral. */
+export function deterministicDailyInference(facts) {
+  const ind = Object.fromEntries((facts.indicators || []).map((i) => [i.key, i]));
+  const fired = (facts.triggers || []).filter((t) => t.status === 'BREACHED');
+  const n = (v, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const say = (k, fmt) => {
+    const i = ind[k];
+    if (!i || i.unavailable || i.price == null) return null;
+    const mtd = i.mtdPct != null ? ` (${i.mtdPct >= 0 ? '+' : MINUS}${n(Math.abs(i.mtdPct * 100), 1)}% no mês)` : '';
+    return `${i.label} em ${fmt(i.price)}${mtd}`;
+  };
+  const join = (...xs) => xs.filter(Boolean).join('; ');
+  const headline = fired.length
+    ? `${fired[0].label}: limiar rompido`
+    : 'Nenhum limiar monitorado foi rompido hoje';
+  const events = (facts.events || []).slice();
+  const order = { high: 0, medium: 1, low: 2 };
+  const candidates = new Map((facts.candidates || []).map((c) => [c.event_id, c]));
+  const whatMatters = events
+    .filter((e) => candidates.has(e.id))
+    .sort((a, b) => (order[a.importance] ?? 1) - (order[b.importance] ?? 1) || (candidates.get(b.id).max_exposure - candidates.get(a.id).max_exposure))
+    .slice(0, 8)
+    .map((e) => ({ event_id: e.id, importance: e.importance || 'medium', why_it_matters_pt: null, advisor_action_pt: null, source_ids: e.source_id ? [e.source_id] : [] }));
+  return {
+    headline_pt: headline,
+    summary_pt: fired.length
+      ? `${fired.length === 1 ? 'Um limiar monitorado foi rompido' : `${fired.length} limiares monitorados foram rompidos`}: ${fired.map((t) => t.label).join('; ')}. ${whatMatters.length} eventos do período tocam carteiras sob sua responsabilidade. Este resumo foi montado sem modelo de linguagem, a partir dos dados recuperados agora.`
+      : `Nenhum limiar configurado está rompido. ${whatMatters.length} eventos do período tocam carteiras sob sua responsabilidade. Este resumo foi montado sem modelo de linguagem, a partir dos dados recuperados agora.`,
+    briefing: {
+      equities_pt: join(say('sp500', (v) => n(v, 0)), say('ibovespa', (v) => n(v, 0)), say('vix', (v) => n(v, 2))) || 'Indicadores de ações indisponíveis.',
+      rates_credit_pt: join(say('us10y', (v) => `${n(v, 2)}%`), say('selic', (v) => `${n(v, 2)}%`), say('hy_etf', (v) => n(v, 2))) || 'Indicadores de juros e crédito indisponíveis.',
+      fx_commodities_pt: join(say('usdbrl', (v) => `R$ ${n(v, 4)}`), say('dxy', (v) => n(v, 2)), say('gold', (v) => `US$ ${n(v, 0)}`), say('brent', (v) => `US$ ${n(v, 2)}`)) || 'Indicadores de câmbio e commodities indisponíveis.',
+      macro_political_pt: facts.macro_vintage
+        ? `Visão macro de referência: ${facts.macro_vintage.headline} (${facts.macro_vintage.provider}, publicada em ${facts.macro_vintage.published}). Compare com as séries ao vivo acima em vez de substituí-las.`
+        : 'Nenhuma visão macro de referência anexada.',
+      main_risk_or_opportunity_pt: fired.length
+        ? `${fired.length === 1 ? 'Limiar rompido' : 'Limiares rompidos'}: ${fired.map((t) => t.label).join('; ')}.`
+        : 'Nenhum limiar configurado está rompido. Acompanhe os que se aproximam.',
+    },
+    what_matters: whatMatters,
+    stance_by_asset_class: {
+      'Equities BR': 'neutral', 'Equities Global': 'neutral', 'Fixed Income': 'neutral',
+      Alternatives: 'neutral', 'Real Estate': 'neutral', Commodities: 'neutral', Cash: 'neutral',
+    },
+    stance_rationale_pt: 'Gerado sem modelo de linguagem. As posturas ficam neutras e devem ser definidas pelo assessor antes de usar esta visão em uma conversa com cliente.',
     generated_without_model: true,
   };
 }

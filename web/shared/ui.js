@@ -515,6 +515,102 @@ export function lineChart(series, { title = null, caption = null, width = 560, h
   return h('figure', {}, title && h('figcaption.chart-title', { text: title }), svg, tip, caption && h('figcaption.chart-caption', { text: caption }));
 }
 
+// ── the daily agents: progress ────────────────────────────────────────────
+export const DAILY_AGENTS = [
+  { step: 1, key: 'dados', title: 'Agente 1 · Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },
+  { step: 2, key: 'inferencia', title: 'Agente 2 · Inferência', what: 'o que importa hoje para as suas carteiras' },
+  { step: 3, key: 'gatilhos', title: 'Agente 3 · Gatilhos', what: 'limiares de mercado e desvios de alocação' },
+];
+
+/** A progress ring. `set(p)` takes 0..100. */
+export function donut({ size = 96 } = {}) {
+  const r = 42; const c = 2 * Math.PI * r;
+  const svg = svgEl('svg', { viewBox: '0 0 100 100', width: size, height: size, class: 'donut', 'aria-hidden': 'true' });
+  const track = svgEl('circle', { cx: 50, cy: 50, r, class: 'track' });
+  const arc = svgEl('circle', { cx: 50, cy: 50, r, class: 'arc', 'stroke-dasharray': c.toFixed(2), 'stroke-dashoffset': c.toFixed(2), transform: 'rotate(-90 50 50)' });
+  const label = text({ x: 50, y: 50, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'pct' }, '0%');
+  svg.append(track, arc, label);
+  return {
+    el: svg,
+    set(p) {
+      const v = Math.max(0, Math.min(100, Number(p) || 0));
+      arc.setAttribute('stroke-dashoffset', (c * (1 - v / 100)).toFixed(2));
+      label.textContent = `${Math.round(v)}%`;
+    },
+  };
+}
+
+/**
+ * The card that pops up while the agents run. `update(run)` takes the run as
+ * the API reports it; `onDone` fires when the person dismisses a finished run.
+ */
+export function progressCard({ title = 'Atualizando o panorama do dia', agents = DAILY_AGENTS, onDone = null } = {}) {
+  const ring = donut({ size: 96 });
+  const msg = h('div.pmsg', { text: 'Na fila…' });
+  const state = h('div.pstate', { text: 'Os três agentes rodam em sequência. Isto leva cerca de um minuto.' });
+  const rows = agents.map((a) => h('li', { dataset: { step: a.step } },
+    h('span.idx', {}, h('b', { text: String(a.step) }), icon('check', { size: 14 })),
+    h('span', {}, h('b', { text: a.title }), h('small', { text: a.what }))));
+  const foot = h('div.pfoot');
+  const clock = h('span.mono.muted');
+  const card = h('div.progress-card', { role: 'dialog', 'aria-live': 'polite', 'aria-label': title },
+    h('div.phead', {}, ring.el, h('div', {}, h('h3', { text: title }), msg, state)),
+    h('ol.agents', {}, rows), foot);
+  const veil = h('div.veil', {}, card);
+  document.body.append(veil);
+  const t0 = Date.now();
+  const timer = setInterval(() => { const s = Math.round((Date.now() - t0) / 1000); clock.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }, 500);
+  mount(foot, clock);
+
+  const close = () => { clearInterval(timer); veil.remove(); };
+  const finish = () => { close(); onDone?.(); };
+  let finished = false;
+  return {
+    el: veil,
+    close,
+    update(run) {
+      ring.set(run.progress ?? 0);
+      msg.textContent = run.message || '';
+      for (const li of rows) {
+        const s = Number(li.dataset.step);
+        li.className = run.status === 'completed' || s < run.step ? 'done' : s === run.step && run.status === 'running' ? 'active' : run.status === 'failed' && s === run.step ? 'failed' : '';
+      }
+      if (run.status === 'completed' && !finished) {
+        finished = true;
+        state.textContent = 'Concluído. O panorama abaixo já reflete esta execução.';
+        mount(foot, clock, h('button.btn.primary', { type: 'button', onclick: finish }, h('span', { text: 'ver o panorama' }), icon('arrow', { size: 15 })));
+        setTimeout(() => { if (veil.isConnected) finish(); }, 1400);
+      } else if (run.status === 'failed' && !finished) {
+        finished = true;
+        state.textContent = `A execução falhou: ${run.error || 'erro desconhecido'}.`;
+        mount(foot, clock, h('button.btn', { type: 'button', text: 'fechar', onclick: finish }));
+      }
+    },
+  };
+}
+
+// ── bars for thresholds and drift ─────────────────────────────────────────
+/** A bullet bar: how far a reading has travelled towards its trigger. The mark is the threshold. */
+export function bulletBar({ proximity, status }) {
+  const CAP = 1.3;
+  const p = proximity == null ? 0 : Math.min(CAP, Math.max(0, proximity));
+  return h('div.bullet', { class: String(status || '').toLowerCase() },
+    h('div.track', {}, h('i.fill', { style: { width: `${((p / CAP) * 100).toFixed(1)}%` } }), h('i.mark', { style: { left: `${((1 / CAP) * 100).toFixed(1)}%` } })));
+}
+
+/** A diverging bar: a drift from target with the rebalance tolerance marked either side of zero. */
+export function driftBar({ drift, tolerance, scale = null }) {
+  const s = Math.max(scale || 0, tolerance * 2, Math.abs(drift) * 1.05) || 1;
+  const pos = drift >= 0;
+  const w = `${((Math.abs(drift) / s) * 50).toFixed(1)}%`;
+  return h('div.diverge', {},
+    h('div.track', {},
+      h('i.tol', { style: { left: `${(50 - (tolerance / s) * 50).toFixed(1)}%` } }),
+      h('i.tol', { style: { left: `${(50 + (tolerance / s) * 50).toFixed(1)}%` } }),
+      h('i.fill', { class: pos ? 'pos' : 'neg', style: pos ? { left: '50%', width: w } : { right: '50%', width: w } }),
+      h('i.zero')));
+}
+
 // ── correlation matrix ────────────────────────────────────────────────────
 // A diverging ramp on the palette: benchmark blue for pairs that move together,
 // drawdown red for pairs that move apart, paper at zero. Never green — green

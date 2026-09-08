@@ -7,7 +7,8 @@
  */
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
-  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix, dateWithWeekday,
+  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix,
+  progressCard, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
@@ -18,6 +19,7 @@ const rail = document.getElementById('rail');
 const L = 'pt-BR';
 let ME = null;
 let CLIENTS = [];
+let ROUTER = null;
 
 const num = (v, d = 1) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }));
 
@@ -83,61 +85,65 @@ const currentHash = () => location.hash.replace(/^#/, '') || '/';
 // ═══ world overview ════════════════════════════════════════════════════════
 async function viewOverview() {
   const o = await api('/api/advisor/overview');
-  const wv = o.world_view;
-  const briefing = wv?.briefing?.briefing || {};
-  const stance = wv?.stance || {};
-  const generatedByModel = wv?.briefing?.mode === 'model';
+  if (o.pending) return pendingOverview(o);
 
-  const briefingBlocks = [
-    ['Ações', briefing.equities],
-    ['Juros e crédito', briefing.rates_credit],
-    ['Câmbio e commodities', briefing.fx_commodities],
-    ['Macro e política', briefing.macro_political],
-    ['Principal risco ou oportunidade', briefing.main_risk_or_opportunity],
+  const wv = o.world_view;
+  const view = wv?.briefing || {};           // the run's payload: headline, summary, blocks, stances
+  const briefing = view.briefing || {};
+  const blocks = [
+    ['Ações', briefing.equities_pt || briefing.equities],
+    ['Juros e crédito', briefing.rates_credit_pt || briefing.rates_credit],
+    ['Câmbio e commodities', briefing.fx_commodities_pt || briefing.fx_commodities],
+    ['Macro e política', briefing.macro_political_pt || briefing.macro_political],
+    ['Principal risco ou oportunidade', briefing.main_risk_or_opportunity_pt || briefing.main_risk_or_opportunity],
   ].filter(([, v]) => v);
 
   const indicatorGroups = {};
   for (const i of o.indicators) (indicatorGroups[i.group || 'Outros'] ||= []).push(i);
   const breached = o.triggers.filter((t) => t.status === 'BREACHED').length;
+  const modelWrote = o.inference?.mode === 'model';
+  const maxDrift = Math.max(0.01, ...o.drift_alerts.map((d) => Math.abs(d.drift)));
 
   return frag(
     head(`${greeting()}, ${(ME?.user?.name || '').split(' ')[0]}`,
       `${o.clients_count} clientes sob sua responsabilidade. O que aconteceu nos mercados, e quais carteiras isso toca.`,
-      [h('button.btn', { onclick: async (e) => { const b = e.currentTarget; b.disabled = true; b.lastChild.textContent = 'atualizando…'; await api('/api/advisor/overview?refresh=1'); location.reload(); } },
-        icon('refresh', { size: 15 }), h('span', { text: 'atualizar dados de mercado' }))],
-      [h('b', { text: 'Panorama do dia' }), sep(), dateWithWeekday(o.date, L)]),
+      [refreshButton()],
+      [h('b', { text: 'Panorama do dia' }), sep(), dateWithWeekday(o.date, L), sep(), h('span', { text: runSummary(o.run) })]),
 
     h('div.grid.g4', { style: { marginBottom: '48px' } },
       stat('Sob assessoria', money(CLIENTS.reduce((a, c) => a + (c.portfolio_value || 0), 0), { locale: L }), { sub: `${o.clients_count} carteiras` }),
-      stat('Eventos que importam hoje', String(o.what_matters.length), { sub: 'com impacto mapeado sobre as carteiras' }),
+      stat('Eventos que importam hoje', String(o.what_matters.length), { sub: modelWrote ? 'selecionados pelo agente de inferência' : 'ordenados por relevância e exposição' }),
       stat('Gatilhos acionados', String(breached), { tone: breached ? 'caution' : '', sub: `de ${o.triggers.length} limiares monitorados` }),
-      stat('Desvios de alocação', String(o.drift_alerts.length), { tone: o.drift_alerts.length ? 'caution' : '', sub: 'contra a política aprovada' })),
+      stat('Desvios de alocação', String(o.drift_alerts.length), { tone: o.drift_alerts.length ? 'caution' : '', sub: 'além do gatilho de rebalanceamento' })),
 
     // ── the briefing ────────────────────────────────────────────────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Resumo do dia' }),
-        h('span.meta', {}, generatedByModel ? `gerado por ${wv.briefing.model}` : 'gerado sem modelo de linguagem — texto determinístico', ' · ',
+        h('span.meta', {}, modelWrote ? `escrito por ${o.inference.model}` : 'sem modelo de linguagem — texto determinístico', ' · ',
           h('span', { class: wv?.approval_status === 'approved' ? 'gain' : 'caution', text: wv?.approval_status === 'approved' ? 'aprovado' : 'rascunho' }))),
       h('div.card', {},
-        wv?.generated_summary ? h('p.pull', { style: { marginBottom: '24px' }, text: wv.generated_summary }) : null,
-        h('div.grid.g2', {}, briefingBlocks.map(([k, v]) => h('div', {},
-          h('div.rail-h', { text: k }),
+        wv?.generated_summary ? h('p.pull', { text: wv.generated_summary }) : null,
+        view.summary_pt ? h('p.serif', { style: { margin: '14px 0 24px', color: 'var(--ink-700)' }, text: view.summary_pt }) : null,
+        h('div.grid.g2', {}, blocks.map(([k, v]) => h('div', {},
+          h('div.kicker', { text: k }),
           h('p.note', { text: v })))),
         h('p.note', { style: { marginTop: '14px' } },
-          'Este resumo é construído a partir dos dados recuperados agora, não da memória de um modelo. ',
-          'Cada número acima vem de um provedor identificado abaixo.'),
-        sourcesBlock(o.sources, 'Ver fontes dos indicadores'))),
+          'Este resumo é construído a partir dos dados recuperados pelos agentes, não da memória de um modelo. ',
+          'Cada número acima vem de um provedor identificado abaixo. ', newsNote(o.news)),
+        sourcesBlock(o.sources, 'Ver fontes'))),
 
     // ── what matters ────────────────────────────────────────────────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'O que importa hoje' }),
-        h('span.meta', { text: `${o.what_matters.length} eventos · impacto mapeado sobre ${o.clients_count} carteiras` })),
+        h('span.meta', { text: `${o.what_matters.length} eventos · impacto mapeado sobre ${o.clients_count} carteiras${modelWrote ? ' · inferido pelo modelo' : ''}` })),
       o.what_matters.length ? h('div.card', {},
         table(['Evento', 'Movimento', 'Por que importa', 'Exposição na sua carteira', 'Conversa sugerida'],
           o.what_matters.map((r) => h('tr', {},
             h('td', { style: { minWidth: '220px', maxWidth: '300px' } },
               h('span.name', { text: r.event_pt || r.event }),
-              h('span.sub', { text: `${r.date}${r.source_label ? ` · ${r.source_label}` : ''}` }),
+              h('span.sub', {}, `${r.date}${r.source_label ? ` · ${r.source_label}` : ''}`),
+              r.source_url ? h('span.sub', {}, h('a.src-link', { href: r.source_url, target: '_blank', rel: 'noopener', title: r.source_url },
+                h('span', { text: r.source_title || hostOf(r.source_url) }), icon('external', { size: 12 }))) : null,
               attentionPills(r)),
             h('td', {}, r.current_move ? moveCell(r.current_move) : h('span.muted', { text: '—' })),
             h('td.why', { style: { minWidth: '240px', maxWidth: '360px' }, text: r.why_it_matters_pt || r.why_it_matters }),
@@ -161,28 +167,43 @@ async function viewOverview() {
             h('span.v', { text: formatIndicator(i) }),
             h('span.c', { class: toneClass(i.mtdPct), text: i.mtdPct == null ? (i.asOf || '') : `${percent(i.mtdPct, { locale: L, decimals: 1 })} no mês` }))))))),
 
-    // ── triggers + drift ────────────────────────────────────────────────
+    // ── triggers + drift, as bars ───────────────────────────────────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Gatilhos e desvios' }),
-        h('span.meta', { text: `${breached} gatilhos acionados · ${o.drift_alerts.length} carteiras fora do gatilho de rebalanceamento` })),
+        h('span.meta', { text: `${breached} ${breached === 1 ? 'gatilho acionado' : 'gatilhos acionados'} · ${o.drift_alerts.length} ${o.drift_alerts.length === 1 ? 'desvio' : 'desvios'} além do gatilho de rebalanceamento` })),
       h('div.grid.g2', {},
         h('div.card', {},
           h('div.card-h', {}, h('h3', { text: 'Gatilhos de mercado' }),
-            h('span.meta', { text: `${breached} acionados` })),
-          h('div', {}, o.triggers.slice().sort(triggerOrder).map((t) => h('div.trg', {},
+            h('span.meta', { text: 'a barra mede a distância até o limiar; a marca é o limiar' })),
+          h('div', {}, o.triggers.slice().sort(triggerOrder).map((t) => h('div.trg.bars', {},
             h('span', { class: `dot ${t.status}` }),
             h('div', {},
-              h('div.lab', {}, t.label, t.status === 'BREACHED' ? h('span.chip.warn', { style: { marginLeft: '8px' }, text: 'acionado' }) : null),
-              h('div.det', { text: t.status === 'NO_DATA' ? (t.reason || 'indicador indisponível') : (t.affected_clients?.length ? `${t.affected_clients.length} cliente(s) expostos · ${t.action_pt || t.action || ''}` : (t.action_pt || t.action || '')) })),
-            h('span.obs', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? '—' : `${num(t.observed, 2)} / ${num(t.threshold, 2)}` }))))),
+              h('div.lab', {}, t.label,
+                t.status === 'BREACHED' ? h('span.chip.warn', { text: 'acionado · ação devida' })
+                  : t.status === 'APPROACHING' ? h('span.chip', { text: 'aproximando' }) : null),
+              t.status === 'BREACHED'
+                ? h('div.det.due', {}, h('b', { text: 'Ação: ' }), t.action_pt || t.action || '',
+                  t.affected_clients?.length ? h('span.muted', { text: ` — ${t.affected_clients.length} cliente(s) expostos: ${t.affected_clients.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ')}${t.affected_clients.length > 3 ? ` +${t.affected_clients.length - 3}` : ''}` }) : null)
+                : h('div.det', { text: t.status === 'NO_DATA' ? (t.reason || 'indicador indisponível') : (t.affected_clients?.length ? `${t.affected_clients.length} cliente(s) expostos · ${t.action_pt || t.action || ''}` : (t.action_pt || t.action || '')) })),
+            h('div.barcol', {},
+              t.status === 'NO_DATA' ? h('div.bullet', {}, h('div.track')) : bulletBar({ proximity: t.proximity, status: t.status }),
+              h('span.vals', {},
+                h('span', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? 'sem leitura' : fmtLevel(t.observed, t.unit) }),
+                h('span', { text: `limiar ${fmtLevel(t.threshold, t.unit)}` }))))))),
 
         h('div.card', {},
-          h('div.card-h', {}, h('h3', { text: 'Desvios de alocação' }), h('span.meta', { text: 'contra a política aprovada' })),
+          h('div.card-h', {}, h('h3', { text: 'Desvios de alocação' }), h('span.meta', { text: 'contra a política aprovada; as marcas são a tolerância de rebalanceamento' })),
           o.drift_alerts.length
-            ? h('div', {}, o.drift_alerts.map((d) => h('div.trg', {},
+            ? h('div', {}, o.drift_alerts.map((d) => h('div.trg.bars', {},
               h('span.dot.BREACHED'),
-              h('div', {}, h('div.lab', {}, h('a', { href: `#/client/${d.client_id}`, text: d.client_name })), h('div.det', { text: d.action_pt || d.action })),
-              h('span.obs', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }))))
+              h('div', {},
+                h('div.lab', {}, h('a', { href: `#/client/${d.client_id}`, text: d.client_name }), h('span.chip.warn', { text: 'ação devida' })),
+                h('div.det.due', {}, h('b', { text: 'Ação: ' }), d.action_pt || d.action)),
+              h('div.barcol', {},
+                driftBar({ drift: d.drift, tolerance: d.threshold_pp ?? 0.05, scale: maxDrift }),
+                h('span.vals', {},
+                  h('span', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }),
+                  h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))
             : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' })))),
 
     // ── correlations ────────────────────────────────────────────────────
@@ -190,9 +211,62 @@ async function viewOverview() {
   );
 }
 
+// ── the agents, from the portal ────────────────────────────────────────────
+function refreshButton() {
+  return h('button.btn', {
+    onclick: async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      try { followRun((await api('/api/advisor/refresh', {})).run); } catch (err) { b.disabled = false; alert(`Não foi possível iniciar a atualização: ${err.message}`); }
+    },
+  }, icon('refresh', { size: 15 }), h('span', { text: 'atualizar dados de mercado' }));
+}
+
+/** Show the progress card for a run and follow it until it ends; then re-render the page. */
+function followRun(run) {
+  const card = progressCard({ agents: run.agents || DAILY_AGENTS, onDone: () => ROUTER?.render() });
+  card.update(run);
+  const tick = async () => {
+    let r;
+    try { r = (await api(`/api/advisor/refresh/${run.id}`)).run; } catch (err) { card.update({ status: 'failed', error: err.message, step: run.step, progress: run.progress }); return; }
+    card.update(r);
+    if (r.status === 'running') setTimeout(tick, 1000);
+  };
+  setTimeout(tick, 500);
+}
+
+function pendingOverview(o) {
+  followRun(o.run);
+  return frag(
+    head(`${greeting()}, ${(ME?.user?.name || '').split(' ')[0]}`,
+      'Os agentes estão montando o panorama de hoje pela primeira vez. Isto leva cerca de um minuto.',
+      null, [h('b', { text: 'Panorama do dia' }), sep(), dateWithWeekday(o.date, L)]),
+    h('div.empty', { text: 'Aguardando a primeira execução dos agentes…' }));
+}
+
+const TRIGGER_PT = { cron: 'pelo agente diário', manual: 'a pedido', bootstrap: 'na primeira visita' };
+function runSummary(run) {
+  if (!run?.finished_at) return 'ainda não atualizado';
+  const when = new Date(run.finished_at);
+  const time = when.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const sameDay = run.finished_at.slice(0, 10) === new Date().toISOString().slice(0, 10);
+  return `atualizado ${sameDay ? `às ${time}` : `em ${dateLong(run.finished_at.slice(0, 10), L)} às ${time}`} ${TRIGGER_PT[run.trigger] || ''} · automático todos os dias às 07:00`;
+}
+
+function newsNote(news) {
+  if (!news) return null;
+  if (news.mode === 'model') return h('span.muted', { text: `${news.kept} ${news.kept === 1 ? 'notícia' : 'notícias'} com fonte verificada ${news.kept === 1 ? 'entrou' : 'entraram'} na análise, em ${news.searches} buscas.` });
+  if (news.mode === 'failed') return h('span.muted', { text: `A varredura de notícias falhou nesta execução: ${news.reason}.` });
+  return h('span.muted', { text: `A varredura de notícias está desligada: ${news.reason}.` });
+}
+
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+const fmtLevel = (v, unit) => (v == null ? '—' : unit === 'mtd' ? percent(v, { locale: L, decimals: 1 }) : `${num(v, Math.abs(v) >= 1000 ? 0 : 2)}${unit && !['index', 'price', 'mtd'].includes(unit) ? ` ${unit}` : ''}`);
+
 /** Pills mark what deserves a second look; the numbers carry the direction. */
 function attentionPills(r) {
   const pills = [];
+  if (r.kind === 'news') pills.push(h('span.chip', { text: 'notícia · fonte citada' }));
   if (r.importance === 'high') pills.push(h('span.chip.warn', { text: 'alta relevância' }));
   const mv = r.current_move?.mtdPct ?? r.current_move?.changePct;
   if (Number.isFinite(mv) && Math.abs(mv) >= 0.10) pills.push(h('span.chip', { text: 'movimento forte' }));
@@ -1002,7 +1076,7 @@ function renderCanonicalSummary(c) {
   installSessionGuard();
   renderRail();
 
-  router([
+  ROUTER = router([
     ['/', viewOverview],
     ['/signals', viewSignals],
     ['/triggers', viewTriggers],

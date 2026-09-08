@@ -10,7 +10,7 @@
 import { monthlyProfitability, modifiedDietz, timeWeightedReturn, historicalMetrics } from '../src/core/performance.js';
 import { proposeForAsset, bandPosition, ACTIONS } from '../src/core/recommendations.js';
 import { checkSuitability, SUITABILITY } from '../src/core/suitability.js';
-import { evaluateTrigger, driftTriggers, TRIGGER_STATUS } from '../src/core/triggers.js';
+import { evaluateTrigger, driftTriggers, triggerProximity, TRIGGER_STATUS } from '../src/core/triggers.js';
 import { validateReport, emptyReport, standardDisclosures } from '../src/core/report-schema.js';
 import { money, percent, pp, previousMonth, monthBounds, MINUS } from '../src/core/format.js';
 import { TrueTypeFont } from '../src/render/pdf/ttf.js';
@@ -216,6 +216,22 @@ t('allocation drift is bilingual and directional', () => {
   close(d[0].drift, 0.10, 1e-9);
   ok(d[0].action.includes('trimming'));
   ok(d[0].action_pt.includes('reduzir'));
+});
+
+console.log('\n  Trigger proximity (the bar the portal draws)');
+t('proximity is exactly 1 at the threshold, whichever way the trigger points', () => {
+  close(triggerProximity({ observed: 90, threshold: 90, comparator: 'gt' }), 1, 1e-12, 'above');
+  close(triggerProximity({ observed: 92, threshold: 92, comparator: 'lt' }), 1, 1e-12, 'below');
+  close(triggerProximity({ observed: -0.04, threshold: -0.04, comparator: 'lt' }), 1, 1e-12, 'negative below');
+  close(triggerProximity({ observed: 30, threshold: 30, comparator: 'abs_gt' }), 1, 1e-12, 'absolute');
+});
+t('proximity grows as a reading approaches its trigger from either side', () => {
+  ok(triggerProximity({ observed: 97.8, threshold: 90, comparator: 'gt' }) > 1, 'past an above trigger');
+  const dxy = triggerProximity({ observed: 98.8, threshold: 92, comparator: 'lt' });
+  ok(dxy > 0.9 && dxy < 1, 'approaching a below trigger from above');
+  close(triggerProximity({ observed: -0.01, threshold: -0.04, comparator: 'lt' }), 0.25, 1e-12, 'a quarter of the way into a fall');
+  eq(triggerProximity({ observed: 0.02, threshold: -0.04, comparator: 'lt' }), 0, 'a rise is nowhere near a fall trigger');
+  eq(triggerProximity({ observed: null, threshold: 90, comparator: 'gt' }), null, 'no reading, no bar');
 });
 
 console.log('\n  Correlation');

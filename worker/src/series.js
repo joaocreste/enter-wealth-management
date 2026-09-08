@@ -1,5 +1,6 @@
 /**
- * Daily price history for the monitored indicators, kept in R2.
+ * Daily price history for the monitored indicators, kept in R2 (the
+ * enter-wealth-market bucket, binding MARKET_SERIES).
  *
  * Yahoo Finance is the provider for every indicator with a listed symbol; the
  * Selic target and the monthly IPCA have no daily price and are listed as
@@ -17,6 +18,10 @@
  * the strip shows, and unlike the adjusted close it is not restated every time
  * an ETF pays a dividend — restatement would make merged history inconsistent.
  * The adjusted close is stored alongside for anything that needs total return.
+ *
+ * A row fetched while its session is still open is the live price, not a close.
+ * The store remembers that (last_provisional) so the strip can say so, and
+ * refreshes again once the session has had time to close.
  */
 import { INDICATORS } from '../../seed/market.mjs';
 import { dailySeries } from '../../src/adapters/yahoo.js';
@@ -27,13 +32,15 @@ export const SERIES_INDICATORS = INDICATORS.filter((i) => i.yahoo_symbol);
 export const EXCLUDED_INDICATORS = INDICATORS.filter((i) => !i.yahoo_symbol)
   .map((i) => ({ key: i.key, label: i.label, reason: 'série mensal ou de política do Banco Central, sem preço diário' }));
 
+const BUCKET = 'enter-wealth-market';       // wrangler.toml [[r2_buckets]] binding MARKET_SERIES
 const PREFIX = 'series/indicators/';
 const keyOf = (ind) => `${PREFIX}${ind.key}.json`;
+const bucketOf = (env) => env.MARKET_SERIES || null;
 
 const BACKFILL_YEARS = 5;
 const BACKFILL_MARGIN_DAYS = 45;
 export const EARLIEST = '1990-01-01';
-const REFRESH_AFTER_MS = 4 * 3600 * 1000;   // a refreshed store is trusted for four hours
+const REFRESH_AFTER_MS = 2 * 3600 * 1000;   // a refreshed store is trusted for two hours
 const REFRESH_CACHE_TTL = 15 * 60;          // the adapter cache for the incremental fetch
 const OVERLAP_DAYS = 10;                    // incremental fetches re-read the last sessions so a late correction lands
 const RESPONSE_TTL = 10 * 60;
@@ -76,17 +83,19 @@ const memStore = new Map(); // stands in for R2 where the binding is absent (tes
 
 async function readStored(env, ind) {
   const key = keyOf(ind);
-  if (!env.REPORTS) return memStore.get(key) ?? null;
+  const bucket = bucketOf(env);
+  if (!bucket) return memStore.get(key) ?? null;
   try {
-    const obj = await env.REPORTS.get(key);
+    const obj = await bucket.get(key);
     return obj ? await obj.json() : null;
   } catch { return null; }
 }
 
 async function writeStored(env, ind, stored) {
   const key = keyOf(ind);
-  if (!env.REPORTS) { memStore.set(key, stored); return; }
-  await env.REPORTS.put(key, JSON.stringify(stored), {
+  const bucket = bucketOf(env);
+  if (!bucket) { memStore.set(key, stored); return; }
+  await bucket.put(key, JSON.stringify(stored), {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
     customMetadata: { symbol: ind.yahoo_symbol, first: stored.first, last: stored.last, refreshed_at: stored.refreshed_at },
   });
@@ -100,6 +109,7 @@ async function fetchPoints(ind, from, to, { cacheTtl = null } = {}) {
     points: s.points.map((p) => ({ date: p.date, close: p.raw, adj: p.close })),
     name: s.name, currency: s.currency, exchange: s.exchange,
     fallback_for: s.source?.fallback_for ?? null,
+    in_progress: s.session?.in_progress === true,
   };
 }
 
@@ -134,6 +144,7 @@ function finish(ind, stored, points, extra = {}) {
     fallback_for: extra.fallback_for ?? stored?.fallback_for ?? null,
     built_at: stored?.built_at ?? now,
     refreshed_at: now,
+    last_provisional: extra.last_provisional ?? stored?.last_provisional ?? false,
     covers_from: [stored?.covers_from, extra.covers_from].filter(Boolean).sort()[0] ?? points[0].date, // the earliest date ever requested; a holiday there is not a gap
     first: points[0].date,
     last: points[points.length - 1].date,
@@ -159,7 +170,7 @@ export async function ensureSeries(env, ind, { from = null, force = false } = {}
   if (!stored?.points?.length) {
     try {
       const got = await fetchPoints(ind, addDays(need, -OVERLAP_DAYS) < EARLIEST ? EARLIEST : addDays(need, -OVERLAP_DAYS), to);
-      stored = finish(ind, null, got.points, { ...got, covers_from: need });
+      stored = finish(ind, null, got.points, { ...got, covers_from: need, last_provisional: got.in_progress });
       await writeStored(env, ind, stored);
       return { ...stored, action: force ? 'rebuilt' : 'built' };
     } catch (err) {
@@ -170,6 +181,7 @@ export async function ensureSeries(env, ind, { from = null, force = false } = {}
   let points = stored.points;
   let action = 'stored';
   let error = null;
+  let provisional = stored.last_provisional === true;
 
   // the caller asks for history older than the store holds: extend backwards
   const coversFrom = stored.covers_from || stored.first;
@@ -183,18 +195,19 @@ export async function ensureSeries(env, ind, { from = null, force = false } = {}
     } catch (err) { error = `extensão para trás falhou: ${err.message}`; }
   }
 
-  // a new session may have closed since the last refresh
+  // a new session may have closed since the last refresh, or today's row may still be moving
   const ageMs = Date.now() - Date.parse(stored.refreshed_at);
-  if (stored.last < to && ageMs > REFRESH_AFTER_MS) {
+  if ((stored.last < to || provisional) && ageMs > REFRESH_AFTER_MS) {
     try {
       const got = await fetchPoints(ind, addDays(stored.last, -OVERLAP_DAYS), to, { cacheTtl: REFRESH_CACHE_TTL });
       points = mergePoints(points, got.points);
+      provisional = got.in_progress;
       action = action === 'extended' ? 'extended+refreshed' : 'refreshed';
     } catch (err) { error = `atualização falhou: ${err.message}`; }
   }
 
   if (action !== 'stored') {
-    stored = finish(ind, stored, points, { covers_from: extendedTo });
+    stored = finish(ind, stored, points, { covers_from: extendedTo, last_provisional: provisional });
     await writeStored(env, ind, stored);
   }
   return { ...stored, action, refresh_error: error };
@@ -239,7 +252,7 @@ export function windowView(stored, { from, to, sessions = null, maxPoints = MAX_
   for (const p of slice) { if (p.close > high.close) high = p; if (p.close < low.close) low = p; }
   return {
     start: { date: start.date, close: start.close },
-    end: { date: end.date, close: end.close },
+    end: { date: end.date, close: end.close, provisional: stored.last_provisional === true && end.date === stored.last },
     change_pct: start.close ? end.close / start.close - 1 : null,
     high: { date: high.date, close: high.close },
     low: { date: low.date, close: low.close },
@@ -279,7 +292,7 @@ export async function indicatorSeries(env, { window: key = '30d', from = null, t
   const indicators = [];
   const excluded = [...EXCLUDED_INDICATORS];
   const sources = [];
-  const store = { backend: env.REPORTS ? 'R2' : 'memory', prefix: PREFIX, objects: 0, refreshed_at: null, actions: {} };
+  const store = { backend: bucketOf(env) ? 'R2' : 'memory', bucket: bucketOf(env) ? BUCKET : null, prefix: PREFIX, objects: 0, refreshed_at: null, actions: {} };
   for (const s of stored) {
     if (s.unavailable) { excluded.push({ key: s.key, label: s.label, reason: s.reason }); continue; }
     store.objects += 1;

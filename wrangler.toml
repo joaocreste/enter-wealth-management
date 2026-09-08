@@ -39,6 +39,12 @@ migrations_dir = "worker/migrations"
 binding = "REPORTS"
 bucket_name = "enter-wealth-reports"
 
+# ── R2: daily price histories of the monitored indicators (worker/src/series.js) ──
+# Mutable, appended every morning by the cron; kept apart from the immutable artefacts.
+[[r2_buckets]]
+binding = "MARKET_SERIES"
+bucket_name = "enter-wealth-market"
+
 # ── KV: cached provider responses and low-latency reference data ────────────
 # Never the authoritative store for a portfolio record.
 [[kv_namespaces]]

@@ -63,6 +63,17 @@ export async function dailySeries(symbol, fromIso, toIsoDate, { cacheTtl = null 
 
     const dividends = Object.values(r.events?.dividends || {}).map((d) => ({ date: iso(d.date), amount: d.amount }));
 
+    // The newest row is still moving while the session that produced it is open:
+    // the last trade falls inside the current regular period and dates that row.
+    const m = r.meta || {};
+    const regular = m.currentTradingPeriod?.regular || {};
+    const lastTrade = m.regularMarketTime;
+    const session = {
+      last_trade_at: Number.isFinite(lastTrade) ? new Date(lastTrade * 1000).toISOString() : null,
+      in_progress: Number.isFinite(lastTrade) && Number.isFinite(regular.start) && Number.isFinite(regular.end)
+        && lastTrade >= regular.start && lastTrade < regular.end && points[points.length - 1].date === iso(lastTrade),
+    };
+
     return {
       symbol,
       currency: r.meta?.currency || null,
@@ -70,6 +81,7 @@ export async function dailySeries(symbol, fromIso, toIsoDate, { cacheTtl = null 
       exchange: r.meta?.fullExchangeName || null,
       points,
       dividends,
+      session,
       fromCache: !!fromCache,
       source: makeSource({
         provider: 'Yahoo Finance',

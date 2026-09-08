@@ -335,7 +335,7 @@ function indicatorsSection(o) {
       h('span.v', { text: fmt(s ? s.end.close : i.price) }),
       c,
       s ? sparkline(s.points, { format: fmt, dateLabel: dmy }) : null,
-      src ? h('span.src', { text: `${src.provider} · ${src.identifier} · até ${dmy(s ? s.end.date : i.asOf)}` }) : null);
+      src ? h('span.src', { text: `${src.provider} · ${src.identifier} · até ${dmy(s ? s.end.date : i.asOf)}${s?.end.provisional ? ' · sessão em curso' : ''}` }) : null);
   }
 
   function paint() {
@@ -354,6 +354,7 @@ function indicatorsSection(o) {
       h('p.chart-caption', {},
         `${d.basis[0].toUpperCase()}${d.basis.slice(1)}. `,
         `Fonte: Yahoo Finance, fechamentos diários; séries mantidas em R2 pelo Worker (${d.store.objects} indicadores, atualizadas em ${dmy(d.store.refreshed_at)} às ${hhmm(d.store.refreshed_at)})`,
+        d.indicators.some((s) => s.end.provisional) ? ' · "sessão em curso" marca o preço corrente de um pregão ainda aberto, substituído pelo fechamento na próxima atualização' : '',
         excluded, '. Passe o mouse sobre a linha para ler um fechamento.'),
       sourcesBlock(d.sources, 'Ver fontes das séries'));
   }

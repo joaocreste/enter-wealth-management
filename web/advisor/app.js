@@ -7,7 +7,7 @@
  */
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
-  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, dateWithWeekday,
+  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, dateWithWeekday,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
@@ -60,6 +60,25 @@ const sep = () => h('span.sep', { text: '·' });
 function head(title, sub, actions, kicker) {
   return pageHead({ title, sub, actions, kicker });
 }
+
+/** The trail for a route. `extra` lets a view name what the route only identifies. */
+function crumbsFor(hash, extra = {}) {
+  const root = { label: 'Portal do assessor', href: '#/' };
+  const top = { '/': 'Panorama do dia', '/signals': 'Sinais de mercado', '/triggers': 'Gatilhos', '/clients': 'Clientes' };
+  if (top[hash]) return [root, { label: top[hash] }];
+  const m = hash.match(/^\/client\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/);
+  if (!m) return [root, { label: 'Página não encontrada' }];
+  const [, id, tab] = m;
+  const name = extra.clientName || CLIENTS.find((c) => c.id === id)?.name || 'Cliente';
+  const trail = [root, { label: 'Clientes', href: '#/clients' }, { label: name, href: `#/client/${id}` }];
+  if (!tab || tab === 'overview') trail.push({ label: 'Visão geral' });
+  else if (tab === 'prep') trail.push({ label: 'Preparação de reunião' });
+  else if (tab === 'editor') trail.push({ label: 'Editor de carteira' });
+  else if (tab === 'report') trail.push({ label: 'Cartas', href: `#/client/${id}/reports` }, { label: extra.report || 'Carta' });
+  else trail.push({ label: Object.fromEntries(CLIENT_TABS)[tab] || tab });
+  return trail;
+}
+const currentHash = () => location.hash.replace(/^#/, '') || '/';
 
 // ═══ world overview ════════════════════════════════════════════════════════
 async function viewOverview() {
@@ -309,6 +328,7 @@ async function viewClient({ id, tab = 'overview' }) {
   })));
 
   const body = await renderClientTab(tab, id, d);
+  crumbs(crumbsFor(currentHash(), { clientName: c.name }));
   return frag(
     head(c.name, `${money(d.total_value, { locale: L })} sob assessoria · política v${d.policy?.version} de ${dateLong(d.policy?.effective_date, L)}${c.next_review_at ? ` · próxima revisão ${shortDate(c.next_review_at)}` : ''}`, [
       h('a.btn', { href: `#/client/${id}/prep` }, icon('prep', { size: 15 }), h('span', { text: 'preparar reunião' })),
@@ -870,6 +890,7 @@ async function viewReport({ id, reportId }) {
     location.reload();
   };
 
+  crumbs(crumbsFor(currentHash(), { clientName: c.client?.name, report: `Carta de ${monthLabel(r.reporting_month, L)}` }));
   const el = frag(
     head(`Carta de ${monthLabel(r.reporting_month, L)}`,
       `${r.page_count} páginas · gerada em ${r.created_at} · execução ${r.graph_run_id || '—'} · narrativa: ${c.provenance?.narrative_mode}`,
@@ -940,5 +961,7 @@ function renderCanonicalSummary(c) {
     ['/client/:id/:tab', viewClient],
   ], { root });
 
-  window.addEventListener('hashchange', () => setActive(rail, location.hash.replace(/^#/, '') || '/'));
+  const syncNav = () => { setActive(rail, currentHash()); crumbs(crumbsFor(currentHash())); };
+  window.addEventListener('hashchange', syncNav);
+  syncNav();
 })();

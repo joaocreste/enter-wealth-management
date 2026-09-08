@@ -110,6 +110,7 @@ html[data-app="client"]{--t-body:14.5px;--t-data:13.5px;--page-max:1120px}
 
 /* ─── base ───────────────────────────────────────────────────────────── */
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%;background:var(--paper)}
 body{
   margin:0;background:var(--paper);color:var(--ink-950);
@@ -130,6 +131,19 @@ svg.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;str
 
 /* ─── shell ──────────────────────────────────────────────────────────── */
 .shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);min-height:100vh}
+.frame{min-width:0;display:flex;flex-direction:column}
+
+/* the trail: where you are, always in view */
+.topbar{position:sticky;top:0;z-index:10;background:var(--paper);border-bottom:1px solid var(--rule);padding:0 48px;min-height:48px;display:flex;align-items:center}
+.crumbs{display:flex;align-items:center;gap:10px;margin:0;padding:0;list-style:none;font-size:13px;line-height:1.3;min-width:0;overflow-x:auto;scrollbar-width:none;white-space:nowrap}
+.crumbs::-webkit-scrollbar{display:none}
+.crumbs li{flex:none;max-width:34ch;overflow:hidden;text-overflow:ellipsis}
+.crumbs a{color:var(--ink-500);transition:color var(--dur) var(--ease)}
+.crumbs a:hover{color:var(--ink-950)}
+.crumbs .sep{color:var(--ink-300);font-weight:300;padding:0 2px}
+.crumbs .cur{color:var(--ink-950);font-weight:600}
+@media (max-width:1100px){.topbar{padding:0 32px}}
+@media (max-width:700px){.topbar{padding:0 16px;min-height:44px}.crumbs li{max-width:22ch}}
 
 .rail{
   position:sticky;top:0;height:100vh;overflow-y:auto;overscroll-behavior:contain;
@@ -170,7 +184,7 @@ svg.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;str
 .rail-tools .btn{background:transparent;color:var(--rail-dim);border-color:var(--rail-line);flex:1;justify-content:center}
 .rail-tools .btn:hover{color:#fff;border-color:rgba(255,255,255,.45);background:var(--rail-hover)}
 
-.main{min-width:0;max-width:var(--page-max);padding:40px 48px 128px;counter-reset:sec}
+.main{min-width:0;max-width:var(--page-max);padding:32px 48px 128px;counter-reset:sec}
 @media (max-width:1100px){.main{padding:32px 32px 96px}}
 @media (max-width:700px){.main{padding:20px 16px 64px}}
 .main>.view{animation:page var(--dur-reveal) var(--ease) both}
@@ -178,7 +192,7 @@ svg.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;str
 
 @media (max-width:960px){
   .shell{grid-template-columns:1fr}
-  .rail{position:sticky;height:auto;flex-direction:row;align-items:center;gap:16px;padding:10px 16px;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--rail-line);z-index:5}
+  .rail{position:static;height:auto;flex-direction:row;align-items:center;gap:16px;padding:10px 16px;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--rail-line)}
   .rail-brand{flex-direction:row;align-items:center;gap:0}
   .rail-brand .app,.rail-brand .lockup .desc{display:none}
   .rail-nav{flex-direction:row;gap:2px}

@@ -8,7 +8,7 @@
  */
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
-  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard,
+  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, lineChart, sourcesBlock,
   apiUrl, loginUrl, advisorUrl,
@@ -49,6 +49,10 @@ const sep = () => h('span.sep', { text: '·' });
 function head(title, sub, actions, kicker) {
   return pageHead({ title, sub, actions, kicker });
 }
+
+const PAGES = { '/': 'Minha carteira', '/month': 'Último mês', '/matters': 'O que importa', '/letter': 'Carta do assessor', '/documents': 'Documentos' };
+const currentHash = () => location.hash.replace(/^#/, '') || '/';
+const crumbsFor = (hash) => [{ label: 'Meus investimentos', href: '#/' }, { label: PAGES[hash] || 'Página não encontrada' }];
 
 async function latestPublished() {
   const list = await api(`/api/clients/${CLIENT_ID}/reports`);
@@ -300,5 +304,7 @@ function notPublished() {
     ['/documents', viewDocuments],
   ], { root });
 
-  window.addEventListener('hashchange', () => setActive(rail, location.hash.replace(/^#/, '') || '/'));
+  const syncNav = () => { setActive(rail, currentHash()); crumbs(crumbsFor(currentHash())); };
+  window.addEventListener('hashchange', syncNav);
+  syncNav();
 })();

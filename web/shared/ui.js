@@ -267,7 +267,25 @@ export function icon(name, { size = 18 } = {}) {
 export const initials = (name = '') => name.trim().split(/\s+/).filter(Boolean).map((w) => w[0]).filter((_, i, a) => i === 0 || i === a.length - 1).join('').toUpperCase() || '·';
 export const avatar = (name) => h('span.avatar', { text: initials(name), 'aria-hidden': 'true' });
 
-// ── shell: rail, masthead ─────────────────────────────────────────────────
+// ── shell: the trail, the rail, the masthead ──────────────────────────────
+/**
+ * Where you are, as a path from the portal's root: every crumb but the last
+ * links back up a level. `items`: [{ label, href }].
+ */
+export function crumbs(items) {
+  const bar = document.getElementById('crumbs');
+  if (!bar) return;
+  const list = h('ol.crumbs', {}, items.flatMap((it, i) => {
+    const last = i === items.length - 1;
+    const node = last || !it.href
+      ? h('li', { class: last ? 'cur' : '', 'aria-current': last ? 'page' : null, text: it.label })
+      : h('li', {}, h('a', { href: it.href, text: it.label }));
+    return i ? [h('li.sep', { 'aria-hidden': 'true', text: '/' }), node] : [node];
+  }));
+  mount(bar, list);
+  list.scrollLeft = list.scrollWidth; // a deep trail on a narrow screen keeps the current page in view
+}
+
 export function railBrand(app) {
   return h('div.rail-brand', {}, h('a', { href: '#/', 'aria-label': 'Início' }, logo({ size: 26 })), app && h('div.app', { text: app }));
 }

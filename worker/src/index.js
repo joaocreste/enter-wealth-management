@@ -22,6 +22,10 @@ import { previousMonth, monthBounds } from '../../src/core/format.js';
 import { INDICATORS } from '../../seed/market.mjs';
 import { seedDatabase } from './seed-runner.js';
 import { artefactLinks, verifyArtefactToken } from './links.js';
+import { dailySeries } from '../../src/adapters/yahoo.js';
+import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
+import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
+import { makeSource } from '../../src/core/sources.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 
@@ -190,6 +194,11 @@ async function route(request, env, url) {
     return ok({ triggers: rows.map((r) => ({ ...r, asset_classes: json(r.asset_classes_json, []) })) });
   }
 
+  if (path === '/api/advisor/correlations') {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    return ok(await advisorCorrelations(env, url.searchParams.get('window') || '6m'));
+  }
+
   // ── client-scoped ────────────────────────────────────────────────────────
   const clientMatch = path.match(/^\/api\/clients\/([^/]+)(\/.*)?$/);
   if (clientMatch) {
@@ -329,6 +338,65 @@ async function advisorOverview(env, session, refresh = false) {
     clients_count: clients.length,
     sources: indicators.filter((i) => i.source).map((i) => i.source),
   };
+}
+
+/**
+ * Correlation between the monitored indicators' daily returns.
+ *
+ * Only indicators with a daily price series take part: the Selic target and the
+ * monthly IPCA are policy or monthly series and would correlate with nothing
+ * meaningful at a daily frequency, so they are listed as excluded rather than
+ * silently dropped. Cached for an hour per window; the underlying Yahoo series
+ * are cached by the adapter for longer.
+ */
+const CORRELATION_WINDOWS = { '3m': 91, '6m': 182, '1y': 365 };
+
+async function advisorCorrelations(env, windowKey) {
+  const key = CORRELATION_WINDOWS[windowKey] ? windowKey : '6m';
+  const days = CORRELATION_WINDOWS[key];
+  const to = new Date().toISOString().slice(0, 10);
+  const from = addDays(to, -days);
+  const cacheKey = `corr:${key}:${to}`;
+  const cached = await cacheGet(cacheKey, 3600);
+  if (cached) return { ...cached, from_cache: true };
+
+  const series = [];
+  const sources = [];
+  const excluded = INDICATORS.filter((i) => !i.yahoo_symbol)
+    .map((i) => ({ key: i.key, label: i.label, reason: 'série mensal ou de política, não um preço diário' }));
+  for (const ind of INDICATORS.filter((i) => i.yahoo_symbol)) {
+    const s = await dailySeries(ind.yahoo_symbol, from, to);
+    if (s.unavailable || s.points.length < 20) {
+      excluded.push({ key: ind.key, label: ind.label, reason: s.unavailable ? s.reason : 'série insuficiente no período' });
+      continue;
+    }
+    series.push({
+      key: ind.key, label: ind.label, group: ind.group, symbol: ind.yahoo_symbol,
+      first: s.points[0].date, last: s.points[s.points.length - 1].date,
+      returns: logReturns(s.points),
+    });
+    sources.push(s.source);
+  }
+
+  const { matrix, observations } = correlationMatrix(series);
+  const pairs = observations.flatMap((row, i) => row.filter((_, j) => j !== i));
+  const result = {
+    window: { key, days, from, to },
+    method: 'Pearson sobre retornos diários logarítmicos, pares completos',
+    indicators: series.map(({ returns, ...rest }) => ({ ...rest, observations: returns.size })),
+    matrix,
+    observations,
+    pair_observations: pairs.length ? { min: Math.min(...pairs), max: Math.max(...pairs) } : null,
+    excluded,
+    computed_at: nowIso(),
+    sources: [...sources, makeSource({
+      provider: 'Enter Asset Management (derivado)', kind: 'derived', instrument: 'Matriz de correlação',
+      identifier: `corr-${key}`, requested_range: `${from}..${to}`, last_observation: to,
+      notes: 'Pearson sobre retornos diários logarítmicos; cada par medido nas datas que ambas as séries observaram',
+    })],
+  };
+  await cacheSet(cacheKey, result, 3600);
+  return result;
 }
 
 function compactIndicator(i) {

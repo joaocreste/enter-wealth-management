@@ -7,7 +7,7 @@
  */
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
-  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, dateWithWeekday,
+  pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix, dateWithWeekday,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
@@ -128,6 +128,27 @@ async function viewOverview() {
           'Cada número acima vem de um provedor identificado abaixo.'),
         sourcesBlock(o.sources, 'Ver fontes dos indicadores'))),
 
+    // ── what matters ────────────────────────────────────────────────────
+    h('section.section', {},
+      h('div.section-h', {}, h('h2', { text: 'O que importa hoje' }),
+        h('span.meta', { text: `${o.what_matters.length} eventos · impacto mapeado sobre ${o.clients_count} carteiras` })),
+      o.what_matters.length ? h('div.card', {},
+        table(['Evento', 'Movimento', 'Por que importa', 'Exposição na sua carteira', 'Conversa sugerida'],
+          o.what_matters.map((r) => h('tr', {},
+            h('td', { style: { minWidth: '220px', maxWidth: '300px' } },
+              h('span.name', { text: r.event_pt || r.event }),
+              h('span.sub', { text: `${r.date}${r.source_label ? ` · ${r.source_label}` : ''}` }),
+              attentionPills(r)),
+            h('td', {}, r.current_move ? moveCell(r.current_move) : h('span.muted', { text: '—' })),
+            h('td.why', { style: { minWidth: '240px', maxWidth: '360px' }, text: r.why_it_matters_pt || r.why_it_matters }),
+            h('td', { style: { minWidth: '150px' } },
+              h('span.move', { text: r.exposure_summary.max_exposure ? weight(r.exposure_summary.max_exposure, { locale: L, decimals: 1 }) : '—' }),
+              h('span.sub', { text: r.per_client.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ') + (r.per_client.length > 3 ? ` +${r.per_client.length - 3}` : '') })),
+            h('td.talk', { style: { minWidth: '240px', maxWidth: '340px' }, text: r.advisor_action_pt || r.advisor_action }))),
+          { className: 'matters' }),
+        h('p.note', { style: { marginTop: '14px' }, text: 'Cada linha é um ponto de conversa, não uma ordem. Nenhuma operação é executada a partir desta tela.' }))
+        : h('div.empty', { text: 'Nenhum evento do período toca as carteiras sob sua responsabilidade.' })),
+
     // ── indicators ──────────────────────────────────────────────────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Indicadores monitorados' }), h('span.meta', { text: 'variação no mês corrente' })),
@@ -140,47 +161,79 @@ async function viewOverview() {
             h('span.v', { text: formatIndicator(i) }),
             h('span.c', { class: toneClass(i.mtdPct), text: i.mtdPct == null ? (i.asOf || '') : `${percent(i.mtdPct, { locale: L, decimals: 1 })} no mês` }))))))),
 
-    // ── what matters ────────────────────────────────────────────────────
-    h('section.section', {},
-      h('div.board', {},
-        h('div.board-h', {}, h('h2', { text: 'O que importa hoje' }),
-          h('span.meta', { text: `${o.what_matters.length} eventos · impacto mapeado sobre ${o.clients_count} carteiras` })),
-        h('div.tw', {},
-          h('table', {},
-            h('thead', {}, h('tr', {}, ['Evento', 'Movimento', 'Por que importa', 'Exposição na sua carteira', 'Conversa sugerida'].map((t) => h('th', { text: t })))),
-            h('tbody', {}, o.what_matters.map((r) => h('tr', {},
-              h('td', { style: { minWidth: '210px' } },
-                h('span.ev', {}, h('i', { class: `imp ${r.importance}` }), r.event_pt || r.event),
-                h('span.src', { text: `${r.date}${r.source_label ? ` · ${r.source_label}` : ''}` })),
-              h('td', {}, r.current_move ? moveCell(r.current_move) : h('span.muted', { text: '—' })),
-              h('td', { style: { minWidth: '260px', maxWidth: '360px' }, text: r.why_it_matters_pt || r.why_it_matters }),
-              h('td', { style: { minWidth: '160px' } },
-                h('span.exposure', { text: r.exposure_summary.max_exposure ? weight(r.exposure_summary.max_exposure, { locale: L, decimals: 1 }) : '—' }),
-                h('span.clients', { text: r.per_client.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ') + (r.per_client.length > 3 ? ` +${r.per_client.length - 3}` : '') })),
-              h('td.action', { style: { minWidth: '240px', maxWidth: '320px' }, text: r.advisor_action_pt || r.advisor_action }))))))),
-      h('p.note', { style: { marginTop: '10px' }, text: 'Cada linha é um ponto de conversa, não uma ordem. Nenhuma operação é executada a partir desta tela.' })),
-
     // ── triggers + drift ────────────────────────────────────────────────
-    h('div.grid.g2', {},
-      h('section.card', {},
-        h('div.card-h', {}, h('h3', { text: 'Gatilhos de mercado' }),
-          h('span.meta', { text: `${o.triggers.filter((t) => t.status === 'BREACHED').length} acionados` })),
-        h('div', {}, o.triggers.slice().sort(triggerOrder).map((t) => h('div.trg', {},
-          h('span', { class: `dot ${t.status}` }),
-          h('div', {},
-            h('div.lab', { text: t.label }),
-            h('div.det', { text: t.status === 'NO_DATA' ? (t.reason || 'indicador indisponível') : (t.affected_clients?.length ? `${t.affected_clients.length} cliente(s) expostos · ${t.action_pt || t.action || ''}` : (t.action_pt || t.action || '')) })),
-          h('span.obs', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? '—' : `${num(t.observed, 2)} / ${num(t.threshold, 2)}` }))))),
+    h('section.section', {},
+      h('div.section-h', {}, h('h2', { text: 'Gatilhos e desvios' }),
+        h('span.meta', { text: `${breached} gatilhos acionados · ${o.drift_alerts.length} carteiras fora do gatilho de rebalanceamento` })),
+      h('div.grid.g2', {},
+        h('div.card', {},
+          h('div.card-h', {}, h('h3', { text: 'Gatilhos de mercado' }),
+            h('span.meta', { text: `${breached} acionados` })),
+          h('div', {}, o.triggers.slice().sort(triggerOrder).map((t) => h('div.trg', {},
+            h('span', { class: `dot ${t.status}` }),
+            h('div', {},
+              h('div.lab', {}, t.label, t.status === 'BREACHED' ? h('span.chip.warn', { style: { marginLeft: '8px' }, text: 'acionado' }) : null),
+              h('div.det', { text: t.status === 'NO_DATA' ? (t.reason || 'indicador indisponível') : (t.affected_clients?.length ? `${t.affected_clients.length} cliente(s) expostos · ${t.action_pt || t.action || ''}` : (t.action_pt || t.action || '')) })),
+            h('span.obs', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? '—' : `${num(t.observed, 2)} / ${num(t.threshold, 2)}` }))))),
 
-      h('section.card', {},
-        h('div.card-h', {}, h('h3', { text: 'Desvios de alocação' }), h('span.meta', { text: 'contra a política aprovada' })),
-        o.drift_alerts.length
-          ? h('div', {}, o.drift_alerts.map((d) => h('div.trg', {},
-            h('span.dot.BREACHED'),
-            h('div', {}, h('div.lab', {}, h('a', { href: `#/client/${d.client_id}`, text: d.client_name })), h('div.det', { text: d.action_pt || d.action })),
-            h('span.obs.caution', { text: pp(d.drift, { locale: L }) }))))
-          : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' }))),
+        h('div.card', {},
+          h('div.card-h', {}, h('h3', { text: 'Desvios de alocação' }), h('span.meta', { text: 'contra a política aprovada' })),
+          o.drift_alerts.length
+            ? h('div', {}, o.drift_alerts.map((d) => h('div.trg', {},
+              h('span.dot.BREACHED'),
+              h('div', {}, h('div.lab', {}, h('a', { href: `#/client/${d.client_id}`, text: d.client_name })), h('div.det', { text: d.action_pt || d.action })),
+              h('span.obs', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }))))
+            : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' })))),
+
+    // ── correlations ────────────────────────────────────────────────────
+    correlationSection(),
   );
+}
+
+/** Pills mark what deserves a second look; the numbers carry the direction. */
+function attentionPills(r) {
+  const pills = [];
+  if (r.importance === 'high') pills.push(h('span.chip.warn', { text: 'alta relevância' }));
+  const mv = r.current_move?.mtdPct ?? r.current_move?.changePct;
+  if (Number.isFinite(mv) && Math.abs(mv) >= 0.10) pills.push(h('span.chip', { text: 'movimento forte' }));
+  if ((r.exposure_summary?.max_exposure ?? 0) >= 0.4) pills.push(h('span.chip.warn', { text: 'exposição alta' }));
+  return pills.length ? h('div.pills', {}, pills) : null;
+}
+
+/** Short names for the matrix columns; the full label sits in the tooltip. */
+const SHORT = {
+  sp500: 'S&P 500', nasdaq: 'Nasdaq', ibovespa: 'Ibovespa', vix: 'VIX', us10y: 'US 10a', hy_etf: 'HYG', ig_etf: 'LQD',
+  usdbrl: 'USD/BRL', eurusd: 'EUR/USD', dxy: 'DXY', gold: 'Ouro', brent: 'Brent', wti: 'WTI', copper: 'Cobre', btc: 'Bitcoin', eth: 'Ether',
+};
+const WINDOWS = [['3m', '3 meses'], ['6m', '6 meses'], ['1y', '12 meses']];
+
+/** The matrix loads after the page: sixteen daily series take a few seconds cold. */
+function correlationSection() {
+  const box = h('div.card');
+  const meta = h('span.meta');
+  const buttons = h('div.split', {}, WINDOWS.map(([k, label]) => h('button.btn.sm', { dataset: { k }, text: label, onclick: () => load(k) })));
+  async function load(k) {
+    for (const b of buttons.querySelectorAll('button')) b.classList.toggle('on', b.dataset.k === k);
+    mount(box, h('div.loading', {}, loader(), h('span', { text: 'Calculando correlações…' })));
+    try {
+      const d = await api(`/api/advisor/correlations?window=${k}`);
+      const obs = d.pair_observations;
+      meta.textContent = `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)}`;
+      mount(box,
+        correlationMatrix(d, { locale: L, short: (i) => SHORT[i.key] || i.label }),
+        h('p.chart-caption', {}, `Correlação de Pearson entre retornos diários (logarítmicos), cada par medido nas datas que ambas as séries observaram`,
+          obs ? ` · ${obs.min === obs.max ? obs.min : `${obs.min} a ${obs.max}`} observações por par` : '',
+          d.excluded?.length ? ` · fora da matriz: ${d.excluded.map((x) => x.label).join(', ')} — ${d.excluded[0].reason}` : '',
+          ' · fonte: Yahoo Finance.'),
+        sourcesBlock(d.sources, 'Ver fontes das séries'));
+    } catch (err) {
+      mount(box, h('div.err', { text: `Não foi possível calcular as correlações: ${err.message}` }));
+    }
+  }
+  load('6m');
+  return h('section.section', {},
+    h('div.section-h', {}, h('h2', { text: 'Correlações entre os indicadores' }), h('div.split', {}, meta, buttons)),
+    box);
 }
 
 function triggerOrder(a, b) {
@@ -198,12 +251,12 @@ function formatIndicator(i) {
 }
 
 function moveCell(m) {
-  if (m.label) return h('span.move', { text: m.label });
+  if (m.label) return h('span.move', { class: /−/.test(m.label) ? 'loss' : /\+/.test(m.label) ? 'gain' : '', text: m.label });
   if (m.unavailable) return h('span.muted', { text: 'DATA UNAVAILABLE' });
   const pctv = m.mtdPct ?? m.changePct;
   return h('div', {},
-    h('span', { class: `move ${pctv > 0 ? 'up' : pctv < 0 ? 'down' : ''}`, text: pctv == null ? '—' : percent(pctv, { locale: L, decimals: 1 }) }),
-    h('span.lvl', { text: `${m.value != null ? num(m.value, m.value > 1000 ? 0 : 2) : '—'}${m.unit && !['index', 'price'].includes(m.unit) ? ` ${m.unit}` : ''}${m.asOf ? ` · ${m.asOf}` : ''}` }));
+    h('span.move', { class: toneClass(pctv), text: pctv == null ? '—' : percent(pctv, { locale: L, decimals: 1 }) }),
+    h('span.sub', { text: `${m.value != null ? num(m.value, m.value > 1000 ? 0 : 2) : '—'}${m.unit && !['index', 'price'].includes(m.unit) ? ` ${m.unit}` : ''}${m.asOf ? ` · ${m.asOf}` : ''}` }));
 }
 
 // ═══ signals dashboard ═════════════════════════════════════════════════════

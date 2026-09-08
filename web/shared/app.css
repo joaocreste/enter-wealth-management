@@ -280,7 +280,7 @@ label{font-size:12.5px;color:var(--ink-600);display:block;margin-bottom:6px}
 .section:last-child{margin-bottom:0}
 .section-h{display:flex;align-items:baseline;justify-content:space-between;gap:16px;border-bottom:1px solid var(--ink-950);padding-bottom:10px;margin-bottom:20px}
 .section-h h2{font-size:var(--t-heading);font-weight:600;letter-spacing:-0.02em;display:flex;align-items:baseline;gap:14px;min-width:0}
-.section-h h2::before,.board-h h2::before{
+.section-h h2::before{
   counter-increment:sec;content:counter(sec,decimal-leading-zero);
   font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.04em;color:var(--ink-400);flex:none;
 }
@@ -335,30 +335,28 @@ table.d td .split{flex-wrap:nowrap}
 .chip.rejected{color:var(--loss-text);border-color:var(--r-200);background:transparent}
 .chip.proposed{color:var(--ink-500);background:transparent}
 
-/* ─── the What Matters board (§34) ───────────────────────────────────── */
-.board{background:var(--board);color:#E4E7E8;border:1px solid var(--board);padding:28px 28px 12px}
-@media (max-width:700px){.board{padding:20px 16px 8px}}
-.board .board-h{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
-  border-bottom:1px solid rgba(255,255,255,.24);padding-bottom:12px;margin-bottom:6px}
-.board .board-h h2{font-size:18px;color:#fff;letter-spacing:-0.02em;display:flex;align-items:baseline;gap:14px}
-.board .board-h h2::before{color:rgba(255,255,255,.45)}
-.board .board-h .meta{font-size:12px;color:rgba(255,255,255,.55);text-align:right}
-.board table{border-collapse:collapse;width:100%;font-size:12.5px}
-.board th{text-align:left;font-size:11px;font-weight:500;color:rgba(255,255,255,.5);
-  border-bottom:1px solid rgba(255,255,255,.2);padding:12px 16px 10px 0;white-space:nowrap;vertical-align:bottom}
-.board td{padding:16px 16px 16px 0;border-bottom:1px solid var(--board-line);vertical-align:top;color:rgba(255,255,255,.8);line-height:1.45}
-.board td:first-child,.board th:first-child{padding-left:0}
-.board tbody tr:last-child td{border-bottom:0}
-.board .ev{color:#fff;font-weight:600;font-size:13.5px;display:block;margin-bottom:4px;letter-spacing:-0.01em;line-height:1.35}
-.board .move{font-family:var(--mono);font-size:13px;font-weight:500;white-space:nowrap}
-.board .move.up{color:var(--g-300)} .board .move.down{color:var(--r-300)}
-.board .lvl{font-family:var(--mono);font-size:10.5px;color:rgba(255,255,255,.45);display:block;margin-top:4px}
-.board .action{color:var(--a-300)}
-.board .exposure{font-family:var(--mono);font-size:13px;color:#fff}
-.board .src{font-family:var(--mono);font-size:10.5px;color:rgba(255,255,255,.4)}
-.board .imp{display:inline-block;width:3px;height:12px;margin-right:10px;vertical-align:-1px}
-.board .imp.high{background:var(--a-300)} .board .imp.medium{background:rgba(255,255,255,.45)} .board .imp.low{background:rgba(255,255,255,.18)}
-.board .clients{color:rgba(255,255,255,.6);font-size:11.5px;display:block;margin-top:4px}
+/* ─── what matters (§34) ─────────────────────────────────────────────── */
+.move{font-family:var(--mono);font-size:13px;font-weight:500;white-space:nowrap;display:block}
+.pills{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+table.d.matters td{vertical-align:top}
+table.d.matters .why{color:var(--ink-700)}
+table.d.matters .talk{color:var(--ink-900)}
+
+/* ─── correlation matrix ─────────────────────────────────────────────── */
+.corr{border-collapse:separate;border-spacing:2px;table-layout:fixed;width:100%;min-width:780px;font-size:11.5px}
+.corr th{font-weight:500;color:var(--ink-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color var(--dur) var(--ease)}
+.corr thead th{text-align:center;padding:0 2px 6px;vertical-align:bottom}
+.corr thead th:first-child{width:112px}
+.corr tbody th{text-align:right;padding:0 10px 0 0;width:118px}
+.corr td{text-align:center;padding:0;height:34px;line-height:34px;font-weight:500;color:var(--ink-950);cursor:default;
+  outline:1px solid transparent;outline-offset:-1px;transition:outline-color var(--dur) var(--ease)}
+.corr td.self{background:var(--paper-3);color:var(--ink-400);font-weight:400}
+.corr td.na{color:var(--ink-300);outline-color:var(--rule-2)}
+.corr tbody tr:hover td,.corr td.col-on{outline-color:var(--ink-950)}
+.corr tbody tr:hover th,.corr thead th.col-on{color:var(--ink-950)}
+.corr-legend{display:flex;align-items:center;flex-wrap:wrap;gap:3px;margin-top:16px;font-size:11.5px;color:var(--ink-500)}
+.corr-legend span{width:24px;height:12px;display:inline-block;flex:none;outline:1px solid var(--rule);outline-offset:-1px}
+.corr-legend i{font-style:normal;padding:0 8px}
 
 /* ─── indicator strip ────────────────────────────────────────────────── */
 .strip-group{margin-bottom:20px}

@@ -16,6 +16,7 @@ import { money, percent, pp, previousMonth, monthBounds, MINUS } from '../src/co
 import { TrueTypeFont } from '../src/render/pdf/ttf.js';
 import { brandFonts } from '../src/render/fonts/index.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
+import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
 
 let pass = 0; let fail = 0;
 const t = (name, fn) => {
@@ -215,6 +216,25 @@ t('allocation drift is bilingual and directional', () => {
   close(d[0].drift, 0.10, 1e-9);
   ok(d[0].action.includes('trimming'));
   ok(d[0].action_pt.includes('reduzir'));
+});
+
+console.log('\n  Correlation');
+t('a series against itself is +1, against its mirror is −1', () => {
+  const pts = [100, 101, 99, 103, 104, 102, 105, 108, 107, 110].map((c, i) => ({ date: `2026-08-${String(i + 1).padStart(2, '0')}`, close: c }));
+  const mirror = pts.map((p) => ({ date: p.date, close: 10000 / p.close }));
+  const { matrix } = correlationMatrix([{ key: 'a', returns: logReturns(pts) }, { key: 'b', returns: logReturns(mirror) }], { minObservations: 5 });
+  close(matrix[0][0], 1, 1e-12, 'diagonal'); close(matrix[0][1], -1, 1e-9, 'mirror'); eq(matrix[0][1], matrix[1][0], 'symmetry');
+});
+t('a pair is measured only over the dates both series observed', () => {
+  const a = new Map([['d1', 0.01], ['d2', -0.02], ['d3', 0.015], ['d4', 0.004], ['d5', -0.01]]);
+  const b = new Map([['d1', 0.02], ['d3', 0.01], ['d4', 0.003], ['d5', -0.02], ['d6', 0.05]]);
+  const { observations } = correlationMatrix([{ key: 'a', returns: a }, { key: 'b', returns: b }], { minObservations: 3 });
+  eq(observations[0][1], 4, 'common dates'); eq(observations[0][0], 5, 'own dates');
+});
+t('too few common observations is unavailable, never zero', () => {
+  const a = new Map([['d1', 0.01], ['d2', -0.02]]); const b = new Map([['d1', 0.02], ['d2', 0.01]]);
+  const { matrix } = correlationMatrix([{ key: 'a', returns: a }, { key: 'b', returns: b }]);
+  eq(matrix[0][1], null); eq(pearson([1, 1, 1], [1, 2, 3]), null, 'constant series');
 });
 
 console.log('\n  Canonical report validation');

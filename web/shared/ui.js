@@ -515,6 +515,72 @@ export function lineChart(series, { title = null, caption = null, width = 560, h
   return h('figure', {}, title && h('figcaption.chart-title', { text: title }), svg, tip, caption && h('figcaption.chart-caption', { text: caption }));
 }
 
+// ── correlation matrix ────────────────────────────────────────────────────
+// A diverging ramp on the palette: benchmark blue for pairs that move together,
+// drawdown red for pairs that move apart, paper at zero. Never green — green
+// means a gain, and a correlation is a comparison (§7.5, §10.4). The value is
+// printed in every cell; colour is redundant reinforcement (§7.10).
+const hexRgb = (hex) => { const v = hex.replace('#', ''); return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16)); };
+function corrColor(r) {
+  const dark = theme.effective === 'dark';
+  const pos = dark ? ['--paper-2', '--b-900', '--b-800', '--b-600', '--b-400'] : ['--paper-2', '--b-100', '--b-200', '--b-400', '--b-700'];
+  const neg = dark ? ['--paper-2', '--r-900', '--r-800', '--r-600', '--r-400'] : ['--paper-2', '--r-100', '--r-200', '--r-400', '--r-700'];
+  const ramp = (r >= 0 ? pos : neg).map((v) => hexRgb(cssVar(v) || '#ffffff'));
+  const t = Math.min(1, Math.abs(r)) * (ramp.length - 1);
+  const i = Math.floor(t); const f = t - i;
+  const a = ramp[i]; const b = ramp[Math.min(ramp.length - 1, i + 1)];
+  const mix = a.map((c, k) => Math.round(c + (b[k] - c) * f));
+  return { bg: `rgb(${mix.join(',')})`, fg: Math.abs(r) >= 0.55 ? '#FFFFFF' : cssVar('--ink-950') };
+}
+
+/**
+ * `data` is the /api/advisor/correlations payload. `short` names a column.
+ * Repaints itself on a theme change while it is on the page.
+ */
+export function correlationMatrix(data, { locale = 'pt-BR', short = (x) => x.label } = {}) {
+  const inds = data.indicators || [];
+  if (inds.length < 2) return h('div.empty', { text: 'Séries insuficientes para uma matriz de correlação.' });
+  const fmt = (r) => (r == null ? '—' : num(r, { locale, decimals: 2, signed: true }));
+  const cells = [];
+  const table = h('table.corr', {},
+    h('thead', {}, h('tr', {}, h('th'), inds.map((ind, j) => h('th', { text: short(ind), title: ind.label, dataset: { col: j } })))),
+    h('tbody', {}, inds.map((ri, i) => h('tr', {},
+      h('th', { text: short(ri), title: ri.label }),
+      inds.map((ci, j) => {
+        const r = data.matrix[i][j];
+        if (i === j) return h('td.self', { text: fmt(1), dataset: { col: j } });
+        const td = h('td', {
+          class: r == null ? 'na' : '', dataset: { col: j }, text: fmt(r),
+          title: `${ri.label} × ${ci.label}: ${fmt(r)} · ${data.observations?.[i]?.[j] ?? '—'} observações`,
+        });
+        if (r != null) cells.push([td, r]);
+        return td;
+      })))));
+  const paint = () => { for (const [td, r] of cells) { const c = corrColor(r); td.style.background = c.bg; td.style.color = c.fg; } };
+  paint();
+
+  // hover reads a row and a column at once
+  const clear = () => { for (const el of table.querySelectorAll('.col-on')) el.classList.remove('col-on'); };
+  table.addEventListener('mouseover', (e) => {
+    const col = e.target.closest('td,th')?.dataset.col;
+    clear();
+    if (col != null) for (const el of table.querySelectorAll(`[data-col="${col}"]`)) el.classList.add('col-on');
+  });
+  table.addEventListener('mouseleave', clear);
+
+  const steps = [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1];
+  const legend = h('div.corr-legend', {}, h('i', { text: '−1 movem em direções opostas' }),
+    steps.map((v) => h('span', { title: fmt(v) })), h('i', { text: 'movem juntos +1' }));
+  const swatches = [...legend.querySelectorAll('span')];
+  const paintLegend = () => swatches.forEach((el, k) => { el.style.background = corrColor(steps[k]).bg; });
+  paintLegend();
+
+  const fig = h('figure', {}, h('div.tw', {}, table), legend);
+  const onTheme = () => { if (!fig.isConnected) { window.removeEventListener('themechange', onTheme); return; } paint(); paintLegend(); };
+  window.addEventListener('themechange', onTheme);
+  return fig;
+}
+
 // ── source provenance (§29) ───────────────────────────────────────────────
 export function sourceLine(s) {
   const bits = [s.provider];

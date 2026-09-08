@@ -35,10 +35,11 @@ deployed Worker rather than your local one.
 | Client | `albert.dasilva@exemplo.com.br` / `albert2026` |
 
 `docs/screens/` holds a captured run if you would rather look before installing:
-the World Overview, the client book, the signal dashboard, performance attribution,
-the recommendation and suitability screen, meeting preparation, both client views,
-the generated **[two-page PDF](docs/screens/carta-mensal-albert-agosto-2026.pdf)** and
-the **[HTML email](docs/screens/email-albert-agosto-2026.html)**.
+the login, the World Overview, the client book, the signal dashboard, performance
+attribution, the recommendation and suitability screen, meeting preparation, both
+client views, the generated
+**[two-page PDF](docs/screens/carta-mensal-albert-agosto-2026.pdf)** and the
+**[HTML email](docs/screens/email-albert-agosto-2026.html)**.
 
 To run the workflow through Rivet itself rather than the demo script:
 
@@ -201,6 +202,17 @@ August 2026 is published, priced from live providers.
 `web/shared/config.js` resolves which API to call from the hostname at runtime, so
 the same committed files work under `wrangler dev` (same origin) and on Pages
 (cross origin). Nothing is injected at build time.
+
+### The portal's design
+
+`web/shared/app.css` is the brand book applied to a screen: an ink rail, a paper
+page with a 2px masthead rule, Archivo for everything that is a number or a control,
+Newsreader for everything a person wrote, and chroma reserved for data — green and
+red appear only on a figure, never on chrome. Sections are numbered like a ledger,
+charts colour themselves from CSS tokens so the light/dark toggle in the rail
+repaints them without a re-render, and the one animated moment per surface is the
+return arrow drawing itself on the login page (and as the loading indicator).
+`prefers-reduced-motion` shows the final state immediately.
 
 ```bash
 npx wrangler login            # as the account that should own the resources

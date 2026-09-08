@@ -6,7 +6,8 @@
  * else hangs off a client.
  */
 import {
-  h, mount, frag, api, auth, logo, stat, table, router, setActive,
+  h, mount, frag, api, auth, stat, table, router, setActive,
+  pageHead, railBrand, navItem, railFoot, icon, greeting, dateWithWeekday,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
@@ -29,32 +30,35 @@ const CLASS_PT = {
 };
 const cls = (k) => CLASS_PT[k] || k || '';
 
+/** Indicator groups come from the data model in English. */
+const GROUP_PT = {
+  equities: 'Ações', 'rates & credit': 'Juros e crédito', 'rates and credit': 'Juros e crédito',
+  'fx & commodities': 'Câmbio e commodities', 'fx and commodities': 'Câmbio e commodities',
+  'digital assets': 'Ativos digitais', crypto: 'Ativos digitais', other: 'Outros', outros: 'Outros',
+};
+const groupPt = (g) => GROUP_PT[String(g || '').toLowerCase()] || g || 'Outros';
+
 // ═══ chrome ════════════════════════════════════════════════════════════════
 function renderRail() {
   const alerts = CLIENTS.reduce((a, c) => a + (c.alerts?.length || 0), 0);
+  const logout = async () => { await api('/api/auth/logout', {}); auth.clear(); location.href = loginUrl(); };
   mount(rail,
-    h('a', { href: '#/' }, logo({ size: 26 })),
+    railBrand('Portal do assessor'),
     h('nav.rail-nav', {},
-      h('a', { href: '#/' }, h('span', { text: 'Panorama do dia' })),
-      h('a', { href: '#/signals' }, h('span', { text: 'Sinais de mercado' })),
-      h('a', { href: '#/clients' }, h('span', { text: 'Clientes' }), h('span.count', { text: String(CLIENTS.length) })),
-      h('a', { href: '#/triggers' }, h('span', { text: 'Gatilhos' }))),
-    CLIENTS.length ? h('div', {},
-      h('div.rail-h', { text: `Carteira de clientes${alerts ? ` · ${alerts} alertas` : ''}` }),
-      h('nav.rail-nav', {}, CLIENTS.map((c) => h('a', { href: `#/client/${c.id}` },
-        h('span', { text: c.name }),
-        c.alerts?.length ? h('span.count', { text: `${c.alerts.length}` }) : null)))) : null,
-    h('div.rail-foot', {},
-      h('div', { text: ME?.user?.name || '' }),
-      h('div.mono', { style: { fontSize: '10px' }, text: ME?.user?.email || '' }),
-      h('button.btn.sm', { text: 'sair', onclick: async () => { await api('/api/auth/logout', {}); auth.clear(); location.href = loginUrl(); } })));
+      navItem({ href: '#/', icon: 'overview', label: 'Panorama do dia' }),
+      navItem({ href: '#/signals', icon: 'signals', label: 'Sinais de mercado' }),
+      navItem({ href: '#/clients', icon: 'clients', label: 'Clientes', count: CLIENTS.length }),
+      navItem({ href: '#/triggers', icon: 'triggers', label: 'Gatilhos' })),
+    CLIENTS.length ? h('div.rail-group.people', {},
+      h('div.rail-h', {}, h('span', { text: 'Carteira de clientes' }), alerts ? h('em', { text: `${alerts} alertas` }) : null),
+      h('nav.rail-nav.people', {}, CLIENTS.map((c) => navItem({ href: `#/client/${c.id}`, person: true, label: c.name, count: c.alerts?.length || null })))) : null,
+    railFoot({ name: ME?.user?.name || '', sub: ME?.user?.email || '', onLogout: logout }));
   setActive(rail, location.hash.replace(/^#/, '') || '/');
 }
 
-function head(title, sub, actions) {
-  return h('header.page-head', {},
-    h('div', {}, h('h1.page-title', { text: title }), sub && h('div.page-sub', { text: sub })),
-    actions && h('div.page-actions', {}, actions));
+const sep = () => h('span.sep', { text: '·' });
+function head(title, sub, actions, kicker) {
+  return pageHead({ title, sub, actions, kicker });
 }
 
 // ═══ world overview ════════════════════════════════════════════════════════
@@ -75,11 +79,20 @@ async function viewOverview() {
 
   const indicatorGroups = {};
   for (const i of o.indicators) (indicatorGroups[i.group || 'Outros'] ||= []).push(i);
+  const breached = o.triggers.filter((t) => t.status === 'BREACHED').length;
 
   return frag(
-    head(`Bom dia, ${(ME?.user?.name || '').split(' ')[0]}`, `${dateLong(o.date, L)} · ${o.clients_count} clientes sob sua responsabilidade`, [
-      h('button.btn', { text: 'atualizar dados de mercado', onclick: async (e) => { e.target.disabled = true; e.target.textContent = 'atualizando…'; await api('/api/advisor/overview?refresh=1'); location.reload(); } }),
-    ]),
+    head(`${greeting()}, ${(ME?.user?.name || '').split(' ')[0]}`,
+      `${o.clients_count} clientes sob sua responsabilidade. O que aconteceu nos mercados, e quais carteiras isso toca.`,
+      [h('button.btn', { onclick: async (e) => { const b = e.currentTarget; b.disabled = true; b.lastChild.textContent = 'atualizando…'; await api('/api/advisor/overview?refresh=1'); location.reload(); } },
+        icon('refresh', { size: 15 }), h('span', { text: 'atualizar dados de mercado' }))],
+      [h('b', { text: 'Panorama do dia' }), sep(), dateWithWeekday(o.date, L)]),
+
+    h('div.grid.g4', { style: { marginBottom: '48px' } },
+      stat('Sob assessoria', money(CLIENTS.reduce((a, c) => a + (c.portfolio_value || 0), 0), { locale: L }), { sub: `${o.clients_count} carteiras` }),
+      stat('Eventos que importam hoje', String(o.what_matters.length), { sub: 'com impacto mapeado sobre as carteiras' }),
+      stat('Gatilhos acionados', String(breached), { tone: breached ? 'caution' : '', sub: `de ${o.triggers.length} limiares monitorados` }),
+      stat('Desvios de alocação', String(o.drift_alerts.length), { tone: o.drift_alerts.length ? 'caution' : '', sub: 'contra a política aprovada' })),
 
     // ── the briefing ────────────────────────────────────────────────────
     h('section.section', {},
@@ -87,7 +100,7 @@ async function viewOverview() {
         h('span.meta', {}, generatedByModel ? `gerado por ${wv.briefing.model}` : 'gerado sem modelo de linguagem — texto determinístico', ' · ',
           h('span', { class: wv?.approval_status === 'approved' ? 'gain' : 'caution', text: wv?.approval_status === 'approved' ? 'aprovado' : 'rascunho' }))),
       h('div.card', {},
-        wv?.generated_summary ? h('p', { class: 'serif', style: { fontSize: '16px', marginBottom: '14px' }, text: wv.generated_summary }) : null,
+        wv?.generated_summary ? h('p.pull', { style: { marginBottom: '24px' }, text: wv.generated_summary }) : null,
         h('div.grid.g2', {}, briefingBlocks.map(([k, v]) => h('div', {},
           h('div.rail-h', { text: k }),
           h('p.note', { text: v })))),
@@ -99,8 +112,8 @@ async function viewOverview() {
     // ── indicators ──────────────────────────────────────────────────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Indicadores monitorados' }), h('span.meta', { text: 'variação no mês corrente' })),
-      Object.entries(indicatorGroups).map(([group, items]) => h('div', { style: { marginBottom: '14px' } },
-        h('div.rail-h', { text: group }),
+      Object.entries(indicatorGroups).map(([group, items]) => h('div.strip-group', {},
+        h('div.kicker', { text: groupPt(group) }),
         h('div.strip', {}, items.map((i) => i.unavailable
           ? h('div.cell.na', {}, h('span.k', { text: i.label }), h('span.v', { text: 'DATA UNAVAILABLE' }), h('span.c.muted', { text: i.reason?.slice(0, 40) || '' }))
           : h('div.cell', { title: i.source ? sourceLine(i.source) : '' },
@@ -198,7 +211,8 @@ async function viewSignals() {
   const headers = ['Ativo', 'Técnico (TradingView)', 'Consenso de analistas', { label: 'Preço-alvo', num: true }, { label: 'Potencial', num: true }, ''];
 
   return frag(
-    head('Sinais de mercado', `TradingView · capturado em ${d.captured_at ? d.captured_at.slice(0, 16).replace('T', ' ') : '—'} UTC · ${rows.length} instrumentos`),
+    head('Sinais de mercado', `Leitura técnica e consenso de analistas, capturados de forma independente para ${rows.length} instrumentos.`, null,
+      [h('b', { text: 'Mercado' }), sep(), `TradingView · capturado em ${d.captured_at ? d.captured_at.slice(0, 16).replace('T', ' ') : '—'} UTC`]),
     h('div.grid.g4', { style: { marginBottom: '24px' } },
       stat('Instrumentos cobertos', String(rows.length)),
       stat('Com sinal técnico', String(rows.filter((r) => r.technical.signal).length)),
@@ -224,7 +238,8 @@ async function viewSignals() {
 async function viewTriggers() {
   const d = await api('/api/advisor/triggers');
   return frag(
-    head('Gatilhos', 'Limiares configuráveis. Alterar um limite é uma mudança de dado, não de código.'),
+    head('Gatilhos', 'Limiares configuráveis. Alterar um limite é uma mudança de dado, não de código.', null,
+      [h('b', { text: 'Configuração' }), sep(), `${d.triggers.length} limiares`]),
     table(['Gatilho', 'Indicador', 'Condição', { label: 'Limite', num: true }, 'Classes afetadas', 'Ação sugerida'],
       d.triggers.map((t) => h('tr', {},
         h('td', {}, h('span.name', { text: t.label })),
@@ -242,7 +257,8 @@ async function viewClients() {
   const d = await api('/api/advisor/clients');
   const total = d.clients.reduce((a, c) => a + c.portfolio_value, 0);
   return frag(
-    head('Clientes', `${d.clients.length} carteiras · ${money(total, { locale: L })} sob assessoria · referência ${monthLabel(d.month, L)}`),
+    head('Clientes', `${d.clients.length} carteiras · ${money(total, { locale: L })} sob assessoria`, null,
+      [h('b', { text: 'Carteira de clientes' }), sep(), `referência ${monthLabel(d.month, L)}`]),
     table(
       ['Cliente', 'Perfil', { label: 'Patrimônio', num: true }, { label: 'Último mês', num: true }, { label: 'Referência', num: true }, 'Última reunião', 'Próxima revisão', 'Carta', 'Alertas'],
       d.clients.map((c) => h('tr.clickable', { onclick: () => { location.hash = `#/client/${c.id}`; } },
@@ -294,10 +310,10 @@ async function viewClient({ id, tab = 'overview' }) {
 
   const body = await renderClientTab(tab, id, d);
   return frag(
-    head(c.name, `${c.risk_profile} · ${money(d.total_value, { locale: L })} · política v${d.policy?.version} de ${dateLong(d.policy?.effective_date, L)}`, [
-      h('a.btn', { href: `#/client/${id}/prep`, text: 'preparar reunião' }),
-      h('a.btn.primary', { href: `#/client/${id}/editor`, text: 'editar carteira' }),
-    ]),
+    head(c.name, `${money(d.total_value, { locale: L })} sob assessoria · política v${d.policy?.version} de ${dateLong(d.policy?.effective_date, L)}${c.next_review_at ? ` · próxima revisão ${shortDate(c.next_review_at)}` : ''}`, [
+      h('a.btn', { href: `#/client/${id}/prep` }, icon('prep', { size: 15 }), h('span', { text: 'preparar reunião' })),
+      h('a.btn.primary', { href: `#/client/${id}/editor` }, icon('edit', { size: 15 }), h('span', { text: 'editar carteira' })),
+    ], [h('b', { text: 'Cliente' }), sep(), `perfil ${c.risk_profile}`, c.segment ? sep() : null, c.segment || null]),
     tabsEl,
     body);
 }
@@ -500,8 +516,8 @@ async function tabRecommendations(id) {
           h('td', {}, h('span', { class: `chip ${String(r.final_action).toLowerCase()}`, text: actionLabel(r.final_action) }),
             r.final_action !== r.proposed_action ? h('span.sub.caution', { text: `motor sugeriu ${actionLabel(r.proposed_action)}` }) : null),
           h('td', { style: { maxWidth: '300px' } },
-            h('div.sig-pair', {}, h('b', { text: 'MERCADO' }), h('span', { text: st.market_signal || '—' })),
-            h('div.sig-pair', { style: { marginTop: '4px' } }, h('b', { text: 'ENQUADRAMENTO' }),
+            h('div.sig-pair', {}, h('b', { text: 'Mercado' }), h('span', { text: st.market_signal || '—' })),
+            h('div.sig-pair', { style: { marginTop: '6px' } }, h('b', { text: 'Enquadramento' }),
               h('span', { class: r.suitability_result === 'PASS' ? '' : 'caution', text: st.client_suitability || r.suitability_result }))),
           h('td.num', { text: r.conviction == null ? '—' : num(r.conviction, 2) }),
           h('td', {}, h('span', { class: `chip ${r.advisor_status}`, text: statusLabel(r.advisor_status) })),
@@ -678,16 +694,21 @@ async function tabAudit(id) {
 
 // ═══ meeting preparation ═══════════════════════════════════════════════════
 async function viewMeetingPrep({ id }) {
-  const p = await api(`/api/clients/${id}/meeting-prep`);
+  const [p, held] = await Promise.all([api(`/api/clients/${id}/meeting-prep`), api(`/api/clients/${id}/holdings`)]);
   const series = cumulativeSeries(p.returns_history);
+  // Recommendations carry only the asset id; the holdings give the instrument
+  // its name. A candidate outside the book falls back to its code.
+  const byAsset = new Map((held.holdings || []).map((x) => [x.asset_id, x]));
+  const instrument = (r) => byAsset.get(r.asset_id) || { ticker: String(r.asset_id || '').replace(/^ast_/, '').toUpperCase(), name: null };
   const bySeverity = { high: [], medium: [], low: [] };
   for (const o of p.discussion_opportunities) (bySeverity[o.severity] ||= []).push(o);
 
   return frag(
-    head(`Preparação de reunião — ${p.client.name}`,
-      `${p.next_meeting ? `próxima reunião ${dateLong(p.next_meeting.date, L)}` : 'sem reunião marcada'} · referência ${monthLabel(p.month, L)}`,
-      [h('a.btn', { href: `#/client/${id}/overview`, text: 'voltar ao cliente' }),
-        h('a.btn.primary', { href: `#/client/${id}/editor`, text: 'editar carteira' })]),
+    head('Preparação de reunião',
+      `${p.next_meeting ? `Próxima reunião ${dateLong(p.next_meeting.date, L)}` : 'Sem reunião marcada'} · referência ${monthLabel(p.month, L)}`,
+      [h('a.btn', { href: `#/client/${id}/overview` }, icon('back', { size: 15 }), h('span', { text: 'voltar ao cliente' })),
+        h('a.btn.primary', { href: `#/client/${id}/editor` }, icon('edit', { size: 15 }), h('span', { text: 'editar carteira' }))],
+      [h('b', { text: p.client.name }), sep(), 'Reunião']),
 
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Pontos de discussão levantados automaticamente' }),
@@ -696,7 +717,7 @@ async function viewMeetingPrep({ id }) {
         ['high', 'medium', 'low'].flatMap((sev) => (bySeverity[sev] || []).map((o) => h('div.trg', {},
           h('span', { class: `dot ${sev === 'high' ? 'BREACHED' : 'APPROACHING'}` }),
           h('div', {}, h('div.lab', { style: { fontWeight: 400 }, text: o.message }),
-            h('div.det', { text: `${o.kind}${o.asset_class ? ` · ${o.asset_class}` : ''}` })),
+            h('div.det', { text: `${o.kind}${o.asset_class ? ` · ${cls(o.asset_class)}` : ''}` })),
           h('span.obs', { class: sev === 'high' ? 'caution' : 'muted', text: sev })))))
         : h('div.empty', { text: 'Nada fora do enquadramento. A conversa pode ser sobre objetivos, não sobre correções.' })),
 
@@ -715,7 +736,7 @@ async function viewMeetingPrep({ id }) {
         h('a.btn.sm', { href: `#/client/${id}/recommendations`, text: 'abrir a tela de decisão' })),
       table(['Ativo', 'Sugestão', 'Enquadramento', 'Status'],
         p.recommendations.map((r) => h('tr', { class: r.signal_conflict ? 'conflict-row' : '' },
-          h('td.name', { text: r.asset_id }),
+          h('td', {}, h('span.name', { text: instrument(r).ticker || instrument(r).name }), instrument(r).ticker && instrument(r).name ? h('span.sub', { text: instrument(r).name }) : null),
           h('td', {}, h('span', { class: `chip ${String(r.final_action).toLowerCase()}`, text: actionLabel(r.final_action) })),
           h('td', { class: r.suitability_result === 'PASS' ? '' : 'caution', text: suitabilityLabel(r.suitability_result) }),
           h('td', {}, h('span', { class: `chip ${r.advisor_status}`, text: statusLabel(r.advisor_status) })))))) : null,
@@ -744,11 +765,12 @@ async function viewEditor({ id }) {
     const before = classTotals('market_value');
     const after = classTotals('proposed_value');
     const beforeTotal = holdings.total_value || 1;
+    const diff = Math.round((t - beforeTotal) * 100) / 100;
 
     mount(summary,
       stat('Valor atual', money(beforeTotal, { locale: L }), { small: true }),
-      stat('Valor proposto', money(t, { locale: L }), { small: true, tone: toneClass(t - beforeTotal) }),
-      stat('Diferença', money(t - beforeTotal, { locale: L, signed: true }), { small: true, tone: toneClass(t - beforeTotal) }),
+      stat('Valor proposto', money(t, { locale: L }), { small: true, tone: toneClass(diff) }),
+      stat('Diferença', money(diff, { locale: L, signed: true }), { small: true, tone: toneClass(diff) }),
       stat('Classes fora da faixa', String([...after.keys()].filter((k) => {
         const r = d.policy?.permitted_ranges?.[k];
         if (!r) return false;
@@ -805,10 +827,10 @@ async function viewEditor({ id }) {
 
   refresh();
   mount(out,
-    head(`Editor de carteira — ${d.client.name}`, 'Salvar cria um novo snapshot versionado. O anterior é marcado como substituído e permanece consultável.', [
+    head('Editor de carteira', 'Salvar cria um novo snapshot versionado. O anterior é marcado como substituído e permanece consultável.', [
       h('a.btn', { href: `#/client/${id}/portfolio`, text: 'cancelar' }),
-      h('button.btn.primary', { text: 'aprovar e criar snapshot', onclick: save }),
-    ]),
+      h('button.btn.primary', { onclick: save }, icon('check', { size: 15 }), h('span', { text: 'aprovar e criar snapshot' })),
+    ], [h('b', { text: d.client.name }), sep(), 'Nova versão da carteira']),
     summary,
     h('div.grid.g2', {},
       h('div.card', {}, h('div.card-h', {}, h('h3', { text: 'Posições' })),
@@ -830,9 +852,9 @@ async function viewReport({ id, reportId }) {
   const links = d.report.links || {};
   const views = {
     letter: () => renderCanonicalSummary(c),
-    email: () => h('iframe', { src: apiUrl(links.html || `/api/reports/${reportId}/html`), style: { width: '100%', height: '1400px', border: '1px solid var(--rule)', background: '#fff' } }),
-    pdf: () => h('iframe', { src: apiUrl(links.pdf || `/api/reports/${reportId}/pdf`), style: { width: '100%', height: '1100px', border: '1px solid var(--rule)' } }),
-    json: () => h('pre', { style: { fontSize: '11px', overflow: 'auto', maxHeight: '900px', background: 'var(--paper-3)', padding: '14px', border: '1px solid var(--rule)' }, text: JSON.stringify(c, null, 2) }),
+    email: () => h('iframe.doc', { src: apiUrl(links.html || `/api/reports/${reportId}/html`), title: 'E-mail', style: { height: '1400px' } }),
+    pdf: () => h('iframe.doc', { src: apiUrl(links.pdf || `/api/reports/${reportId}/pdf`), title: 'PDF', style: { height: '1100px' } }),
+    json: () => h('pre.json', { text: JSON.stringify(c, null, 2) }),
   };
   const labels = { letter: 'carta (dados)', email: 'e-mail html', pdf: 'pdf', json: 'objeto canônico' };
   let current = 'letter';
@@ -849,14 +871,15 @@ async function viewReport({ id, reportId }) {
   };
 
   const el = frag(
-    head(`Carta de ${monthLabel(r.reporting_month, L)} — ${c.client?.name}`,
+    head(`Carta de ${monthLabel(r.reporting_month, L)}`,
       `${r.page_count} páginas · gerada em ${r.created_at} · execução ${r.graph_run_id || '—'} · narrativa: ${c.provenance?.narrative_mode}`,
       [
         reportChip(r.status),
-        r.status === 'pending_approval' ? h('button.btn.primary', { text: 'aprovar carta', onclick: () => approve('approve') }) : null,
-        r.status === 'approved' ? h('button.btn.primary', { text: 'publicar para o cliente', onclick: () => approve('publish') }) : null,
-        h('a.btn', { href: apiUrl(links.pdf || `/api/reports/${reportId}/pdf`), target: '_blank', text: 'abrir pdf' }),
-      ].filter(Boolean)),
+        r.status === 'pending_approval' ? h('button.btn.primary', { onclick: () => approve('approve') }, icon('check', { size: 15 }), h('span', { text: 'aprovar carta' })) : null,
+        r.status === 'approved' ? h('button.btn.primary', { onclick: () => approve('publish') }, icon('arrow', { size: 15 }), h('span', { text: 'publicar para o cliente' })) : null,
+        h('a.btn', { href: apiUrl(links.pdf || `/api/reports/${reportId}/pdf`), target: '_blank' }, icon('download', { size: 15 }), h('span', { text: 'abrir pdf' })),
+      ].filter(Boolean),
+      [h('b', { text: c.client?.name || '' }), sep(), 'Carta mensal']),
     mode, stage);
   show('letter');
   return el;

@@ -7,7 +7,8 @@
  * the PDF can never disagree.
  */
 import {
-  h, mount, frag, api, auth, logo, stat, table, router, setActive,
+  h, mount, frag, api, auth, stat, table, router, setActive,
+  pageHead, railBrand, navItem, railFoot, icon, greeting,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, lineChart, sourcesBlock,
   apiUrl, loginUrl, advisorUrl,
@@ -30,23 +31,23 @@ const CLASS_PT = {
 const cls = (k) => CLASS_PT[k] || k || '';
 
 function renderRail() {
+  const adv = SUMMARY?.advisor;
+  const logout = async () => { await api('/api/auth/logout', {}); auth.clear(); location.href = loginUrl(); };
   mount(rail,
-    h('a', { href: '#/' }, logo({ size: 24 })),
+    railBrand('Meus investimentos'),
     h('nav.rail-nav', {},
-      h('a', { href: '#/' }, h('span', { text: 'Minha carteira' })),
-      h('a', { href: '#/month' }, h('span', { text: 'Último mês' })),
-      h('a', { href: '#/matters' }, h('span', { text: 'O que importa' })),
-      h('a', { href: '#/letter' }, h('span', { text: 'Carta do assessor' })),
-      h('a', { href: '#/documents' }, h('span', { text: 'Documentos' }))),
-    h('div.rail-foot', {},
-      h('div', { text: ME?.user?.name || '' }),
-      h('div', { style: { fontSize: '10.5px' }, text: SUMMARY?.advisor ? `assessor ${SUMMARY.advisor.code}` : '' }),
-      h('button.btn.sm', { text: 'sair', onclick: async () => { await api('/api/auth/logout', {}); auth.clear(); location.href = loginUrl(); } })));
+      navItem({ href: '#/', icon: 'portfolio', label: 'Minha carteira' }),
+      navItem({ href: '#/month', icon: 'month', label: 'Último mês' }),
+      navItem({ href: '#/matters', icon: 'matters', label: 'O que importa' }),
+      navItem({ href: '#/letter', icon: 'letter', label: 'Carta do assessor' }),
+      navItem({ href: '#/documents', icon: 'documents', label: 'Documentos' })),
+    railFoot({ name: ME?.user?.name || '', sub: adv ? `assessor ${adv.name || adv.code}` : '', onLogout: logout }));
   setActive(rail, location.hash.replace(/^#/, '') || '/');
 }
 
-function head(title, sub) {
-  return h('header.page-head', {}, h('div', {}, h('h1.page-title', { text: title }), sub && h('div.page-sub', { text: sub })));
+const sep = () => h('span.sep', { text: '·' });
+function head(title, sub, actions, kicker) {
+  return pageHead({ title, sub, actions, kicker });
 }
 
 async function latestPublished() {
@@ -74,13 +75,14 @@ async function viewPortfolio() {
   const last = d.returns[d.returns.length - 1];
 
   return frag(
-    head(`Olá, ${(d.client.name || '').split(' ')[0]}`,
-      `Posição em ${dateLong(d.snapshot?.effective_date, L)} · perfil ${d.client.risk_profile} · política de investimentos versão ${d.policy?.version}`),
+    head(`${greeting()}, ${(d.client.name || '').split(' ')[0]}`,
+      `Perfil ${d.client.risk_profile} · política de investimentos versão ${d.policy?.version}${SUMMARY?.advisor?.name ? ` · seu assessor é ${SUMMARY.advisor.name}` : ''}`,
+      null, [h('b', { text: 'Minha carteira' }), sep(), `posição em ${dateLong(d.snapshot?.effective_date, L)}`]),
 
-    h('div.grid.g3', { style: { marginBottom: '24px' } },
-      stat('Patrimônio', money(d.total_value, { locale: L })),
-      stat(last ? `Rentabilidade em ${monthLabel(last.month, L)}` : 'Rentabilidade', last ? percent(last.portfolio, { locale: L }) : '—', { tone: toneClass(last?.portfolio) }),
-      stat('Carteira de referência', last?.benchmark != null ? percent(last.benchmark, { locale: L }) : '—', { tone: 'bench' })),
+    h('div.grid.g3', { style: { marginBottom: '32px' } },
+      stat('Patrimônio', money(d.total_value, { locale: L }), { hero: true }),
+      stat(last ? `Rentabilidade em ${monthLabel(last.month, L)}` : 'Rentabilidade', last ? percent(last.portfolio, { locale: L }) : '—', { hero: true, tone: toneClass(last?.portfolio) }),
+      stat('Carteira de referência', last?.benchmark != null ? percent(last.benchmark, { locale: L }) : '—', { hero: true, tone: 'bench', sub: 'a referência da sua política, no mesmo mês' })),
 
     h('div.grid.g2', {},
       h('div.card', {}, allocationBar(d.allocation.map((a) => ({ label: cls(a.asset_class), weight: a.weight })), {
@@ -136,7 +138,8 @@ async function viewMonth() {
     .sort((a, b) => b.value - a.value);
 
   return frag(
-    head(`Seu mês em ${monthLabel(c.reporting_period?.month, L)}`, `Apurado em ${dateLong(c.reporting_period?.end, L)} · moeda ${c.client?.base_currency}`),
+    head(`Seu mês em ${monthLabel(c.reporting_period?.month, L)}`, `Apurado em ${dateLong(c.reporting_period?.end, L)} · moeda ${c.client?.base_currency}`,
+      null, [h('b', { text: 'Último mês' }), sep(), `${c.reporting_period?.start} a ${c.reporting_period?.end}`]),
 
     h('div.grid.g4', { style: { marginBottom: '20px' } },
       stat('Rentabilidade', percent(perf?.monthly_return, { locale: L }), { tone: toneClass(perf?.monthly_return) }),
@@ -144,8 +147,8 @@ async function viewMonth() {
       stat('Carteira de referência', bench?.value == null ? '—' : percent(bench.value, { locale: L }), { tone: 'bench' }),
       stat('Diferença', excess == null ? '—' : pp(excess, { locale: L }), { tone: toneClass(excess) })),
 
-    h('div.card', { style: { marginBottom: '20px' } },
-      h('p.serif', { style: { fontSize: '16px' }, text: c.letter?.performance || '' })),
+    h('div.card', { style: { marginBottom: '24px' } },
+      h('p.pull', { text: c.letter?.performance || '' })),
 
     h('div.grid.g2', {},
       h('div.card', {}, barChart(classItems, {
@@ -180,10 +183,11 @@ async function viewMatters() {
   const impacts = (c.portfolio_impact || []).filter((i) => i.relevance === 'high' || i.relevance === 'medium');
 
   return frag(
-    head('O que importa para a sua carteira', `Eventos do período de ${monthLabel(c.reporting_period?.month, L)} com efeito sobre o que você tem hoje`),
-    h('div.card', { style: { marginBottom: '20px' } },
-      h('p.serif', { style: { fontSize: '16px' }, text: c.letter?.markets || '' }),
-      h('p.serif', { style: { fontSize: '16px', marginTop: '12px' }, text: c.letter?.meaning || '' })),
+    head('O que importa para a sua carteira', `Eventos do período de ${monthLabel(c.reporting_period?.month, L)} com efeito sobre o que você tem hoje`,
+      null, [h('b', { text: 'O que importa' }), sep(), monthLabel(c.reporting_period?.month, L)]),
+    h('div.card', { style: { marginBottom: '24px' } },
+      h('p.pull', { text: c.letter?.markets || '' }),
+      h('p.serif', { style: { marginTop: '16px', color: 'var(--ink-700)' }, text: c.letter?.meaning || '' })),
 
     impacts.length ? h('div.stack', {}, impacts.map((i) => h('div.card', {},
       h('div.card-h', {},
@@ -207,17 +211,22 @@ async function viewLetter() {
   const recs = c.recommendations || [];
 
   return frag(
-    head(`Carta de ${monthLabel(c.reporting_period?.month, L)}`, `De ${c.advisor?.name} · publicada em ${shortDate(r.meta.published_at)}`),
-    h('div.page-actions', { style: { marginBottom: '20px' } },
-      h('a.btn.primary', { href: apiUrl(r.links.pdf || `/api/reports/${r.meta.id}/pdf`), target: '_blank', text: 'baixar em pdf' }),
-      h('a.btn', { href: apiUrl(r.links.portal || `/api/reports/${r.meta.id}/portal`), target: '_blank', text: 'ver a carta formatada' })),
+    head(`Carta de ${monthLabel(c.reporting_period?.month, L)}`, `Escrita por ${c.advisor?.name} e publicada em ${shortDate(r.meta.published_at)}. Este é o documento exato que foi aprovado; ele não muda depois de publicado.`,
+      [h('a.btn.primary', { href: apiUrl(r.links.pdf || `/api/reports/${r.meta.id}/pdf`), target: '_blank' }, icon('download', { size: 15 }), h('span', { text: 'baixar em pdf' })),
+        h('a.btn', { href: apiUrl(r.links.portal || `/api/reports/${r.meta.id}/portal`), target: '_blank' }, icon('external', { size: 15 }), h('span', { text: 'ver a carta formatada' }))],
+      [h('b', { text: 'Carta do assessor' }), sep(), monthLabel(c.reporting_period?.month, L)]),
 
-    h('article.card', {},
-      h('p.serif', { style: { fontSize: '17px' }, text: letter.greeting || '' }),
-      ['opening', 'performance', 'markets', 'meaning'].map((k) => letter[k] && h('p.serif', { style: { fontSize: '16px' }, text: letter[k] })),
+    h('article.card.letter-card', {},
+      h('div.letter-mast', {},
+        h('span', {}, h('b', { text: 'Carta mensal' }), ` · ${monthLabel(c.reporting_period?.month, L)}`),
+        h('span', {}, 'Para ', h('b', { text: c.client?.name || '' })),
+        h('span', {}, 'De ', h('b', { text: c.advisor?.name || '' }))),
+      h('div.letter', {},
+      h('p.greeting', { text: letter.greeting || '' }),
+      ['opening', 'performance', 'markets', 'meaning'].map((k) => letter[k] && h('p', { text: letter[k] })),
       recs.length ? frag(
-        h('h3', { style: { margin: '22px 0 10px' }, text: 'O que sugiro discutirmos' }),
-        h('p.serif', { style: { fontSize: '16px' }, text: letter.recommendations_intro || '' }),
+        h('h3', { text: 'O que sugiro discutirmos' }),
+        h('p', { text: letter.recommendations_intro || '' }),
         table(['Ativo', 'Sugestão', 'Sinais de mercado', 'Enquadramento na sua política'],
           recs.map((x) => h('tr', {},
             h('td', {}, h('span.name', { text: x.ticker || x.name }), h('span.sub', { text: `${cls(x.asset_class)} · ${weight(x.current_weight, { locale: L, decimals: 1 })} da carteira` })),
@@ -228,12 +237,12 @@ async function viewLetter() {
             h('td', { class: x.suitability_result === 'PASS' ? '' : 'caution', text: suitabilityPt(x.suitability_result) })))),
         recs.some((x) => x.rationale_pt) ? h('div', { style: { marginTop: '12px' } },
           recs.filter((x) => x.rationale_pt).map((x) => h('p.note', {}, h('b', { text: `${x.ticker || x.name}: ` }), x.rationale_pt))) : null,
-        h('p.note', { style: { marginTop: '12px' }, text: 'São pontos para conversarmos na próxima reunião. Nenhuma operação é executada automaticamente.' })) : null,
-      letter.closing ? h('p.serif', { style: { fontSize: '16px', marginTop: '20px' }, text: letter.closing }) : null,
-      h('p.serif', { style: { fontSize: '16px', marginTop: '16px' }, text: letter.sign_off || '' }),
-      h('div', { style: { marginTop: '8px' } },
-        h('div', { style: { fontWeight: 600 }, text: c.advisor?.name || '' }),
-        h('div.note', { text: `Enter Asset Management${c.advisor?.code ? ` · ${c.advisor.code}` : ''}` }))),
+        h('p.note', { style: { margin: '12px 0 28px' }, text: 'São pontos para conversarmos na próxima reunião. Nenhuma operação é executada automaticamente.' })) : null,
+      letter.closing ? h('p', { text: letter.closing }) : null,
+      h('p', { text: letter.sign_off || '' }),
+      h('div.sig', {},
+        h('b', { text: c.advisor?.name || '' }),
+        h('span', { text: `Enter Asset Management${c.advisor?.code ? ` · ${c.advisor.code}` : ''}` })))),
 
     h('div.card', { style: { marginTop: '20px' } }, sourcesBlock(c.sources, 'Fontes usadas nesta carta')),
     h('div.disclosure', {}, (c.disclosures || []).map((x) => h('p', { text: x }))),
@@ -252,7 +261,8 @@ async function viewDocuments() {
   const list = await api(`/api/clients/${CLIENT_ID}/reports`);
   const published = list.reports.filter((r) => r.status === 'published');
   return frag(
-    head('Documentos', 'Suas cartas mensais. Cada uma é o documento exato que foi publicado, sem alterações posteriores.'),
+    head('Documentos', 'Suas cartas mensais. Cada uma é o documento exato que foi publicado, sem alterações posteriores.',
+      null, [h('b', { text: 'Documentos' }), sep(), `${published.length} ${published.length === 1 ? 'carta publicada' : 'cartas publicadas'}`]),
     published.length
       ? table(['Mês', 'Publicada em', { label: 'Páginas', num: true }, 'Formatos'],
         published.map((r) => h('tr', {},
@@ -260,8 +270,8 @@ async function viewDocuments() {
           h('td', { text: shortDate(r.published_at) }),
           h('td.num', { text: r.page_count ?? '—' }),
           h('td', {}, h('div.split', {},
-            h('a.btn.sm', { href: apiUrl(r.links?.pdf || `/api/reports/${r.id}/pdf`), target: '_blank', text: 'pdf' }),
-            h('a.btn.sm', { href: apiUrl(r.links?.portal || `/api/reports/${r.id}/portal`), target: '_blank', text: 'carta' }))))))
+            h('a.btn.sm', { href: apiUrl(r.links?.pdf || `/api/reports/${r.id}/pdf`), target: '_blank' }, icon('download', { size: 13 }), h('span', { text: 'pdf' })),
+            h('a.btn.sm', { href: apiUrl(r.links?.portal || `/api/reports/${r.id}/portal`), target: '_blank' }, icon('external', { size: 13 }), h('span', { text: 'carta' })))))))
       : h('div.empty', { text: 'Nenhuma carta publicada ainda.' }),
   );
 }

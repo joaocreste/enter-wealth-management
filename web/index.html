@@ -1,19 +1,21 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-app="login">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Enter Asset Management</title>
+<title>Enter Asset Management — Portal de investimentos</title>
+<meta name="theme-color" content="#0B0D0E">
+<script>try{var t=localStorage.getItem("ew_theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,300;6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared/app.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%230B0D0E' stroke-width='9'%3E%3Cpath d='M8 30 L8 8 L30 8'/%3E%3Cpath d='M92 70 L92 92 L70 92'/%3E%3Cpath d='M72 34 L72 56 L36 56'/%3E%3Cpath d='M48 44 L36 56 L48 68'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23F5F6F5'/%3E%3Cg fill='none' stroke='%230B0D0E' stroke-width='9' transform='translate(18 18) scale(.64)'%3E%3Cpath d='M8 30 L8 8 L30 8'/%3E%3Cpath d='M92 70 L92 92 L70 92'/%3E%3Cpath d='M72 34 L72 56 L36 56'/%3E%3Cpath d='M48 44 L36 56 L48 68'/%3E%3C/g%3E%3C/svg%3E">
 </head>
 <body>
 <main class="login-wrap" id="root"></main>
 <script type="module">
-import { h, mount, api, auth, logo, advisorUrl, clientUrl } from './shared/ui.js';
+import { h, mount, api, auth, logo, symbol, icon, avatar, advisorUrl, clientUrl } from './shared/ui.js';
 
 const DEMO = [
   { role: 'Assessor', name: 'Antonio Bicudo', email: 'antonio.bicudo@enteram.com.br', password: 'enter2026' },
@@ -22,16 +24,16 @@ const DEMO = [
 ];
 
 const root = document.getElementById('root');
-const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', placeholder: 'voce@enteram.com.br' });
-const password = h('input', { type: 'password', id: 'password', autocomplete: 'current-password' });
-const error = h('div.err', { style: { display: 'none', marginTop: '12px' } });
-const submit = h('button.btn.primary', { type: 'submit', text: 'entrar' });
+const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', placeholder: 'voce@enteram.com.br', required: true });
+const password = h('input', { type: 'password', id: 'password', autocomplete: 'current-password', placeholder: '••••••••', required: true });
+const error = h('div.err', { style: { display: 'none' }, role: 'alert' });
+const submit = h('button.btn.primary', { type: 'submit' }, h('span', { text: 'entrar' }), icon('arrow', { size: 15 }));
 
 async function go(e) {
   e?.preventDefault();
   error.style.display = 'none';
   submit.disabled = true;
-  submit.textContent = 'entrando…';
+  submit.firstChild.textContent = 'entrando…';
   try {
     const s = await api('/api/auth/login', { email: email.value, password: password.value });
     auth.token = s.token;
@@ -40,27 +42,41 @@ async function go(e) {
     error.textContent = 'Credenciais inválidas. Verifique o e-mail e a senha.';
     error.style.display = 'block';
     submit.disabled = false;
-    submit.textContent = 'entrar';
+    submit.firstChild.textContent = 'entrar';
   }
 }
 
-mount(root, h('section.login', {},
-  logo({ size: 30 }),
-  h('h1', { text: 'Portal de investimentos' }),
-  h('p.lede', { text: 'Acesso para assessores e clientes. As áreas são separadas: um assessor vê apenas os clientes sob sua responsabilidade, e um cliente vê apenas os próprios dados.' }),
-  h('form', { onsubmit: go },
-    h('div.field', {}, h('label', { for: 'email', text: 'E-mail' }), email),
-    h('div.field', {}, h('label', { for: 'password', text: 'Senha' }), password),
-    submit),
-  error,
-  h('div.demo', {},
-    h('div', { style: { marginBottom: '6px' }, text: 'Acessos de demonstração' }),
-    DEMO.map((d) => h('button', {
-      type: 'button',
-      text: `${d.role} · ${d.name} — ${d.email}`,
-      onclick: () => { email.value = d.email; password.value = d.password; go(); },
-    })),
-    h('p.note', { style: { marginTop: '10px' }, text: 'Em produção este login fica atrás do Cloudflare Access; o par e-mail/senha existe para que a demonstração rode sem um tenant configurado.' }))));
+// §13 — one orchestrated moment per surface: the return arrow completing its turn.
+const mark = symbol({ size: 200, className: 'mark' });
+
+mount(root,
+  h('section.login-hero', {},
+    logo({ size: 26 }),
+    h('div.hero-mark', {}, mark),
+    h('h1.hero-title', {}, 'O mês da sua carteira, ', h('em', { text: 'explicado' }), ' por quem a acompanha.'),
+    h('p.hero-sub', { text: 'Rentabilidade apurada, o que aconteceu no mercado que importa para esta carteira, e o que vale discutir na próxima reunião — todo mês, com a fonte em cada número.' }),
+    h('dl.hero-facts', {},
+      h('div', {}, h('b', { text: 'Números calculados em código' }), h('span', { text: 'o modelo escreve, nunca calcula' })),
+      h('div', {}, h('b', { text: 'Preços de provedores ao vivo' }), h('span', { text: 'Yahoo Finance · TradingView · Banco Central · CoinGecko' })),
+      h('div', {}, h('b', { text: 'Nada executa sem o assessor' }), h('span', { text: 'cada recomendação é aprovada por uma pessoa' }))),
+    h('footer.hero-foot', {}, h('span', { text: 'Enter Asset Management' }), h('span', { text: 'Portal de investimentos · v1.0' }))),
+
+  h('section.login-pane', {},
+    h('div.login', {},
+      h('h1', { text: 'Entrar' }),
+      h('p.lede', { text: 'Assessores e clientes entram pela mesma porta. Um assessor vê apenas os clientes sob sua responsabilidade; um cliente vê apenas os próprios dados.' }),
+      h('form', { onsubmit: go, novalidate: true },
+        h('div.field', {}, h('label', { for: 'email', text: 'E-mail' }), email),
+        h('div.field', {}, h('label', { for: 'password', text: 'Senha' }), password),
+        submit),
+      error,
+      h('div.demo', {},
+        h('div.kicker', { text: 'Acessos de demonstração' }),
+        h('div.demo-list', {}, DEMO.map((d) => h('button.demo-acct', {
+          type: 'button', title: `Entrar como ${d.name}`,
+          onclick: () => { email.value = d.email; password.value = d.password; go(); },
+        }, avatar(d.name), h('span', {}, h('b', { text: d.name }), h('small', { text: `${d.role} · ${d.email}` })), icon('arrow', { size: 15 })))),
+        h('p.note', { text: 'Em produção este login fica atrás do Cloudflare Access; o par e-mail/senha existe para que a demonstração rode sem um tenant configurado.' })))));
 
 if (auth.token) {
   api('/api/auth/me').then((me) => { location.href = me.user.role === 'client' ? clientUrl() : advisorUrl(); }).catch(() => auth.clear());

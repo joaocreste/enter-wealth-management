@@ -10,13 +10,15 @@ import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cloudflareEnv } from './cloudflare-auth.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = path.join(ROOT, 'web', 'shared', 'config.js');
 
-const run = (args) => execFileSync('npx', ['wrangler', ...args], { cwd: ROOT, encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] });
+const { env: CF_ENV, source: CF_SOURCE } = await cloudflareEnv();
+const run = (args) => execFileSync('npx', ['wrangler', ...args], { cwd: ROOT, env: CF_ENV, encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] });
 
-console.log('\n  Deploying the API Worker…\n');
+console.log(`\n  Deploying the API Worker (auth: ${CF_SOURCE})…\n`);
 const out = run(['deploy']);
 process.stdout.write(out);
 

@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cloudflareEnv } from './cloudflare-auth.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOML = path.join(ROOT, 'wrangler.toml');
@@ -20,11 +21,13 @@ const D1_NAME = 'enter-wealth';
 const KV_NAME = 'MARKET_CACHE';
 const R2_NAME = 'enter-wealth-reports';
 
+const { env: CF_ENV, source: CF_SOURCE } = await cloudflareEnv();
+
 const say = (s) => console.log(`  ${s}`);
 const wrangler = (args, { quiet = false } = {}) => {
   try {
     return execFileSync('npx', ['wrangler', ...args], {
-      cwd: ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', quiet ? 'pipe' : 'inherit'],
+      cwd: ROOT, env: CF_ENV, encoding: 'utf8', stdio: ['pipe', 'pipe', quiet ? 'pipe' : 'inherit'],
     });
   } catch (err) {
     return `__ERROR__${err.stdout || ''}${err.stderr || ''}`;
@@ -35,13 +38,18 @@ const wrangler = (args, { quiet = false } = {}) => {
 const who = wrangler(['whoami'], { quiet: true });
 const email = who.match(/associated with the email ([^\s.]+@[^\s.]+\.[^\s.]+)/i)?.[1];
 const account = who.match(/│\s*(\S[^│]*?)\s*│\s*([0-9a-f]{32})\s*│/);
-if (!email) {
-  console.error('\n  Not logged in. Run:  npx wrangler login\n');
+if (!account && /not authenticated|Please run/i.test(who)) {
+  console.error('\n  Not authenticated. Either:');
+  console.error('    npx wrangler login');
+  console.error('  or, if the browser flow will not complete, create an API token at');
+  console.error('    https://dash.cloudflare.com/profile/api-tokens');
+  console.error('  and save it:  echo \'TOKEN\' > .cloudflare-token\n');
   process.exit(1);
 }
 console.log('\n  Cloudflare setup');
 console.log(`  ${'─'.repeat(64)}`);
 say(`account   ${account?.[1] ?? 'unknown'} (${email})`);
+say(`auth      ${CF_SOURCE}`);
 
 // ── D1 ────────────────────────────────────────────────────────────────────
 let dbId = null;
@@ -100,7 +108,7 @@ const randomToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))
 for (const name of ['SERVICE_TOKEN', 'ASSET_SIGNING_KEY', 'SEED_TOKEN']) {
   const value = randomToken();
   try {
-    execFileSync('npx', ['wrangler', 'secret', 'put', name], { cwd: ROOT, input: value, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    execFileSync('npx', ['wrangler', 'secret', 'put', name], { cwd: ROOT, env: CF_ENV, input: value, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     say(`secret    ${name} set`);
     if (name === 'SERVICE_TOKEN') console.log(`\n            the Rivet runner needs this:  export SERVICE_TOKEN=${value}\n`);
     if (name === 'SEED_TOKEN') console.log(`            seeding the deployed database needs this:  ${value}\n`);

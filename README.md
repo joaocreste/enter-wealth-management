@@ -202,6 +202,23 @@ npm run deploy:worker         # deploys, and writes the Worker URL into the port
 git add web/shared/config.js wrangler.toml && git commit -m "point the portal at the Worker" && git push
 ```
 
+**If `wrangler login` will not complete.** The OAuth flow needs an interactive
+terminal, a free callback port and a browser already signed in to the right
+account. Two things break it in practice: a previous `wrangler login` left running
+still holds port 8976, so every later attempt fails to bind (`lsof -nP -iTCP:8976`,
+then kill it); and if the browser is signed in to a different Cloudflare account
+the consent screen authorises that one instead. An API token avoids all of it:
+
+```bash
+# dash.cloudflare.com/profile/api-tokens → Create Token → Edit Cloudflare Workers,
+# then add: D1 Edit, Workers R2 Storage Edit, Account Settings Read
+echo 'PASTE_TOKEN_HERE' > .cloudflare-token && chmod 600 .cloudflare-token
+```
+
+`.cloudflare-token` is gitignored, and `setup:cloudflare` and `deploy:worker` pick
+it up automatically — no browser, no callback port, and the account is whichever one
+minted the token.
+
 The push triggers `.github/workflows/pages.yml`, which publishes `web/`. That
 workflow refuses to publish while `config.js` still holds the `WORKERS_SUBDOMAIN`
 placeholder — a portal pointing at an API that does not exist is worse than no

@@ -19,3 +19,6 @@ enter_challenge.rivet-project
 # Cloudflare API token, when the OAuth browser flow is not usable.
 # Read by scripts/cloudflare-auth.mjs; never committed.
 .cloudflare-token
+
+# Your copy of the deployed Worker secrets.
+.secrets.local

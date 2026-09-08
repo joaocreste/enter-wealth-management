@@ -14,6 +14,7 @@
  *   §9.3  1px ink closes a table header, 1px rule separates rows,
  *         2px ink marks a document boundary; no dashed or double rules
  *   §9.4  radius 0 on anything containing data, 2px on controls, no shadows
+ *         (chips are the one exception: full pill radius, they are labels not data)
  *   §11.2 the bracket device at most once per page
  *   §13   120ms state · 200ms reveal · 320ms page · reduced motion honoured
  */
@@ -323,8 +324,8 @@ table.d td .btn{vertical-align:middle}
 table.d td .split{flex-wrap:nowrap}
 
 /* ─── chips ──────────────────────────────────────────────────────────── */
-.chip{display:inline-block;padding:3px 8px;font-size:11px;font-weight:500;line-height:1.4;white-space:nowrap;
-  border:1px solid var(--rule);border-radius:var(--radius-data);color:var(--ink-600);background:var(--paper-3)}
+.chip{display:inline-block;padding:3px 10px;font-size:11px;font-weight:500;line-height:1.4;white-space:nowrap;
+  border:1px solid var(--rule);border-radius:999px;color:var(--ink-600);background:var(--paper-3)}
 .chip.add{color:var(--gain-text);border-color:var(--g-200);background:var(--gain-fill)}
 .chip.reduce,.chip.exit{color:var(--loss-text);border-color:var(--r-200);background:var(--loss-fill)}
 .chip.discuss,.chip.warn{color:var(--caution);border-color:var(--a-200);background:var(--caution-wash)}

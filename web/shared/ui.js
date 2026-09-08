@@ -547,7 +547,7 @@ export function donut({ size = 96 } = {}) {
 export function progressCard({ title = 'Atualizando o panorama do dia', agents = DAILY_AGENTS, onDone = null } = {}) {
   const ring = donut({ size: 96 });
   const msg = h('div.pmsg', { text: 'Na fila…' });
-  const state = h('div.pstate', { text: 'Os três agentes rodam em sequência. Isto leva cerca de um minuto.' });
+  const state = h('div.pstate', { text: 'Os três agentes rodam em sequência. Com o modelo pesquisando o noticiário, isto leva de um a cinco minutos; a página pode ser fechada, a execução continua.' });
   const rows = agents.map((a) => h('li', { dataset: { step: a.step } },
     h('span.idx', {}, h('b', { text: String(a.step) }), icon('check', { size: 14 })),
     h('span', {}, h('b', { text: a.title }), h('small', { text: a.what }))));

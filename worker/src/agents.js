@@ -33,6 +33,7 @@ import { INDICATORS, MACRO_VINTAGE } from '../../seed/market.mjs';
 import { indicatorQuote } from '../../src/adapters/marketdata.js';
 import { triggerProximity } from '../../src/core/triggers.js';
 import { makeSource } from '../../src/core/sources.js';
+import { percent, num } from '../../src/core/format.js';
 
 export const AGENTS = [
   { step: 1, key: 'dados', title: 'Agente 1 · Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },
@@ -358,14 +359,30 @@ export function compactIndicator(i) {
   };
 }
 
+/** A level as the letter would print it, so the model quotes a string the code formatted. */
+function levelText(price, unit) {
+  if (price == null || !Number.isFinite(price)) return null;
+  if (['%', '% a.a.', '% a.m.'].includes(unit)) return `${num(price, { decimals: 2 })}%${unit === '% a.a.' ? ' a.a.' : unit === '% a.m.' ? ' a.m.' : ''}`;
+  if (unit === 'USD' || unit === 'USD/oz') return `US$ ${num(price, { decimals: 0 })}`;
+  if (unit === 'USD/bbl' || unit === 'USD/lb') return `US$ ${num(price, { decimals: 2 })}`;
+  if (unit === 'BRL') return `R$ ${num(price, { decimals: 4 })}`;
+  return num(price, { decimals: price >= 1000 ? 0 : 2 });
+}
+
 function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRows }) {
   return {
     date,
     indicators: indicators.map((i) => ({
-      key: i.key, label: i.label, unit: i.unit, price: i.price ?? null, changePct: i.changePct ?? null, mtdPct: i.mtdPct ?? null,
+      key: i.key, label: i.label, unit: i.unit,
+      level: levelText(i.price, i.unit),
+      day: i.changePct == null ? null : percent(i.changePct, { decimals: 1 }),
+      mtd: i.mtdPct == null ? null : percent(i.mtdPct, { decimals: 1 }),
       asOf: i.asOf ?? null, unavailable: !!i.unavailable, source_id: i.source?.id ?? null,
     })),
-    triggers: triggers.filter((t) => t.status !== 'NO_DATA').map((t) => ({ label: t.label, status: t.status, observed: t.observed, threshold: t.threshold, unit: t.unit })),
+    triggers: triggers.filter((t) => t.status !== 'NO_DATA').map((t) => ({
+      label: t.label, status: t.status, unit: t.unit,
+      observed: levelText(t.observed, t.unit === 'mtd' ? '%' : t.unit), threshold: levelText(t.threshold, t.unit === 'mtd' ? '%' : t.unit),
+    })),
     events: events.map((e) => ({
       id: e.id, kind: e.kind || (e.generated ? 'move' : 'curated'), date: e.date, title: e.title, title_pt: e.title_pt ?? null,
       category: e.category, summary: e.summary, summary_pt: e.summary_pt ?? null, importance: e.importance,

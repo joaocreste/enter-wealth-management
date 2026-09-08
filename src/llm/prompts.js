@@ -223,7 +223,7 @@ Return STRICT JSON with this exact shape and nothing else:
 
 - Rank by what matters for THESE portfolios: FACTS.book gives each client's exposure by asset class and FACTS.candidates says which clients each event touches. An event nobody is exposed to is dropped unless it is high importance for the market as a whole.
 - Keep at most 8 events, ordered by importance. Merge events that share one cause by keeping the one with the better source.
-- Quote levels and moves only from FACTS.indicators. For a news event, say only what its summary says.
+- Quote a level or a move only as the strings FACTS.indicators carry — level, day, mtd — copied verbatim, already formatted for Brazil. Never write a figure in any other form, never with more decimals, and never from memory. For a news event, say only what its summary says.
 - Every source id you cite must exist in FACTS. Never invent one.
 - A fired threshold in FACTS.triggers is always worth an event when one exists for its indicator.
 - Write everything in Brazilian Portuguese. True minus sign − for negatives. Brazilian number format 1.234,56.

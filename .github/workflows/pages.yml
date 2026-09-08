@@ -34,13 +34,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
-      - name: Install
-        run: npm ci --omit=optional
-
+      # No install step: build-web.mjs only copies two source modules into
+      # web/shared/vendor/ and imports nothing outside node: builtins. Installing
+      # the toolchain here would add a minute to every deploy for no benefit.
       - name: Refresh the shared modules the browser imports
-        run: npm run build:web
+        run: node scripts/build-web.mjs
 
       - name: Fail if a stale API placeholder would ship
         run: |

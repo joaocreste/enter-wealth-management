@@ -27,6 +27,28 @@ export function notableWindow(ind, { d5 = 0.03, d30 = 0.05 } = {}) {
 }
 
 /**
+ * Where an event belongs on the advisor's table: Brazil or the rest of the
+ * world. The newsroom feed is Brazilian by construction and the web scan is
+ * told to look only outside Brazil, so the kind decides first; a market move
+ * follows its indicator; a curated event without one follows its asset
+ * classes. An explicit `region` on the event always wins.
+ */
+export const REGIONS = ['br', 'intl'];
+export const REGION_PT = { br: 'Brasil', intl: 'Internacional' };
+const BR_INDICATORS = new Set(['ibovespa', 'selic', 'ipca', 'usdbrl']);
+export function eventRegion(e) {
+  if (!e) return 'intl';
+  if (REGIONS.includes(e.region)) return e.region;
+  if (e.kind === 'headline') return 'br';
+  if (e.kind === 'news') return 'intl';
+  if (e.indicator_key) return BR_INDICATORS.has(e.indicator_key) ? 'br' : 'intl';
+  const classes = e.asset_classes || e.exposure_summary?.asset_classes || [];
+  if (classes.includes('Equities BR') && !classes.includes('Equities Global')) return 'br';
+  if (['Equities Global', 'Commodities', 'Digital Assets'].some((k) => classes.includes(k))) return 'intl';
+  return 'br';
+}
+
+/**
  * @param {object} event      { id, date, title, category, summary, direction, magnitude, asset_classes, instruments, importance, source_id }
  * @param {object} portfolio  { exposures: {class: weight}, positions: [{ticker, asset_class, weight, currency}], base_currency }
  */
@@ -120,6 +142,7 @@ export function buildWhatMattersTable(events, indicators, clientPortfolios) {
       event: event.title,
       event_pt: event.title_pt ?? null,
       indicator_key: event.indicator_key ?? null,
+      region: eventRegion(event),
       current_move: indicator
         ? {
           value: indicator.price, unit: indicator.unit, asOf: indicator.asOf, unavailable: !!indicator.unavailable,

@@ -104,6 +104,7 @@ async function viewOverview() {
   const modelWrote = o.inference?.mode === 'model';
   const maxDrift = Math.max(0.01, ...o.drift_alerts.map((d) => Math.abs(d.drift)));
   const driftGroups = groupDrift(o.drift_alerts);
+  const byRegion = { br: o.what_matters.filter((r) => regionOf(r) === 'br'), intl: o.what_matters.filter((r) => regionOf(r) !== 'br') };
 
   return frag(
     head(`${greeting()}, ${(ME?.user?.name || '').split(' ')[0]}`,
@@ -134,24 +135,13 @@ async function viewOverview() {
             'Cada número acima vem de um provedor identificado abaixo. ', newsNote(o.news)),
           sourcesBlock(o.sources, 'Ver fontes')))),
 
-    // ── what matters ────────────────────────────────────────────────────
+    // ── what matters, Brazil first, then the rest of the world ──────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'O que importa hoje' }),
-        h('span.meta', { text: `${o.what_matters.length} eventos · impacto mapeado sobre ${o.clients_count} carteiras${modelWrote ? ' · inferido pelo modelo' : ''}` })),
-      o.what_matters.length ? h('div.card', {},
-        table(['Evento', 'Movimento', 'Por que importa', 'Exposição na sua carteira', 'Conversa sugerida'],
-          o.what_matters.map((r) => h('tr', {},
-            h('td', { style: { minWidth: '220px', maxWidth: '300px' } },
-              h('span.name', { text: r.event_pt || r.event }),
-              sourceCell(r),
-              attentionPills(r)),
-            h('td', {}, r.current_move ? moveCell(r.current_move) : h('span.muted', { text: '—' })),
-            h('td.why', { style: { minWidth: '240px', maxWidth: '360px' }, text: r.why_it_matters_pt || r.why_it_matters }),
-            h('td', { style: { minWidth: '150px' } },
-              h('span.move', { text: r.exposure_summary.max_exposure ? weight(r.exposure_summary.max_exposure, { locale: L, decimals: 1 }) : '—' }),
-              h('span.sub', { text: r.per_client.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ') + (r.per_client.length > 3 ? ` +${r.per_client.length - 3}` : '') })),
-            h('td.talk', { style: { minWidth: '240px', maxWidth: '340px' }, text: r.advisor_action_pt || r.advisor_action }))),
-          { className: 'matters' }),
+        h('span.meta', { text: `${o.what_matters.length} eventos · ${byRegion.br.length} Brasil · ${byRegion.intl.length} internacional · impacto mapeado sobre ${o.clients_count} carteiras${modelWrote ? ' · inferido pelo modelo' : ''}` })),
+      o.what_matters.length ? frag(
+        mattersRegion('Brasil', 'manchetes do Valor Econômico, indicadores e eventos do mercado local', byRegion.br, o),
+        mattersRegion('Internacional', 'imprensa internacional com fonte citada, indicadores e eventos dos mercados globais', byRegion.intl, o),
         h('p.note', { style: { marginTop: '14px' }, text: 'Cada linha é um ponto de conversa, não uma ordem. Nenhuma operação é executada a partir desta tela.' }))
         : h('div.empty', { text: 'Nenhum evento do período toca as carteiras sob sua responsabilidade.' })),
 
@@ -282,6 +272,43 @@ const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); 
  * there is one. A headline also lists the other lines the newsroom ran on
  * the same story, each with its own link.
  */
+/** The Worker tags every row; a row from before the split is classified the same way here. */
+const BR_INDICATORS = new Set(['ibovespa', 'selic', 'ipca', 'usdbrl']);
+function regionOf(r) {
+  if (r.region === 'br' || r.region === 'intl') return r.region;
+  if (r.kind === 'headline') return 'br';
+  if (r.kind === 'news') return 'intl';
+  if (r.indicator_key) return BR_INDICATORS.has(r.indicator_key) ? 'br' : 'intl';
+  const classes = r.exposure_summary?.asset_classes || [];
+  if (classes.includes('Equities BR') && !classes.includes('Equities Global')) return 'br';
+  return ['Equities Global', 'Commodities', 'Digital Assets'].some((k) => classes.includes(k)) ? 'intl' : 'br';
+}
+
+/** One region of the table: a card with its own count, or a quiet line when nothing landed there. */
+function mattersRegion(title, sub, rows, o) {
+  const affected = new Set(rows.flatMap((r) => r.per_client.map((c) => c.client_id))).size;
+  return h('div.card.matters-region', {},
+    h('div.card-h', {}, h('h3', { text: title }),
+      h('span.meta', { text: rows.length ? `${rows.length} ${rows.length === 1 ? 'evento' : 'eventos'} · ${affected} de ${o.clients_count} carteiras tocadas` : sub })),
+    rows.length ? mattersTable(rows) : h('div.empty', { text: `Nenhum evento ${title === 'Brasil' ? 'do mercado brasileiro' : 'internacional'} toca as carteiras hoje.` }));
+}
+
+function mattersTable(rows) {
+  return table(['Evento', 'Movimento', 'Por que importa', 'Exposição na sua carteira', 'Conversa sugerida'],
+    rows.map((r) => h('tr', {},
+      h('td', { style: { minWidth: '220px', maxWidth: '300px' } },
+        h('span.name', { text: r.event_pt || r.event }),
+        sourceCell(r),
+        attentionPills(r)),
+      h('td', {}, r.current_move ? moveCell(r.current_move) : h('span.muted', { text: '—' })),
+      h('td.why', { style: { minWidth: '240px', maxWidth: '360px' }, text: r.why_it_matters_pt || r.why_it_matters }),
+      h('td', { style: { minWidth: '150px' } },
+        h('span.move', { text: r.exposure_summary.max_exposure ? weight(r.exposure_summary.max_exposure, { locale: L, decimals: 1 }) : '—' }),
+        h('span.sub', { text: r.per_client.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ') + (r.per_client.length > 3 ? ` +${r.per_client.length - 3}` : '') })),
+      h('td.talk', { style: { minWidth: '240px', maxWidth: '340px' }, text: r.advisor_action_pt || r.advisor_action }))),
+    { className: 'matters' });
+}
+
 function sourceCell(r) {
   const provider = r.source_provider || (r.source_label ? r.source_label.replace(/:/, ' · ') : null) || 'fonte não registrada';
   const when = r.published_at && hhmm(r.published_at) ? `${r.date} ${hhmm(r.published_at)}` : r.date;

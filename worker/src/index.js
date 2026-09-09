@@ -20,6 +20,7 @@ import { brandFonts } from '../../src/render/fonts/index.js';
 import { validateReport } from '../../src/core/report-schema.js';
 import { previousMonth, monthBounds } from '../../src/core/format.js';
 import { INDICATORS } from '../../seed/market.mjs';
+import { eventRegion } from '../../src/core/events.js';
 import { seedDatabase } from './seed-runner.js';
 import { artefactLinks, verifyArtefactToken } from './links.js';
 import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
@@ -306,7 +307,9 @@ async function advisorOverview(env, ctx, session) {
     };
   }
   const result = json(last.result_json, {});
-  return { ...result, run: A.runView(last), active_run: active && active.status === 'running' ? active : null };
+  // A run stored before the table was split by region gets its rows classified on the way out.
+  const whatMatters = (result.what_matters || []).map((r) => ({ ...r, region: eventRegion(r) }));
+  return { ...result, what_matters: whatMatters, run: A.runView(last), active_run: active && active.status === 'running' ? active : null };
 }
 
 /**

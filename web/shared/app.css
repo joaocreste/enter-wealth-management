@@ -354,6 +354,8 @@ table.d td .split{flex-wrap:nowrap}
 table.d.matters td{vertical-align:top}
 table.d.matters .why{color:var(--ink-700)}
 table.d.matters .talk{color:var(--ink-900)}
+.matters-region+.matters-region{margin-top:16px}
+.matters-region .empty{padding:18px 0 6px}
 
 /* ─── the daily agents: progress card ────────────────────────────────── */
 .veil{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--paper) 82%,transparent);animation:page var(--dur-reveal) var(--ease) both}

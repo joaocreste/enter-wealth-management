@@ -563,11 +563,12 @@ iframe.doc{width:100%;border:1px solid var(--rule);background:#fff;display:block
 @media (prefers-reduced-motion:reduce){.hero-mark path{animation:none;stroke-dashoffset:0}}
 .hero-title{font-family:var(--serif);font-weight:300;font-size:clamp(30px,3.3vw,44px);line-height:1.12;letter-spacing:-0.012em;max-width:17ch;margin:0 0 20px;color:#fff}
 .hero-title em{font-style:italic;font-weight:300}
-.hero-sub{font-size:15px;line-height:1.55;color:rgba(255,255,255,.66);max-width:50ch;margin:0 0 40px}
-.hero-facts{display:grid;grid-template-columns:repeat(3,minmax(0,auto));gap:24px 40px;justify-content:start;border-top:1px solid rgba(255,255,255,.18);padding-top:22px;margin:0}
-.hero-facts div{min-width:0}
-.hero-facts b{display:block;font-size:13.5px;color:#fff;font-weight:500;line-height:1.35;margin-bottom:3px}
-.hero-facts span{font-size:11.5px;color:rgba(255,255,255,.5);line-height:1.4;display:block}
+.hero-sub{font-size:15px;line-height:1.55;color:rgba(255,255,255,.7);max-width:52ch;margin:0 0 36px}
+.hero-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;border-top:1px solid rgba(255,255,255,.18);padding-top:24px;margin:0}
+.hero-facts div{min-width:0;padding-left:16px;border-left:1px solid rgba(255,255,255,.16)}
+.hero-facts div::before{content:attr(data-n);display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;color:rgba(255,255,255,.4);margin-bottom:10px}
+.hero-facts dt{font-size:14px;color:#fff;font-weight:500;line-height:1.3;margin:0 0 6px}
+.hero-facts dd{font-size:12.5px;color:rgba(255,255,255,.55);line-height:1.5;margin:0;max-width:30ch}
 .hero-foot{margin-top:44px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:rgba(255,255,255,.4);letter-spacing:.02em}
 .login-pane{display:grid;place-items:center;padding:56px 32px;background:var(--paper)}
 .login{width:min(400px,100%);animation:rise var(--dur-page) var(--ease) both;animation-delay:80ms}
@@ -611,7 +612,7 @@ iframe.doc{width:100%;border:1px solid var(--rule);background:#fff;display:block
   .login-wrap{grid-template-columns:1fr}
   .login-hero{min-height:0;padding:28px 24px 28px;border-right:0;border-bottom:1px solid var(--rail-line)}
   .hero-mark{margin:28px 0 24px;width:96px}
-  .hero-facts{grid-template-columns:1fr 1fr}
+  .hero-facts{grid-template-columns:1fr;gap:18px}
   .hero-foot{margin-top:28px}
   .login-pane{padding:32px 20px 48px}
 }

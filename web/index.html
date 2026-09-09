@@ -64,11 +64,13 @@ mount(root,
     logo({ size: 26 }),
     h('div.hero-mark', {}, mark),
     h('h1.hero-title', {}, 'A inteligência evolui. Seu patrimônio acompanha e ', h('em', { text: 'cresce' }), '.'),
-    h('p.hero-sub', { text: 'Rentabilidade apurada, o que aconteceu no mercado que importa para esta carteira, e o que vale discutir na próxima reunião — todo mês, com a fonte em cada número.' }),
+    h('p.hero-sub', { text: 'Quanto rendeu, o que mudou no mercado e o que decidir a seguir. Todo mês, para você e para o seu assessor.' }),
+    // §3.3 — the three house values a reader can hold the portal to, in investor
+    // language: show the work, own the downside first, someone signs.
     h('dl.hero-facts', {},
-      h('div', {}, h('b', { text: 'Números calculados em código' }), h('span', { text: 'o modelo escreve, nunca calcula' })),
-      h('div', {}, h('b', { text: 'Preços de provedores ao vivo' }), h('span', { text: 'Yahoo Finance · TradingView · Banco Central · CoinGecko' })),
-      h('div', {}, h('b', { text: 'Nada executa sem o assessor' }), h('span', { text: 'cada recomendação é aprovada por uma pessoa' }))),
+      h('div', { 'data-n': '01' }, h('dt', { text: 'Cada número tem fonte' }), h('dd', { text: 'Período, base e origem em toda cifra: bolsa, Banco Central e extrato do custodiante.' })),
+      h('div', { 'data-n': '02' }, h('dt', { text: 'A perda vem primeiro' }), h('dd', { text: 'Quando a carteira cai, você lê isso na primeira linha. Sem eufemismo.' })),
+      h('div', { 'data-n': '03' }, h('dt', { text: 'Seu assessor assina' }), h('dd', { text: 'Nenhuma recomendação chega até você sem o nome de quem a aprovou.' }))),
     h('footer.hero-foot', {}, h('span', { text: 'Enter Asset Management' }), h('span', { text: 'Portal de investimentos · v1.0' }))),
 
   h('section.login-pane', {},

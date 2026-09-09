@@ -251,14 +251,15 @@ so a dividend restatement never makes merged history inconsistent. Every respons
 carries the source record of each series. `POST /api/advisor/indicators/series/rebuild`
 downloads every history again; the daily cron refreshes the store after it starts
 the overview runs. The correlation matrix (1, 2 or 5 years) reads the same store,
-using the adjusted closes. So does `GET /api/advisor/risk-return`: the trailing
-twelve-month total return and annualised volatility (sample standard deviation of
-daily log returns, scaled by the square root of the sessions per year the series
-itself shows — about 252 for an exchange, 365 for crypto) of every monitored
-asset, grouped into four broad classes
-for the scatter on the World Overview. Levels that are not assets — the VIX and
-the 10-year yield — are excluded with the reason, alongside the monthly and
-policy series.
+using the adjusted closes. `GET /api/advisor/assets/risk-return` plots every mapped
+asset over the last twelve completed months — compounded return against the
+annualised standard deviation of monthly returns, in reais — with the Ibovespa,
+the S&P 500 in reais and the CDI as references and the empirical efficient
+frontier over the top. Listed assets are sampled at month-ends from Yahoo's
+adjusted closes, fund quotas come from the custodian observations, contractual
+instruments accrue from the Banco Central index plus their spread; cash, matured
+lines and short series are listed as excluded with the reason. The chart sits on
+the Sinais de mercado page.
 
 ### The portal's design
 

@@ -17,7 +17,7 @@ import { TrueTypeFont } from '../src/render/pdf/ttf.js';
 import { brandFonts } from '../src/render/fonts/index.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
-import { riskReturn, riskClassOf, sessionsPerYear } from '../src/core/risk.js';
+import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, efficientFrontier } from '../src/core/risk.js';
 import { parseRss, clusterHeadlines, sourceFor, PROVIDER as VALOR } from '../src/adapters/valor.js';
 import { buildWhatMattersTable, notableWindow } from '../src/core/events.js';
 
@@ -313,39 +313,37 @@ t('too few common observations is unavailable, never zero', () => {
 });
 
 console.log('\n  Return and volatility');
-t('total return is last over first; a series with no daily variation has zero volatility', () => {
-  const pts = Array.from({ length: 30 }, (_, i) => ({ date: `d${i}`, close: 100 + i }));
-  const m = riskReturn(pts);
-  close(m.total_return, 129 / 100 - 1, 1e-12, 'return'); eq(m.sessions, 29, 'sessions');
-  const flat = Array.from({ length: 30 }, (_, i) => ({ date: `d${i}`, close: 100 }));
-  eq(riskReturn(flat).volatility, 0, 'flat series');
+t('return compounds the monthly returns; volatility is their sample deviation × √12', () => {
+  const rs = [0.02, -0.01, 0.015, 0.005, -0.02, 0.03, 0.01, 0, 0.012, -0.004, 0.018, 0.007].map((v, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, value: v }));
+  const m = riskFromMonthly(rs);
+  close(m.total_return, rs.reduce((a, r) => a * (1 + r.value), 1) - 1, 1e-12, 'compounded');
+  const mean = rs.reduce((a, r) => a + r.value, 0) / 12;
+  const sd = Math.sqrt(rs.reduce((a, r) => a + (r.value - mean) ** 2, 0) / 11);
+  close(m.volatility, sd * Math.sqrt(12), 1e-12, 'annualised'); eq(m.observations, 12);
 });
-t('volatility is the sample standard deviation of log returns, annualised by √252', () => {
-  const pts = [{ date: 'd0', close: 100 }];
-  for (let i = 1; i <= 40; i += 1) pts.push({ date: `d${i}`, close: pts[i - 1].close * (i % 2 ? 1.01 : 1 / 1.01) });
-  const r = Math.log(1.01);                          // returns alternate +r, −r: mean 0, sample variance n/(n−1)·r²
-  close(riskReturn(pts, { tradingDays: 252 }).volatility, Math.sqrt((40 / 39) * r * r * 252), 1e-9);
-  close(riskReturn(pts, { tradingDays: 1 }).volatility, Math.sqrt((40 / 39) * r * r), 1e-9, 'trading days scale');
-  eq(riskReturn(pts).annualisation_days, 252, 'labels that are not dates fall back to 252');
+t('too few months is unavailable, never zero; a missing close leaves two months without a return', () => {
+  eq(riskFromMonthly([{ month: 'a', value: 0.01 }, { month: 'b', value: 0.02 }]), null);
+  const months = ['2026-01', '2026-02', '2026-03'];
+  const rs = monthlyReturnsFromCloses([100, 110, null, 121], months);
+  eq(rs.length, 3); close(rs[0].value, 0.1, 1e-12); eq(rs[1].value, null); eq(rs[2].value, null);
 });
-t('the annualisation follows how often the series trades: weekdays ≈ 252, every day = 365', () => {
-  const day = (i) => new Date(Date.UTC(2025, 0, 1) + i * 86400000).toISOString().slice(0, 10);
-  const daily = Array.from({ length: 366 }, (_, i) => ({ date: day(i), close: 100 + (i % 7) }));
-  eq(sessionsPerYear(daily), 365, 'a market that never closes');
-  const weekdays = daily.filter((p) => ![0, 6].includes(new Date(`${p.date}T00:00:00Z`).getUTCDay()));
-  ok(Math.abs(sessionsPerYear(weekdays) - 261) <= 1, `weekday series: ${sessionsPerYear(weekdays)} sessions a year`);
-  const m = riskReturn(daily);
-  eq(m.annualisation_days, 365); close(m.volatility, riskReturn(daily, { tradingDays: 365 }).volatility, 1e-12);
+t('month arithmetic lands on the right calendar day', () => {
+  eq(monthEnd('2026-02'), '2026-02-28'); eq(monthEnd('2024-02'), '2024-02-29'); eq(monthEnd('2026-12'), '2026-12-31');
+  eq(monthBefore('2026-01'), '2025-12'); eq(monthBefore('2026-08'), '2026-07');
 });
-t('too few sessions is unavailable, never zero, and a non-positive close is skipped', () => {
-  eq(riskReturn(Array.from({ length: 10 }, (_, i) => ({ date: `d${i}`, close: 100 + i }))), null);
-  const pts = Array.from({ length: 30 }, (_, i) => ({ date: `d${i}`, close: i === 5 ? 0 : 100 + i }));
-  eq(riskReturn(pts).sessions, 28, 'the zero close is dropped');
+t('the empirical frontier is the upper hull from the least volatile point to the highest return', () => {
+  const pts = [
+    { key: 'cdi', x: 0.002, y: 0.12 }, { key: 'lqd', x: 0.05, y: 0.02 }, { key: 'bova', x: 0.18, y: 0.30 },
+    { key: 'ivv', x: 0.14, y: 0.25 }, { key: 'gold', x: 0.20, y: 0.45 }, { key: 'btc', x: 0.55, y: 0.10 }, { key: 'mid', x: 0.10, y: 0.15 },
+  ];
+  const f = efficientFrontier(pts);
+  eq(f[0], 'cdi', 'starts at the least volatile'); eq(f[f.length - 1], 'gold', 'ends at the highest return');
+  ok(!f.includes('lqd') && !f.includes('btc') && !f.includes('mid') && !f.includes('ivv'), `dominated points stay below the line: ${f}`);
+  for (let i = 1; i < f.length; i += 1) { const a = pts.find((p) => p.key === f[i - 1]); const b = pts.find((p) => p.key === f[i]); ok(b.x > a.x && b.y > a.y, 'rises to the right'); }
 });
-t('indicator groups fold into the four chart classes', () => {
-  eq(riskClassOf('Equities'), 'equity'); eq(riskClassOf('Rates & Credit'), 'debt');
-  eq(riskClassOf('FX & Commodities'), 'fx_commodities'); eq(riskClassOf('Digital Assets'), 'crypto_other');
-  eq(riskClassOf('Something new'), 'crypto_other', 'unmapped groups are "other"');
+t('asset classes fold into the four chart classes', () => {
+  eq(riskClassOf('Equities BR'), 'equity'); eq(riskClassOf('Real Estate'), 'equity'); eq(riskClassOf('Fixed Income'), 'debt');
+  eq(riskClassOf('Commodities'), 'fx_commodities'); eq(riskClassOf('Alternatives'), 'crypto_other'); eq(riskClassOf('Something new'), 'crypto_other');
 });
 
 console.log('\n  Canonical report validation');

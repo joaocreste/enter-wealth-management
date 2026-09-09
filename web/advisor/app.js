@@ -192,9 +192,6 @@ async function viewOverview() {
                   h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))))
           : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' }))),
 
-    // ── return against risk, twelve months ──────────────────────────────
-    riskReturnSection(),
-
     // ── correlations ────────────────────────────────────────────────────
     correlationSection(),
   );
@@ -494,66 +491,87 @@ function indicatorsSection(o) {
 /** The four broad classes of the risk/return chart, in the order the Worker lists them. */
 const RISK_CLASS_PT = { equity: 'Renda variável', debt: 'Renda fixa e crédito', fx_commodities: 'Câmbio e commodities', crypto_other: 'Cripto e outros' };
 
+/** A fund or bond name short enough to sit beside a mark: the words before the dash, minus the vehicle jargon. */
+function shortAssetName(name) {
+  const stop = /^(FIC|FIM|FIA|FIRF|FI|S\.A\.|Advisory|Banco|Institucional|Plus|REF|DI|CP|Simples|Fundo|de|Índice|Long|Bias(ed)?|ST|Hedge|Global|Foods|Company|Consignado|Pactual)$/i;
+  const words = String(name || '').split(' — ')[0].split(/\s+/).filter((w) => w && !stop.test(w));
+  return words.slice(0, 2).join(' ') || name;
+}
+
 /**
- * Every monitored asset over the last twelve months: total return up, annualised
- * volatility across. What is not an asset — the VIX, the 10-year yield, the
- * monthly and policy series — is named under the chart with the reason.
+ * Every mapped asset over the last twelve months: return up, annualised
+ * volatility across, in reais, with the Ibovespa, the S&P 500 in reais and
+ * the CDI as references and the empirical efficient frontier over the top.
+ * What cannot be measured is named under the chart with the reason.
  */
-function riskReturnSection() {
+function assetRiskReturnSection() {
   const box = h('div.card');
   const meta = h('span.meta');
   const pct1 = (v) => percent(v, { locale: L, decimals: 1 });
   const vol = (v) => percent(v, { locale: L, decimals: 1, signed: false });
-  // axis ticks: whole percentages unless the step itself is fractional
   const tickDecimals = (v) => (Math.round(Math.abs(v) * 1000) % 10 ? 1 : 0);
   const tickY = (v) => (v === 0 ? '0%' : percent(v, { locale: L, decimals: tickDecimals(v) }));
   const tickX = (v) => percent(v, { locale: L, decimals: tickDecimals(v), signed: false });
-  const excludedNote = (excluded) => {
+  const groupByReason = (list) => {
     const byReason = new Map();
-    for (const x of excluded) (byReason.get(x.reason) || byReason.set(x.reason, []).get(x.reason)).push(SHORT[x.key] || x.label);
+    for (const x of list) (byReason.get(x.reason) || byReason.set(x.reason, []).get(x.reason)).push(x.ticker || x.label || x.name);
     return [...byReason].map(([reason, names]) => `${names.join(', ')} (${reason})`).join('; ');
   };
   async function load() {
-    mount(box, h('div.loading', {}, loader(), h('span', { text: 'Calculando retorno e volatilidade…' })));
+    mount(box, h('div.loading', {}, loader(), h('span', { text: 'Calculando retorno e volatilidade de cada ativo…' })));
     try {
-      const d = await api('/api/advisor/risk-return');
-      meta.textContent = `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)}`;
+      const d = await api('/api/advisor/assets/risk-return');
+      meta.textContent = `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)} · em reais`;
       const classes = d.classes.map((c) => ({ key: c.key, label: RISK_CLASS_PT[c.key] || c.label }));
       const className = (k) => classes.find((c) => c.key === k)?.label || k;
-      const items = d.assets.map((a) => ({ key: a.key, label: SHORT[a.key] || a.label, x: a.volatility, y: a.total_return, cls: a.asset_class, asset: a }));
-      const partial = d.assets.filter((a) => a.partial);
-      const provisional = d.assets.filter((a) => a.provisional);
-      const rows = [...d.assets].sort((a, b) => b.total_return - a.total_return).map((a) => h('tr', {},
-        h('td.name', {}, a.label, h('span.sub', { text: `${className(a.asset_class)} · ${a.symbol}` })),
-        h('td.num', { class: toneClass(a.total_return), text: pct1(a.total_return) }),
-        h('td.num', { text: vol(a.volatility) }),
-        h('td.num', { text: `${a.sessions} · √${a.annualisation_days}` }),
-        h('td', { text: `${dmy(a.from)} a ${dmy(a.to)}${a.partial ? ' · série começa dentro da janela' : ''}${a.provisional ? ' · sessão em curso' : ''}` })));
+      const items = [
+        ...d.assets.map((a) => ({ key: a.id, label: a.ticker || shortAssetName(a.name), x: a.volatility, y: a.total_return, cls: a.risk_class, row: a })),
+        ...d.references.map((r) => ({ key: r.key, label: r.label, x: r.volatility, y: r.total_return, cls: 'ref', ring: true, row: r })),
+      ];
+      const simulated = d.assets.filter((a) => a.simulated);
+      const partial = [...d.assets, ...d.references].filter((a) => a.partial);
+      const legend = [
+        { label: 'Referências: Ibovespa, S&P 500 em reais, CDI', cls: 'ref', ring: true },
+        ...classes.map((c) => ({ label: c.label, cls: c.key })),
+        { label: 'Fronteira eficiente (empírica)', dash: true },
+      ];
+      const rows = [...d.assets.map((a) => ({ ...a, label: a.ticker || a.name, kind: className(a.risk_class) })), ...d.references.map((r) => ({ ...r, id: r.key, label: r.label, kind: 'Referência', name: r.symbol || '' }))]
+        .sort((a, b) => b.total_return - a.total_return)
+        .map((a) => h('tr', {},
+          h('td.name', {}, a.label, h('span.sub', { text: `${a.kind}${a.name && a.name !== a.label ? ` · ${a.name}` : ''}` })),
+          h('td.num', { class: toneClass(a.total_return), text: pct1(a.total_return) }),
+          h('td.num', { text: vol(a.volatility) }),
+          h('td.num', { text: `${a.observations} de ${d.window.months.length}` }),
+          h('td', { text: `${a.basis || ''}${a.simulated ? ' · cotas simuladas para a demonstração' : ''}` })));
       mount(box,
         scatterChart(items, {
-          classes, xLabel: 'Volatilidade anualizada, 12 meses', yLabel: 'Retorno total, 12 meses', formatX: tickX, formatY: tickY,
+          classes, legend, shapes: false, height: 520,
+          kicker: 'Retorno vs volatilidade · 12 meses',
+          subtitle: `Últimos 12 meses · ${d.assets.length} ativos mapeados e ${d.references.length} referências · em reais`,
+          xLabel: 'Volatilidade 12 meses', yLabel: 'Retorno 12 meses', formatX: tickX, formatY: tickY,
+          frontier: { keys: d.frontier, label: 'Fronteira eficiente' },
           tip: (p) => [
-            h('b', { text: `${p.asset.label} · ${className(p.cls)}` }),
-            h('span', { text: `Retorno ${pct1(p.y)} · volatilidade ${vol(p.x)}` }), h('br'),
-            h('span', { text: `${p.asset.sessions} sessões · ${dmy(p.asset.from)} a ${dmy(p.asset.to)} · anualizada por √${p.asset.annualisation_days}${p.asset.provisional ? ' · sessão em curso' : ''}` }),
+            h('b', { text: `${p.row.ticker ? `${p.row.ticker} · ` : ''}${p.row.name || p.row.label}` }),
+            h('span', { text: `${p.ring ? 'Referência' : className(p.cls)} · retorno ${pct1(p.y)} · volatilidade ${vol(p.x)}` }), h('br'),
+            h('span', { text: `${p.row.observations} de ${d.window.months.length} meses · ${p.row.basis || ''}${p.row.simulated ? ' · cotas simuladas' : ''}` }),
           ],
         }),
         h('p.chart-caption', {},
-          'Retorno total entre o último fechamento até o início da janela e o fechamento mais recente; volatilidade é o desvio-padrão dos retornos diários logarítmicos, anualizado pelas sessões por ano de cada série (√252 em bolsa, √365 em cripto, que não fecha).',
-          partial.length ? ` Série começa dentro da janela: ${partial.map((a) => SHORT[a.key] || a.label).join(', ')}.` : '',
-          provisional.length ? ` Sessão ainda em curso: ${provisional.map((a) => SHORT[a.key] || a.label).join(', ')}.` : '',
-          d.excluded?.length ? ` Fora do gráfico: ${excludedNote(d.excluded)}.` : '',
-          ' Fonte: Yahoo Finance, fechamentos diários ajustados, das séries mantidas em R2.'),
-        h('details.sc-table', {}, h('summary', { text: `Ver tabela (${d.assets.length} ativos)` }),
-          table(['Ativo', { label: 'Retorno 12m', num: true }, { label: 'Volatilidade', num: true }, { label: 'Sessões · anualização', num: true }, 'Período medido'], rows)),
+          'Retorno composto dos doze retornos mensais e desvio-padrão desses retornos anualizado por √12, amostrados nos fins de mês e medidos em reais (ativos em dólar traduzidos pela PTAX). A fronteira eficiente é empírica: a envoltória superior dos pontos, do ativo menos volátil ao de maior retorno.',
+          simulated.length ? ` Cotas simuladas para a demonstração: ${simulated.map((a) => a.ticker || shortAssetName(a.name)).join(', ')}.` : '',
+          partial.length ? ` Série incompleta na janela: ${partial.map((a) => a.ticker || a.label || shortAssetName(a.name)).join(', ')}.` : '',
+          d.excluded?.length ? ` Fora do gráfico: ${groupByReason(d.excluded)}.` : '',
+          ' Fonte: Yahoo Finance (fechamentos e dividendos), Banco Central do Brasil (PTAX, CDI, IPCA) e cotas do custodiante.'),
+        h('details.sc-table', {}, h('summary', { text: `Ver tabela (${d.assets.length + d.references.length} linhas)` }),
+          table(['Ativo', { label: 'Retorno 12m', num: true }, { label: 'Volatilidade', num: true }, { label: 'Meses', num: true }, 'Base de cálculo'], rows)),
         sourcesBlock(d.sources, 'Ver fontes das séries'));
     } catch (err) {
       mount(box, h('div.err', { text: `Não foi possível calcular retorno e volatilidade: ${err.message}` }));
     }
   }
   load();
-  return h('section.section', {},
-    h('div.section-h', {}, h('h2', { text: 'Retorno e risco em 12 meses' }), meta),
+  return h('section.section', { style: { marginBottom: '32px' } },
+    h('div.section-h', {}, h('h2', { text: 'Retorno e risco por ativo' }), meta),
     box);
 }
 
@@ -662,6 +680,8 @@ async function viewSignals() {
       stat('Com sinal técnico', String(rows.filter((r) => r.technical.signal).length)),
       stat('Com consenso de analistas', String(rows.length - noCoverage.length)),
       stat('Sinais divergentes', String(conflicts.length), { tone: conflicts.length ? 'caution' : 'flat' })),
+
+    assetRiskReturnSection(),
 
     h('div.hint', { style: { marginBottom: '20px' } },
       'As duas famílias de sinal são capturadas de forma independente e nunca combinadas. ',

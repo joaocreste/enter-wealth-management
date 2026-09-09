@@ -545,11 +545,11 @@ function assetRiskReturnSection() {
           h('td', { text: `${a.basis || ''}${a.simulated ? ' · cotas simuladas para a demonstração' : ''}` })));
       mount(box,
         scatterChart(items, {
-          classes, legend, shapes: false, height: 520,
+          classes, legend, shapes: false, height: 540,
           kicker: 'Retorno vs volatilidade · 12 meses',
           subtitle: `Últimos 12 meses · ${d.assets.length} ativos mapeados e ${d.references.length} referências · em reais`,
           xLabel: 'Volatilidade 12 meses', yLabel: 'Retorno 12 meses', formatX: tickX, formatY: tickY,
-          frontier: { keys: d.frontier, label: 'Fronteira eficiente' },
+          frontier: { keys: d.frontier, label: 'fronteira eficiente' },
           tip: (p) => [
             h('b', { text: `${p.row.ticker ? `${p.row.ticker} · ` : ''}${p.row.name || p.row.label}` }),
             h('span', { text: `${p.ring ? 'Referência' : className(p.cls)} · retorno ${pct1(p.y)} · volatilidade ${vol(p.x)}` }), h('br'),
@@ -557,13 +557,18 @@ function assetRiskReturnSection() {
           ],
         }),
         h('p.chart-caption', {},
-          'Retorno composto dos doze retornos mensais e desvio-padrão desses retornos anualizado por √12, amostrados nos fins de mês e medidos em reais (ativos em dólar traduzidos pela PTAX). A fronteira eficiente é empírica: a envoltória superior dos pontos, do ativo menos volátil ao de maior retorno.',
+          'Retorno composto dos doze retornos mensais; volatilidade é o desvio-padrão desses retornos anualizado por √12. Amostrado nos fins de mês, em reais (ativos em dólar pela PTAX). A fronteira eficiente é empírica: a envoltória superior dos pontos.',
           simulated.length ? ` Cotas simuladas para a demonstração: ${simulated.map((a) => a.ticker || shortAssetName(a.name)).join(', ')}.` : '',
           partial.length ? ` Série incompleta na janela: ${partial.map((a) => a.ticker || a.label || shortAssetName(a.name)).join(', ')}.` : '',
-          d.excluded?.length ? ` Fora do gráfico: ${groupByReason(d.excluded)}.` : '',
+          d.excluded?.length ? ` ${d.excluded.length} ${d.excluded.length === 1 ? 'linha fica' : 'linhas ficam'} fora do gráfico, com o motivo na tabela.` : '',
           ' Fonte: Yahoo Finance (fechamentos e dividendos), Banco Central do Brasil (PTAX, CDI, IPCA) e cotas do custodiante.'),
-        h('details.sc-table', {}, h('summary', { text: `Ver tabela (${d.assets.length + d.references.length} linhas)` }),
-          table(['Ativo', { label: 'Retorno 12m', num: true }, { label: 'Volatilidade', num: true }, { label: 'Meses', num: true }, 'Base de cálculo'], rows)),
+        h('details.sc-table', {}, h('summary', { text: `Ver tabela (${d.assets.length + d.references.length} no gráfico${d.excluded?.length ? `, ${d.excluded.length} fora` : ''})` }),
+          table(['Ativo', { label: 'Retorno 12m', num: true }, { label: 'Volatilidade', num: true }, { label: 'Meses', num: true }, 'Base de cálculo'], rows),
+          d.excluded?.length ? h('div', { style: { marginTop: '16px' } },
+            h('div.rail-h', { text: 'Fora do gráfico' }),
+            table(['Ativo', 'Motivo'], d.excluded.map((x) => h('tr', {},
+              h('td.name', {}, x.ticker || x.label, x.name && x.name !== (x.ticker || x.label) ? h('span.sub', { text: x.name }) : null),
+              h('td', { text: x.reason }))))) : null),
         sourcesBlock(d.sources, 'Ver fontes das séries'));
     } catch (err) {
       mount(box, h('div.err', { text: `Não foi possível calcular retorno e volatilidade: ${err.message}` }));

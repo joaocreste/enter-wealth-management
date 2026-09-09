@@ -751,137 +751,160 @@ function niceTicks(lo, hi, n = 5) {
  * `shapes` is on). `legend` overrides the class legend with { label, cls, ring?,
  * dash? } entries. `frontier` is { keys, label }: the items, by key, the dashed
  * line runs through. `tip(item)` returns the tooltip's children.
+ *
+ * The plot is drawn at the width the figure actually has, in CSS pixels, and
+ * redrawn when that width changes — so type stays the size it was set, and a
+ * wider card spreads the points out instead of magnifying them.
  */
 export function scatterChart(items, {
   classes = [], legend = null, xLabel = '', yLabel = '', formatX = (v) => String(v), formatY = formatX,
   kicker = null, subtitle = null, title = null, caption = null, frontier = null, shapes = false,
-  width = 760, height = 440, tip: tipFor = null,
+  height = 520, tip: tipFor = null,
 } = {}) {
   const pts = items.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (pts.length < 2) return h('div.empty', { text: 'Séries insuficientes para o gráfico.' });
-  const pad = { l: 72, r: 96, t: 22, b: 62 };
-  const plotW = width - pad.l - pad.r; const plotH = height - pad.t - pad.b;
-  const xTicks = niceTicks(0, Math.max(...pts.map((p) => p.x)) * 1.08, 5);
-  const yTicks = niceTicks(Math.min(0, ...pts.map((p) => p.y)) - 0.02, Math.max(0, ...pts.map((p) => p.y)) + 0.02, 5);
-  const x0 = xTicks[0]; const x1 = xTicks[xTicks.length - 1];
-  const y0 = yTicks[0]; const y1 = yTicks[yTicks.length - 1];
-  const sx = (v) => pad.l + ((v - x0) / (x1 - x0)) * plotW;
-  const sy = (v) => pad.t + (1 - (v - y0) / (y1 - y0)) * plotH;
   const slot = (cls) => Math.max(0, classes.findIndex((c) => c.key === cls));
-  const radius = (p) => p.r ?? (p.ring ? 8 : 6);
-
-  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', role: 'img', 'aria-label': title || kicker || `${yLabel} × ${xLabel}`, class: 'sc' });
-  // grid: recessive rules at the ticks, the zero line a shade darker
-  for (const v of yTicks) {
-    svg.append(svgEl('line', { x1: pad.l, x2: width - pad.r, y1: sy(v).toFixed(1), y2: sy(v).toFixed(1), class: v === 0 ? 'c-zero soft' : 'c-rule', 'stroke-width': 1 }));
-    svg.append(text({ x: pad.l - 10, y: sy(v) + 3.5, 'text-anchor': 'end', 'font-size': 11, class: 'c-muted' }, formatY(v)));
-  }
-  for (const v of xTicks) {
-    if (v !== x0) svg.append(svgEl('line', { x1: sx(v).toFixed(1), x2: sx(v).toFixed(1), y1: pad.t, y2: height - pad.b, class: 'c-rule', 'stroke-width': 1 }));
-    svg.append(text({ x: sx(v), y: height - pad.b + 18, 'text-anchor': 'middle', 'font-size': 11, class: 'c-muted' }, formatX(v)));
-  }
-  svg.append(svgEl('line', { x1: pad.l, x2: pad.l, y1: pad.t, y2: height - pad.b, class: 'c-rule', 'stroke-width': 1 }));
-  if (yLabel) svg.append(text({ x: 16, y: pad.t + plotH / 2, 'text-anchor': 'middle', transform: `rotate(-90 16 ${(pad.t + plotH / 2).toFixed(1)})`, 'font-size': 11, class: 'sc-axis' }, yLabel));
-  if (xLabel) svg.append(text({ x: pad.l + plotW / 2, y: height - 10, 'text-anchor': 'middle', 'font-size': 11, class: 'sc-axis' }, xLabel));
-
-  // the frontier, under the marks
-  let frontierBox = null;
-  if (frontier?.keys?.length > 1) {
-    const line = frontier.keys.map((k) => pts.find((p) => p.key === k)).filter(Boolean).sort((a, b) => a.x - b.x);
-    if (line.length > 1) {
-      svg.append(svgEl('path', { d: line.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(' '), class: 'sc-frontier' }));
-      if (frontier.label) {
-        // the label sits above the longest segment, along its slope
-        let best = 0; let bi = 0;
-        for (let i = 1; i < line.length; i += 1) { const d = Math.hypot(sx(line[i].x) - sx(line[i - 1].x), sy(line[i].y) - sy(line[i - 1].y)); if (d > best) { best = d; bi = i; } }
-        const a = line[bi - 1]; const b = line[bi];
-        const mx = (sx(a.x) + sx(b.x)) / 2; const my = (sy(a.y) + sy(b.y)) / 2;
-        const ang = Math.atan2(sy(b.y) - sy(a.y), sx(b.x) - sx(a.x)) * 180 / Math.PI;
-        svg.append(text({ x: mx.toFixed(1), y: (my - 11).toFixed(1), 'text-anchor': 'middle', transform: `rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})`, 'font-size': 9.5, class: 'sc-frontier-lbl' }, frontier.label));
-        frontierBox = { p: null, w: frontier.label.length * 7.4, x: mx, y: my - 11 + 4, anchor: 'middle' };
-      }
-    }
-  }
-
-  // labels: each mark tries the right, the left, above and below, in that
-  // order, and takes the first spot clear of every label placed before it and
-  // of every other mark; failing all four it sits to the right and steps down
-  // until it clears, with a hairline back to its mark.
-  const LINE = 13;
-  const left = (l) => (l.anchor === 'start' ? l.x : l.anchor === 'end' ? l.x - l.w : l.x - l.w / 2);
-  const boxOf = (l) => ({ x0: left(l), x1: left(l) + l.w, y0: l.y - 9, y1: l.y + 2 });
-  const markBoxes = pts.map((p) => { const r = radius(p) + (p.ring ? 6 : 2); return { p, x0: sx(p.x) - r, x1: sx(p.x) + r, y0: sy(p.y) - r, y1: sy(p.y) + r }; });
-  const hits = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-  const inside = (l) => { const b = boxOf(l); return b.x0 >= 2 && b.x1 <= width - 2 && b.y0 >= 2 && b.y1 <= height - pad.b + 4; };
-  const placed = frontierBox ? [frontierBox] : [];
-  const clear = (l) => inside(l) && !placed.some((a) => hits(boxOf(a), boxOf(l))) && !markBoxes.some((m) => m.p !== l.p && hits(m, boxOf(l)));
-  const labels = [...pts].sort((a, b) => sy(a.y) - sy(b.y)).map((p) => {
-    const w = String(p.label).length * 6.6; const cx = sx(p.x); const cy = sy(p.y); const r = radius(p) + (p.ring ? 5 : 0);
-    const candidates = [
-      { p, w, x: cx + r + 6, y: cy + 4, anchor: 'start' },
-      { p, w, x: cx - r - 6, y: cy + 4, anchor: 'end' },
-      { p, w, x: cx, y: cy - r - 6, anchor: 'middle' },
-      { p, w, x: cx, y: cy + r + 13, anchor: 'middle' },
-    ];
-    let l = candidates.find(clear);
-    if (!l) {
-      l = { ...candidates[0], leader: true };
-      if (l.x + w > width - 2) { l.x = cx - r - 6; l.anchor = 'end'; }
-      for (let guard = 0; guard < 40; guard += 1) {
-        const box = boxOf(l);
-        const label = placed.find((a) => hits(boxOf(a), box));
-        if (label) { l.y = label.y + LINE; continue; }
-        const mark = markBoxes.find((m) => m.p !== p && hits(m, box));
-        if (mark) { l.y = mark.y1 + 9; continue; }
-        break;
-      }
-    }
-    placed.push(l);
-    return l;
-  });
-
+  const radius = (p) => p.r ?? (p.ring ? 6 : 4.5);
+  const RING = 5;                        // the gap between a reference mark and its ring
+  const FONT = 10.5; const CHAR = 5.7;   // label size, and the width of one of its characters
   const tip = h('div.chart-tip');
-  const marks = svgEl('g');
-  for (const l of labels) {
-    const p = l.p; const cx = sx(p.x); const cy = sy(p.y); const r = radius(p);
-    const g = svgEl('g', { class: `sc-mark k-${p.cls}${p.ring ? ' ref' : ''}`, tabindex: 0, role: 'img', 'aria-label': `${p.label}: ${formatY(p.y)}, ${formatX(p.x)}` });
-    if (l.leader && l.y - 4 - cy > r + 4) {
-      const lx = l.anchor === 'start' ? l.x - 3 : l.x + 3;
-      g.append(svgEl('line', { x1: cx.toFixed(1), y1: (cy + r + 1).toFixed(1), x2: lx.toFixed(1), y2: (l.y - 4).toFixed(1), class: 'sc-leader' }));
+  const svg = svgEl('svg', { role: 'img', 'aria-label': title || kicker || `${yLabel} × ${xLabel}`, class: 'sc' });
+
+  function draw(width) {
+    svg.replaceChildren();
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', width); svg.setAttribute('height', height);
+    const pad = { l: 60, r: 36, t: 18, b: 56 };
+    const plotW = width - pad.l - pad.r; const plotH = height - pad.t - pad.b;
+    const xTicks = niceTicks(0, Math.max(...pts.map((p) => p.x)) * 1.08, 5);
+    const yTicks = niceTicks(Math.min(0, ...pts.map((p) => p.y)) - 0.02, Math.max(0, ...pts.map((p) => p.y)) + 0.02, 5);
+    const x0 = xTicks[0]; const x1 = xTicks[xTicks.length - 1];
+    const y0 = yTicks[0]; const y1 = yTicks[yTicks.length - 1];
+    const sx = (v) => pad.l + ((v - x0) / (x1 - x0)) * plotW;
+    const sy = (v) => pad.t + (1 - (v - y0) / (y1 - y0)) * plotH;
+
+    // grid: recessive rules at the ticks, the zero line a shade darker
+    for (const v of yTicks) {
+      svg.append(svgEl('line', { x1: pad.l, x2: width - pad.r, y1: sy(v).toFixed(1), y2: sy(v).toFixed(1), class: v === 0 ? 'c-zero soft' : 'c-rule', 'stroke-width': 1 }));
+      svg.append(text({ x: pad.l - 10, y: sy(v) + 3.5, 'text-anchor': 'end', 'font-size': FONT, class: 'c-muted' }, formatY(v)));
     }
-    if (p.ring) g.append(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: r + 5, class: 'sc-ring' }));
-    g.append(marker(shapes ? SHAPES[slot(p.cls) % SHAPES.length] : 'circle', cx, cy, r, { class: 'sc-dot' }));
-    g.append(text({ x: l.x.toFixed(1), y: l.y.toFixed(1), 'text-anchor': l.anchor, 'font-size': 11.5, class: `sc-lbl${p.ring ? ' strong' : ''}` }, p.label));
-    g.append(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: Math.max(14, r + 6), class: 'c-hit' }));
-    const show = () => {
-      g.classList.add('on');
-      tip.replaceChildren(...(tipFor ? tipFor(p) : [h('b', { text: p.label }), h('span', { text: `${yLabel} ${formatY(p.y)}` }), h('br'), h('span', { text: `${xLabel} ${formatX(p.x)}` })]));
-      const rect = svg.getBoundingClientRect();
-      const px = (cx / width) * rect.width; const py = (cy / height) * rect.height;
-      const flip = px > rect.width * 0.62;
-      tip.style.display = 'block';
-      tip.style.left = `${px}px`;
-      tip.style.top = `${rect.top - tip.parentElement.getBoundingClientRect().top + py}px`;
-      tip.style.transform = flip ? 'translate(calc(-100% - 14px), -50%)' : 'translate(14px, -50%)';
-    };
-    const hide = () => { g.classList.remove('on'); tip.style.display = 'none'; };
-    g.addEventListener('mouseenter', show); g.addEventListener('mouseleave', hide);
-    g.addEventListener('focus', show); g.addEventListener('blur', hide);
-    marks.append(g);
+    for (const v of xTicks) {
+      if (v !== x0) svg.append(svgEl('line', { x1: sx(v).toFixed(1), x2: sx(v).toFixed(1), y1: pad.t, y2: height - pad.b, class: 'c-rule', 'stroke-width': 1 }));
+      svg.append(text({ x: sx(v), y: height - pad.b + 16, 'text-anchor': 'middle', 'font-size': FONT, class: 'c-muted' }, formatX(v)));
+    }
+    svg.append(svgEl('line', { x1: pad.l, x2: pad.l, y1: pad.t, y2: height - pad.b, class: 'c-rule', 'stroke-width': 1 }));
+    if (yLabel) svg.append(text({ x: 14, y: pad.t + plotH / 2, 'text-anchor': 'middle', transform: `rotate(-90 14 ${(pad.t + plotH / 2).toFixed(1)})`, 'font-size': 10, class: 'sc-axis' }, yLabel));
+    if (xLabel) svg.append(text({ x: pad.l + plotW / 2, y: height - 8, 'text-anchor': 'middle', 'font-size': 10, class: 'sc-axis' }, xLabel));
+
+    // the frontier, under the marks
+    let frontierBox = null;
+    if (frontier?.keys?.length > 1) {
+      const line = frontier.keys.map((k) => pts.find((p) => p.key === k)).filter(Boolean).sort((a, b) => a.x - b.x);
+      if (line.length > 1) {
+        svg.append(svgEl('path', { d: line.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(' '), class: 'sc-frontier' }));
+        if (frontier.label) {
+          let best = 0; let bi = 0;   // the label rides the longest segment, along its slope
+          for (let i = 1; i < line.length; i += 1) { const d = Math.hypot(sx(line[i].x) - sx(line[i - 1].x), sy(line[i].y) - sy(line[i - 1].y)); if (d > best) { best = d; bi = i; } }
+          const a = line[bi - 1]; const b = line[bi];
+          const mx = (sx(a.x) + sx(b.x)) / 2; const my = (sy(a.y) + sy(b.y)) / 2;
+          const ang = Math.atan2(sy(b.y) - sy(a.y), sx(b.x) - sx(a.x)) * 180 / Math.PI;
+          svg.append(text({ x: mx.toFixed(1), y: (my - 9).toFixed(1), 'text-anchor': 'middle', transform: `rotate(${ang.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)})`, 'font-size': 8.5, class: 'sc-frontier-lbl' }, frontier.label));
+          frontierBox = { p: null, w: frontier.label.length * 6.6, x: mx, y: my - 5, anchor: 'middle' };
+        }
+      }
+    }
+
+    // labels: each mark tries the right, the left, above and below, in that
+    // order, and takes the first spot clear of every label placed before it and
+    // of every other mark; failing all four it sits to the right and steps down
+    // until it clears, with a hairline back to its mark.
+    const LINE = FONT + 2;
+    const left = (l) => (l.anchor === 'start' ? l.x : l.anchor === 'end' ? l.x - l.w : l.x - l.w / 2);
+    const boxOf = (l) => ({ x0: left(l) - 1, x1: left(l) + l.w + 1, y0: l.y - FONT + 1, y1: l.y + 2 });
+    const markBoxes = pts.map((p) => { const r = radius(p) + (p.ring ? RING + 1 : 2); return { p, x0: sx(p.x) - r, x1: sx(p.x) + r, y0: sy(p.y) - r, y1: sy(p.y) + r }; });
+    const hits = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+    const inside = (l) => { const b = boxOf(l); return b.x0 >= 2 && b.x1 <= width - 2 && b.y0 >= 2 && b.y1 <= height - pad.b + 4; };
+    const placed = frontierBox ? [frontierBox] : [];
+    const clear = (l) => inside(l) && !placed.some((a) => hits(boxOf(a), boxOf(l))) && !markBoxes.some((m) => m.p !== l.p && hits(m, boxOf(l)));
+    // references first, so their names sit where they belong and the rest fit around them
+    const order = [...pts].sort((a, b) => (b.ring ? 1 : 0) - (a.ring ? 1 : 0) || sy(a.y) - sy(b.y));
+    const labels = order.map((p) => {
+      const w = String(p.label).length * CHAR; const cx = sx(p.x); const cy = sy(p.y); const r = radius(p) + (p.ring ? RING : 0);
+      const candidates = [
+        { p, w, x: cx + r + 5, y: cy + 3.5, anchor: 'start' },
+        { p, w, x: cx - r - 5, y: cy + 3.5, anchor: 'end' },
+        { p, w, x: cx, y: cy - r - 5, anchor: 'middle' },
+        { p, w, x: cx, y: cy + r + FONT + 1, anchor: 'middle' },
+      ];
+      let l = candidates.find(clear);
+      if (!l) {
+        l = { ...candidates[0], leader: true };
+        if (l.x + w > width - 2) { l.x = cx - r - 5; l.anchor = 'end'; }
+        for (let guard = 0; guard < 60; guard += 1) {
+          const box = boxOf(l);
+          const label = placed.find((a) => hits(boxOf(a), box));
+          if (label) { l.y = label.y + LINE; continue; }
+          const mark = markBoxes.find((m) => m.p !== p && hits(m, box));
+          if (mark) { l.y = mark.y1 + FONT - 2; continue; }
+          break;
+        }
+      }
+      placed.push(l);
+      return l;
+    });
+
+    const marks = svgEl('g');
+    for (const l of labels) {
+      const p = l.p; const cx = sx(p.x); const cy = sy(p.y); const r = radius(p);
+      const g = svgEl('g', { class: `sc-mark k-${p.cls}${p.ring ? ' ref' : ''}`, tabindex: 0, role: 'img', 'aria-label': `${p.label}: ${formatY(p.y)}, ${formatX(p.x)}` });
+      if (l.leader && l.y - 3.5 - cy > r + 4) {
+        const lx = l.anchor === 'start' ? l.x - 2 : l.x + 2;
+        g.append(svgEl('line', { x1: cx.toFixed(1), y1: (cy + r + 1).toFixed(1), x2: lx.toFixed(1), y2: (l.y - 3.5).toFixed(1), class: 'sc-leader' }));
+      }
+      if (p.ring) g.append(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: r + RING, class: 'sc-ring' }));
+      g.append(marker(shapes ? SHAPES[slot(p.cls) % SHAPES.length] : 'circle', cx, cy, r, { class: 'sc-dot' }));
+      g.append(text({ x: l.x.toFixed(1), y: l.y.toFixed(1), 'text-anchor': l.anchor, 'font-size': FONT, class: `sc-lbl${p.ring ? ' strong' : ''}` }, p.label));
+      g.append(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: Math.max(12, r + 6), class: 'c-hit' }));
+      const show = () => {
+        g.classList.add('on');
+        tip.replaceChildren(...(tipFor ? tipFor(p) : [h('b', { text: p.label }), h('span', { text: `${yLabel} ${formatY(p.y)}` }), h('br'), h('span', { text: `${xLabel} ${formatX(p.x)}` })]));
+        const rect = svg.getBoundingClientRect();
+        const flip = cx > rect.width * 0.62;
+        tip.style.display = 'block';
+        tip.style.left = `${cx}px`;
+        tip.style.top = `${rect.top - tip.parentElement.getBoundingClientRect().top + cy}px`;
+        tip.style.transform = flip ? 'translate(calc(-100% - 12px), -50%)' : 'translate(12px, -50%)';
+      };
+      const hide = () => { g.classList.remove('on'); tip.style.display = 'none'; };
+      g.addEventListener('mouseenter', show); g.addEventListener('mouseleave', hide);
+      g.addEventListener('focus', show); g.addEventListener('blur', hide);
+      marks.append(g);
+    }
+    svg.append(marks);
   }
-  svg.append(marks);
 
   const entries = legend || (classes.length > 1 ? classes.map((c) => ({ label: c.label, cls: c.key })) : []);
-  const legendEl = entries.length ? h('div.sc-legend', {}, entries.map((e, k) => {
+  const legendEl = entries.length ? h('div.sc-legend', {}, entries.map((e) => {
     if (e.dash) return h('span.sc-key', {}, h('span.dash', { 'aria-hidden': 'true' }), h('span', { text: e.label }));
-    const sw = svgEl('svg', { viewBox: '0 0 20 20', width: 16, height: 16, class: `k-${e.cls}`, 'aria-hidden': 'true' });
-    if (e.ring) sw.append(svgEl('circle', { cx: 10, cy: 10, r: 9, class: 'sc-ring' }));
-    sw.append(marker(shapes ? SHAPES[slot(e.cls) % SHAPES.length] : 'circle', 10, 10, e.ring ? 5 : 6, { class: 'sc-dot' }));
+    const sw = svgEl('svg', { viewBox: '0 0 16 16', width: 14, height: 14, class: `k-${e.cls}`, 'aria-hidden': 'true' });
+    if (e.ring) sw.append(svgEl('circle', { cx: 8, cy: 8, r: 7, class: 'sc-ring' }));
+    sw.append(marker(shapes ? SHAPES[slot(e.cls) % SHAPES.length] : 'circle', 8, 8, e.ring ? 3.5 : 4.5, { class: 'sc-dot' }));
     return h('span.sc-key', {}, sw, h('span', { text: e.label }));
   })) : null;
 
   const headEl = kicker || subtitle ? h('div.sc-head', {}, kicker && h('span.sc-kicker', { text: kicker }), subtitle && h('span.sc-sub', { text: subtitle })) : null;
-  return h('figure.sc-fig', {}, headEl, title && h('figcaption.chart-title', { text: title }), svg, tip, legendEl, caption && h('figcaption.chart-caption', { text: caption }));
+  const fig = h('figure.sc-fig', {}, headEl, title && h('figcaption.chart-title', { text: title }), svg, tip, legendEl, caption && h('figcaption.chart-caption', { text: caption }));
+
+  // draw at the real width, and again whenever it changes
+  let drawn = 0;
+  const redraw = () => { const w = Math.floor(fig.clientWidth); if (w >= 320 && w !== drawn) { drawn = w; draw(w); } };
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(() => { if (!fig.isConnected) { ro.disconnect(); return; } redraw(); });
+    ro.observe(fig);
+  } else { window.addEventListener('resize', redraw); }
+  draw(960);                    // a first drawing for a figure measured later (tests, a detached render)
+  queueMicrotask(redraw);
+  return fig;
 }
 
 // ── source provenance (§29) ───────────────────────────────────────────────

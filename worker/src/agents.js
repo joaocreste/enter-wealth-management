@@ -31,6 +31,7 @@ import * as P from './pipeline.js';
 import * as LLM from './llm.js';
 import { INDICATORS, MACRO_VINTAGE } from '../../seed/market.mjs';
 import { indicatorQuote } from '../../src/adapters/marketdata.js';
+import * as Valor from '../../src/adapters/valor.js';
 import { triggerProximity } from '../../src/core/triggers.js';
 import { makeSource } from '../../src/core/sources.js';
 import { percent, num } from '../../src/core/format.js';
@@ -42,7 +43,7 @@ export const AGENTS = [
 ];
 const STALE_MS = 10 * 60 * 1000;
 const ASSET_CLASSES = ['Cash', 'Fixed Income', 'Equities BR', 'Equities Global', 'Alternatives', 'Real Estate', 'Commodities', 'Digital Assets'];
-const CATEGORIES = new Set(['equities', 'rates', 'credit', 'fx', 'commodities', 'macro', 'geopolitics', 'crypto', 'market_move']);
+const CATEGORIES = new Set(['equities', 'rates', 'credit', 'fx', 'commodities', 'macro', 'politics', 'geopolitics', 'crypto', 'market_move']);
 const IMPORTANCE = { high: 0, medium: 1, low: 2 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -160,25 +161,39 @@ async function agentDados(env, runId) {
     const curated = await P.loadMarketEvents(env, { since: addDays(date, -21), limit: 20 });
     const generated = P.eventsFromIndicatorMoves(indicators);
 
+    // Brazil comes from the newsroom, not from a search: Valor Econômico's public feeds.
+    await report(1, 29, 'Agente 1 · Dados — lendo as manchetes do Valor Econômico (feeds RSS: capa, política, finanças, brasil, empresas, mundo)');
+    const brazil = await gatherHeadlines(env, { date, modelOn: !!env.ANTHROPIC_API_KEY || !!env.OPENAI_API_KEY, report });
+
     let newsEvents = []; let newsSources = [];
-    let news = { mode: 'skipped', reason: 'sem modelo de linguagem configurado — defina ANTHROPIC_API_KEY para a varredura de notícias com fontes citadas', items: [], dropped: [], searches: 0 };
+    let news = { mode: 'skipped', reason: 'sem modelo de linguagem configurado — defina ANTHROPIC_API_KEY para a varredura da imprensa internacional com fontes citadas', items: [], dropped: [], searches: 0 };
     if (env.ANTHROPIC_API_KEY) {
-      await report(1, 31, 'Agente 1 · Dados — o modelo varre o noticiário na web e cita a fonte de cada item');
+      await report(1, 37, 'Agente 1 · Dados — o modelo varre a imprensa internacional na web e cita a fonte de cada item');
       try {
-        const scan = await LLM.scanNews(env, { date, indicator_keys: INDICATORS.map((i) => i.key), asset_classes: ASSET_CLASSES });
+        const facts = { date, indicator_keys: INDICATORS.map((i) => i.key), asset_classes: ASSET_CLASSES };
+        let scan;
+        try {
+          scan = await LLM.scanNews(env, facts);
+        } catch (err) {
+          // A gateway timeout on a search-heavy turn is the usual failure; one more try, with fewer searches.
+          if (!/\b5\d\d\b|timeout|timed out|abort/i.test(err.message)) throw err;
+          await report(1, 41, `Agente 1 · Dados — a varredura na web falhou (${err.message.slice(0, 60)}); tentando de novo com menos buscas`);
+          scan = await LLM.scanNews(env, facts, { maxSearches: 4 });
+        }
         ({ events: newsEvents, sources: newsSources } = newsToEvents(scan.items, date));
         news = { mode: 'model', model: scan.model, searches: scan.searches, items: newsEvents.map(compactNews), dropped: scan.dropped, urls: scan.urls };
-        await report(1, 44, `Agente 1 · Dados — ${newsEvents.length} notícias com fonte verificada em ${scan.searches} buscas${scan.dropped.length ? `; ${scan.dropped.length} descartadas por falta de fonte` : ''}`);
+        await report(1, 44, `Agente 1 · Dados — ${newsEvents.length} notícias internacionais com fonte verificada em ${scan.searches} buscas${scan.dropped.length ? `; ${scan.dropped.length} descartadas por falta de fonte` : ''}`);
       } catch (err) {
         news = { mode: 'failed', reason: err.message, items: [], dropped: [], searches: 0 };
-        await report(1, 44, `Agente 1 · Dados — varredura de notícias indisponível (${err.message.slice(0, 80)}); seguindo com indicadores e eventos curados`);
+        await report(1, 44, `Agente 1 · Dados — varredura internacional indisponível (${err.message.slice(0, 80)}); seguindo com as manchetes do Valor, indicadores e eventos curados`);
       }
     }
+    news.headlines = brazil.meta;
     await report(1, 47, 'Agente 1 · Dados — mapeando a exposição de cada carteira por classe de ativo');
     const { clients, portfolios } = await bookExposures(db, advisor.id);
-    const events = dedupeEvents([...curated, ...generated, ...newsEvents]);
+    const events = dedupeEvents([...brazil.events, ...curated, ...generated, ...newsEvents]);
     const triggerEvals = await P.evaluateTriggers(env, indicators, advisor.id);
-    const sources = [...indicators.filter((i) => i.source).map((i) => i.source), ...newsSources];
+    const sources = [...indicators.filter((i) => i.source).map((i) => i.source), ...brazil.sources, ...newsSources];
     return { date, advisorId: advisor.id, actorId: row.actor_id, trigger: row.trigger, indicators, retrieved, events, clients, portfolios, triggerEvals, sources, news };
   } catch (err) {
     await fail(err);
@@ -245,6 +260,7 @@ async function agentGatilhos(env, runId, s) {
     await report(3, 96, `Agente 3 · Gatilhos — ${breached} ${breached === 1 ? 'limiar rompido' : 'limiares rompidos'}, ${driftAlerts.length} ${driftAlerts.length === 1 ? 'desvio' : 'desvios'} além do gatilho de rebalanceamento`);
 
     const news = s.news;
+    const hl = news.headlines || null;
     const result = {
       date: s.date,
       advisor: { id: advisor.id, name: advisor.name, code: advisor.advisor_code, team: advisor.team },
@@ -255,7 +271,10 @@ async function agentGatilhos(env, runId, s) {
       what_matters: s.whatMatters,
       clients_count: s.clients.length,
       sources: s.sources,
-      news: { mode: news.mode, model: news.model ?? null, reason: news.reason ?? null, searches: news.searches ?? 0, kept: news.items?.length ?? 0, dropped: news.dropped ?? [] },
+      news: {
+        mode: news.mode, model: news.model ?? null, reason: news.reason ?? null, searches: news.searches ?? 0, kept: news.items?.length ?? 0, dropped: news.dropped ?? [],
+        headlines: hl ? { provider: hl.provider, mode: hl.mode, reason: hl.reason ?? null, feeds: hl.feeds, items: hl.items, clusters: hl.clusters, kept: hl.kept, classified_by: hl.classified_by, model: hl.model ?? null, dropped: hl.dropped ?? [], top_story: hl.top_story ?? null } : null,
+      },
       inference: s.inference,
       events_count: s.events.length,
     };
@@ -295,6 +314,238 @@ async function bookExposures(db, advisorId) {
   return { clients, portfolios };
 }
 
+// ── Brazil: Valor Econômico's headlines ───────────────────────────────────────
+
+/** How a news host is named on the portal. The reader should see a newspaper, not a domain. */
+const PROVIDER_NAMES = [
+  [/valor\.globo\.com/, 'Valor Econômico'], [/g1\.globo\.com/, 'g1'], [/oglobo\.globo\.com/, 'O Globo'],
+  [/folha\.uol\.com\.br/, 'Folha de S.Paulo'], [/estadao\.com\.br/, 'Estadão'], [/infomoney\.com\.br/, 'InfoMoney'],
+  [/exame\.com/, 'Exame'], [/cnnbrasil\.com\.br/, 'CNN Brasil'], [/poder360\.com\.br/, 'Poder360'], [/bcb\.gov\.br/, 'Banco Central do Brasil'],
+  [/reuters\.com/, 'Reuters'], [/bloomberg\.com/, 'Bloomberg'], [/ft\.com/, 'Financial Times'], [/wsj\.com/, 'The Wall Street Journal'],
+  [/finance\.yahoo\.com/, 'Yahoo Finance'], [/tradingeconomics\.com/, 'Trading Economics'], [/tradingview\.com/, 'TradingView'],
+  [/federalreserve\.gov/, 'Federal Reserve'], [/bls\.gov/, 'U.S. Bureau of Labor Statistics'], [/cnbc\.com/, 'CNBC'], [/investing\.com/, 'Investing.com'],
+];
+export function providerName(host) {
+  const hit = PROVIDER_NAMES.find(([re]) => re.test(host));
+  return hit ? hit[1] : host;
+}
+
+/**
+ * Fetch, cluster, classify. Returns events with a source record each and a
+ * meta block the portal shows verbatim, so a morning without headlines is a
+ * visible fact rather than a quiet gap.
+ */
+async function gatherHeadlines(env, { date, modelOn, report }) {
+  const meta = { provider: Valor.PROVIDER, mode: 'feed', reason: null, feeds: [], items: 0, clusters: 0, kept: 0, classified_by: 'rule', model: null, dropped: [], top_story: null };
+  let feed;
+  try {
+    feed = await Valor.headlines({ windowHours: 36 });
+  } catch (err) {
+    return { events: [], sources: [], meta: { ...meta, mode: 'failed', reason: err.message } };
+  }
+  meta.feeds = feed.feeds;
+  meta.items = feed.items.length;
+  if (!feed.items.length) {
+    meta.mode = 'failed';
+    meta.reason = feed.feeds.map((f) => f.error).filter(Boolean)[0] || 'nenhuma manchete nas últimas 36 horas';
+    await report(1, 33, `Agente 1 · Dados — manchetes do Valor indisponíveis (${meta.reason.slice(0, 80)})`);
+    return { events: [], sources: [], meta };
+  }
+  const clusters = Valor.clusterHeadlines(feed.items);
+  meta.clusters = clusters.length;
+  const candidates = pickCandidates(clusters, 25);
+  const okFeeds = feed.feeds.filter((f) => f.ok).length;
+  let classified = null;
+  if (modelOn) {
+    await report(1, 33, `Agente 1 · Dados — ${feed.items.length} manchetes do Valor em ${okFeeds} seções; o modelo classifica as ${candidates.length} mais cobertas`);
+    try {
+      const r = await LLM.classifyHeadlines(env, {
+        date,
+        headlines: candidates.map(candidateFacts),
+        indicator_keys: INDICATORS.map((i) => i.key),
+        asset_classes: ASSET_CLASSES,
+        categories: [...CATEGORIES].filter((c) => c !== 'market_move'),
+      });
+      classified = r.items; meta.classified_by = 'model'; meta.model = r.model; meta.dropped = r.dropped;
+    } catch (err) {
+      meta.reason = `classificação pelo modelo falhou (${err.message.slice(0, 80)}); manchetes classificadas por regra`;
+    }
+  } else {
+    await report(1, 33, `Agente 1 · Dados — ${feed.items.length} manchetes do Valor em ${okFeeds} seções; sem modelo, as mais cobertas entram classificadas por regra`);
+  }
+  const items = classified && classified.length ? classified : ruleClassify(candidates);
+  const { events, sources } = headlinesToEvents(items, candidates, date);
+  meta.kept = events.length;
+  const top = events.find((e) => e.market_wide);
+  if (top) meta.top_story = { title: top.title_pt, url: top.source_url, coverage: top.coverage };
+  await report(1, 35, `Agente 1 · Dados — ${events.length} manchetes do Valor entram como eventos${top ? `; notícia do dia: “${top.title_pt.slice(0, 70)}” (${top.coverage} manchetes)` : ''}`);
+  return { events, sources, meta };
+}
+
+/**
+ * The most covered stories first, then the freshest single lines from the
+ * market sections. Two clusters that name the same people are one story told
+ * from two angles: the second folds into the first and its lines count
+ * towards the coverage, so the portal says "51 manchetes", not three rows.
+ */
+function pickCandidates(clusters, limit) {
+  const out = [];
+  const seen = new Set();
+  const sameStory = (a, b) => a.entities.slice(0, 6).filter((e) => b.entities.slice(0, 6).includes(e)).length >= 2;
+  const push = (c) => {
+    if (seen.has(c.lead.id) || out.length >= limit) return;
+    seen.add(c.lead.id);
+    const twin = c.size >= 2 ? out.find((o) => o.cluster && sameStory(o.cluster, c)) : null;
+    if (twin) {
+      twin.coverage += c.size;
+      twin.related = [...twin.related, ...c.items].filter((x, i, arr) => x.id !== twin.lead.id && arr.findIndex((y) => y.id === x.id) === i);
+      return;
+    }
+    out.push({ id: c.lead.id, lead: c.lead, cluster: c, related: c.items.filter((x) => x.id !== c.lead.id), coverage: c.size, rank: out.length, sections: c.sections });
+  };
+  for (const c of clusters) if (c.size >= 2) push(c);
+  const MARKET = new Set(['financas', 'brasil', 'politica', 'empresas', 'agronegocios']);
+  for (const c of clusters) if (c.size === 1 && MARKET.has(c.lead.section)) push(c);
+  for (const o of out) { o.related = o.related.sort((a, b) => (b.published || '').localeCompare(a.published || '')).slice(0, 10); delete o.cluster; }
+  return out;
+}
+
+const candidateFacts = (c) => ({
+  id: c.id, title: c.lead.title, subtitle: c.lead.subtitle, lead: c.lead.lead, section: c.lead.section, published: c.lead.published,
+  coverage: c.coverage, related_titles: c.related.slice(0, 5).map((r) => r.title),
+});
+
+const SECTION_CATEGORY = { politica: 'politics', financas: 'macro', brasil: 'macro', empresas: 'equities', mundo: 'geopolitics', agronegocios: 'commodities' };
+const CATEGORY_CLASSES = {
+  politics: ['Equities BR', 'Fixed Income', 'FX'], macro: ['Fixed Income', 'Equities BR'], rates: ['Fixed Income', 'Cash'], credit: ['Fixed Income'],
+  fx: ['FX', 'Equities Global'], equities: ['Equities BR'], geopolitics: ['Equities Global', 'Commodities'], commodities: ['Commodities', 'Equities BR'], crypto: ['Digital Assets'],
+};
+const CATEGORY_INDICATOR = { politics: 'usdbrl', fx: 'usdbrl', rates: 'selic', equities: 'ibovespa', commodities: 'brent', crypto: 'btc', macro: null, credit: null, geopolitics: null };
+
+/** Category from the words of the headline when the section is ambiguous. */
+function categoryByRule(c) {
+  const t = `${c.lead.title} ${c.lead.subtitle || ''}`.toLowerCase();
+  if (/selic|copom|juro|treasury|curva/.test(t)) return 'rates';
+  if (/dólar|câmbio|real\b|ptax/.test(t)) return 'fx';
+  if (/ibovespa|bolsa|ações|b3\b/.test(t)) return 'equities';
+  if (/petróleo|brent|minério|soja|commodit/.test(t)) return 'commodities';
+  if (/bitcoin|cripto|ether/.test(t)) return 'crypto';
+  if (/ipca|inflação|pib|fiscal|arcabouço|déficit|orçamento/.test(t)) return 'macro';
+  if (/stf|senado|câmara|congresso|governo|ministro|eleição|eleições|pf\b|polícia federal|lula|bolsonaro/.test(t)) return 'politics';
+  return SECTION_CATEGORY[c.lead.section] || 'macro';
+}
+
+/**
+ * Without a model: the story of the day plus the biggest clusters and the
+ * freshest market lines, summarised by the newsroom's own first paragraph.
+ * Nothing is written here that the feed did not publish.
+ */
+function ruleClassify(candidates) {
+  const out = [];
+  const big = candidates.filter((c) => c.coverage >= 3).slice(0, 3);
+  for (const c of big) out.push(ruleItem(c, c.rank === 0 ? 'high' : 'medium', c.rank === 0));
+  const market = candidates.filter((c) => !big.includes(c) && ['financas', 'brasil'].includes(c.lead.section)).slice(0, 2);
+  for (const c of market) out.push(ruleItem(c, c.coverage >= 2 ? 'medium' : 'low', false));
+  if (!out.length && candidates[0]) out.push(ruleItem(candidates[0], 'medium', candidates[0].coverage >= 3));
+  return out;
+}
+/**
+ * Without a model the mechanism and the conversation are fixed sentences per
+ * category — never a fact about the story, which only the newsroom's own
+ * paragraph is allowed to state.
+ */
+const RULE_TEXT = {
+  politics: {
+    impact: 'Notícia política chega à carteira pelo câmbio, pela curva de juros e pelo prêmio de risco dos ativos brasileiros, não por uma posição específica.',
+    prompt: 'Explicar ao cliente o que foi publicado e por que a carteira não muda por causa de uma manchete; combinar o que observar no câmbio e nos juros nos próximos dias.',
+  },
+  macro: {
+    impact: 'Dados e decisões macro alteram a inflação esperada e a curva de juros, e por elas a marcação da renda fixa e o valor das ações brasileiras.',
+    prompt: 'Conversar sobre o que a notícia muda na premissa de inflação e juros por trás da alocação em renda fixa.',
+  },
+  rates: {
+    impact: 'Juros mais altos ou mais baixos mudam a marcação dos títulos prefixados e indexados e o custo de oportunidade das ações.',
+    prompt: 'Revisar com o cliente o equilíbrio entre prefixado, IPCA e CDI diante do que a notícia sinaliza para a Selic.',
+  },
+  fx: {
+    impact: 'A variação do real afeta em reais tudo o que a carteira tem no exterior e o preço das exportadoras na bolsa.',
+    prompt: 'Rever com o cliente quanto da carteira está exposto ao dólar e se essa exposição continua sendo a combinada.',
+  },
+  equities: {
+    impact: 'Notícia de empresa ou de bolsa afeta as ações brasileiras da carteira, diretamente ou pelo setor.',
+    prompt: 'Verificar se a empresa ou o setor da notícia está na carteira e o que a política aprovada permite discutir.',
+  },
+  commodities: {
+    impact: 'Commodities chegam à carteira pelas exportadoras da bolsa, pelo câmbio e pela inflação que a renda fixa carrega.',
+    prompt: 'Discutir se a carteira tem exposição direta a commodities e como um movimento persistente afeta a inflação assumida na renda fixa.',
+  },
+  geopolitics: {
+    impact: 'Risco geopolítico eleva a aversão a risco global: pesa em ações no exterior, sustenta o dólar e o petróleo.',
+    prompt: 'Enquadrar a notícia no prazo de investimento combinado antes de qualquer conversa sobre reduzir risco.',
+  },
+  credit: {
+    impact: 'Condições de crédito mais apertadas afetam os fundos de crédito privado e o preço dos títulos corporativos.',
+    prompt: 'Revisar a parcela de crédito privado da carteira e a liquidez combinada na política.',
+  },
+  crypto: {
+    impact: 'Ativos digitais reagem a notícia regulatória e de fluxo com volatilidade muito acima das demais classes.',
+    prompt: 'Confirmar que a parcela em ativos digitais segue dentro da faixa aprovada.',
+  },
+};
+
+function ruleItem(c, importance, marketWide) {
+  const category = categoryByRule(c);
+  const text = RULE_TEXT[category] || RULE_TEXT.macro;
+  return {
+    headline_id: c.id, category, direction: null, indicator_key: CATEGORY_INDICATOR[category] ?? null,
+    asset_classes: CATEGORY_CLASSES[category] || ['Equities BR'], importance, market_wide: marketWide,
+    summary_pt: c.lead.lead || c.lead.subtitle || c.lead.title, impact_note_pt: text.impact, discussion_prompt_pt: text.prompt,
+  };
+}
+
+/** A classified headline becomes an event; its title is the newsroom's, verbatim, and its source is the article. */
+function headlinesToEvents(items, candidates, date) {
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const events = []; const sources = [];
+  for (const it of items) {
+    const c = byId.get(it.headline_id);
+    if (!c) continue;
+    const h = c.lead;
+    const category = CATEGORIES.has(it.category) && it.category !== 'market_move' ? it.category : categoryByRule(c);
+    const classes = (it.asset_classes || []).filter((k) => ASSET_CLASSES.includes(k) || k === 'FX');
+    const marketWide = it.market_wide === true || it.market_wide === 'true' || (c.rank === 0 && c.coverage >= 3);
+    events.push({
+      id: `evt_valor_${h.id.replace(/^vlr_/, '')}`,
+      date: (h.published || date).slice(0, 10),
+      title: h.title, title_pt: h.title,
+      category,
+      summary: it.summary_pt || h.lead || h.subtitle || h.title,
+      summary_pt: it.summary_pt || h.lead || h.subtitle || h.title,
+      subtitle: h.subtitle || null,
+      direction: ['positive', 'negative', 'mixed'].includes(it.direction) ? it.direction : null,
+      indicator_key: INDICATORS.some((k) => k.key === it.indicator_key) ? it.indicator_key : (CATEGORY_INDICATOR[category] ?? null),
+      asset_classes: classes.length ? classes : (CATEGORY_CLASSES[category] || ['Equities BR']),
+      instruments: [],
+      importance: IMPORTANCE[it.importance] != null ? it.importance : (marketWide ? 'high' : 'medium'),
+      market_wide: marketWide,
+      coverage: c.coverage,
+      impact_note_pt: it.impact_note_pt || null,
+      discussion_prompt_pt: it.discussion_prompt_pt || null,
+      source_id: h.source.id,
+      source_provider: Valor.PROVIDER,
+      source_label: `${Valor.PROVIDER} · manchete`,
+      source_url: h.url,
+      source_title: h.title,
+      published_at: h.published,
+      section: h.section,
+      related: c.related.map((r) => ({ title: r.title, url: r.url, published: r.published, section: r.section, provider: Valor.PROVIDER })),
+      kind: 'headline',
+    });
+    sources.push(h.source);
+  }
+  return { events, sources };
+}
+
 /** A verified news item becomes an event with a source record of its own. */
 function newsToEvents(items, date) {
   const events = []; const sources = [];
@@ -302,8 +553,9 @@ function newsToEvents(items, date) {
     const url = it.source_url;
     let host = 'fonte';
     try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* keep the placeholder */ }
+    const provider = providerName(host);
     const source = makeSource({
-      provider: host, kind: 'news', instrument: it.source_title || it.title, identifier: url,
+      provider, kind: 'news', instrument: it.source_title || it.title, identifier: url,
       requested_range: it.date || date, last_observation: it.date || date, reference: url,
       notes: 'notícia recuperada pelo modelo com busca na web; a URL constou dos resultados da busca',
     });
@@ -324,7 +576,8 @@ function newsToEvents(items, date) {
       impact_note_pt: it.impact_note_pt || null,
       discussion_prompt_pt: it.discussion_prompt_pt || null,
       source_id: source.id,
-      source_label: `${host} · notícia`,
+      source_provider: provider,
+      source_label: `${provider} · notícia`,
       source_url: url,
       source_title: it.source_title || null,
       kind: 'news',
@@ -333,12 +586,12 @@ function newsToEvents(items, date) {
   }
   return { events, sources };
 }
-const compactNews = (e) => ({ id: e.id, date: e.date, title_pt: e.title_pt, category: e.category, importance: e.importance, source_url: e.source_url, source_title: e.source_title, source_label: e.source_label });
+const compactNews = (e) => ({ id: e.id, date: e.date, title_pt: e.title_pt, category: e.category, importance: e.importance, source_url: e.source_url, source_title: e.source_title, source_label: e.source_label, source_provider: e.source_provider ?? null });
 
 function dedupeEvents(events) {
   const seen = new Map();
   for (const e of events) {
-    const key = e.kind === 'news' ? e.id : `${e.indicator_key || ''}|${e.category}`;
+    const key = e.kind === 'news' || e.kind === 'headline' ? e.id : `${e.indicator_key || ''}|${e.category}`;
     const existing = seen.get(key);
     if (!existing || IMPORTANCE[e.importance] < IMPORTANCE[existing.importance]) seen.set(key, e);
     if (!e.indicator_key) seen.set(e.id, e);
@@ -386,8 +639,9 @@ function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRo
     events: events.map((e) => ({
       id: e.id, kind: e.kind || (e.generated ? 'move' : 'curated'), date: e.date, title: e.title, title_pt: e.title_pt ?? null,
       category: e.category, summary: e.summary, summary_pt: e.summary_pt ?? null, importance: e.importance,
+      market_wide: !!e.market_wide, coverage: e.coverage ?? null,
       indicator_key: e.indicator_key ?? null, asset_classes: e.asset_classes || [],
-      source_id: e.source_id ?? null, source_label: e.source_label ?? null, source_url: e.source_url ?? null,
+      source_id: e.source_id ?? null, source_label: e.source_label ?? null, source_url: e.source_url ?? null, source_provider: e.source_provider ?? null,
     })),
     candidates: baseRows.map((r) => ({
       event_id: r.event_id, clients_affected: r.exposure_summary.clients_affected, max_exposure: r.exposure_summary.max_exposure,
@@ -408,16 +662,27 @@ function mergeInference(baseRows, inference, events) {
   const byId = new Map(baseRows.map((r) => [r.event_id, r]));
   const knownSources = new Set(events.map((e) => e.source_id).filter(Boolean));
   const eventById = new Map(events.map((e) => [e.id, e]));
+  // What every row carries regardless of who wrote it: where it came from, and whether it is the story of the day.
+  const attributed = (base) => {
+    const ev = eventById.get(base.event_id) || {};
+    return {
+      kind: ev.kind || (ev.generated ? 'move' : 'curated'),
+      source_url: ev.source_url ?? null,
+      source_title: ev.source_title ?? null,
+      source_provider: ev.source_provider ?? null,
+      published_at: ev.published_at ?? null,
+      related: ev.related ?? [],
+      market_wide: !!ev.market_wide,
+      coverage: ev.coverage ?? null,
+    };
+  };
   const picked = [];
   for (const m of inference?.what_matters || []) {
     const base = byId.get(m?.event_id);
     if (!base || picked.some((p) => p.event_id === base.event_id)) continue;
-    const ev = eventById.get(base.event_id) || {};
     picked.push({
       ...base,
-      kind: ev.kind || (ev.generated ? 'move' : 'curated'),
-      source_url: ev.source_url ?? null,
-      source_title: ev.source_title ?? null,
+      ...attributed(base),
       importance: IMPORTANCE[m.importance] != null ? m.importance : base.importance,
       why_it_matters_pt: typeof m.why_it_matters_pt === 'string' && m.why_it_matters_pt.trim() ? m.why_it_matters_pt.trim() : base.why_it_matters_pt,
       advisor_action_pt: typeof m.advisor_action_pt === 'string' && m.advisor_action_pt.trim() ? m.advisor_action_pt.trim() : base.advisor_action_pt,
@@ -425,11 +690,15 @@ function mergeInference(baseRows, inference, events) {
       inferred: !inference.generated_without_model,
     });
   }
-  if (picked.length) return picked.slice(0, 8);
-  return baseRows.map((r) => {
-    const ev = eventById.get(r.event_id) || {};
-    return { ...r, kind: ev.kind || (ev.generated ? 'move' : 'curated'), source_url: ev.source_url ?? null, source_title: ev.source_title ?? null, source_ids: r.source_id ? [r.source_id] : [], inferred: false };
-  }).slice(0, 8);
+  if (picked.length) {
+    // The story of the day is on the table whether or not the model chose it: the code guarantees it, at the top.
+    for (const base of baseRows) {
+      if (!base.market_wide || picked.some((p) => p.event_id === base.event_id)) continue;
+      picked.unshift({ ...base, ...attributed(base), source_ids: base.source_id ? [base.source_id] : [], inferred: false });
+    }
+    return picked.slice(0, 8);
+  }
+  return baseRows.map((r) => ({ ...r, ...attributed(r), source_ids: r.source_id ? [r.source_id] : [], inferred: false })).slice(0, 8);
 }
 
 async function upsertWorldView(db, advisorId, date, inference, meta) {
@@ -442,7 +711,10 @@ async function upsertWorldView(db, advisorId, date, inference, meta) {
     mode: meta.mode, model: meta.model, prompt_version: meta.promptVersion,
     fallback_reason: inference.fallback_reason ?? null,
     generated_without_model: !!inference.generated_without_model,
-    news: { mode: meta.news.mode, searches: meta.news.searches ?? 0, kept: meta.news.items?.length ?? 0 },
+    news: {
+      mode: meta.news.mode, searches: meta.news.searches ?? 0, kept: meta.news.items?.length ?? 0,
+      headlines: meta.news.headlines ? { provider: meta.news.headlines.provider, mode: meta.news.headlines.mode, items: meta.news.headlines.items, kept: meta.news.headlines.kept, top_story: meta.news.headlines.top_story ?? null } : null,
+    },
     generated_at: nowIso(),
   };
   const existing = await first(db, 'SELECT * FROM world_overviews WHERE advisor_id = ? AND date = ?', advisorId, date);

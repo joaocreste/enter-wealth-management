@@ -534,6 +534,10 @@ export function assembleCanonicalReport({
     discussion_prompt: e.discussion_prompt,
     discussion_prompt_pt: e.discussion_prompt_pt ?? null,
     relevance: e.relevance,
+    // The client sees where the event came from, on the card itself (the ledger holds the record).
+    source_id: e.source_id ?? null,
+    source_label: e.source_label ?? null,
+    source_url: e.source_url ?? null,
     is_discussion_only: true,
   }));
 

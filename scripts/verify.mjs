@@ -17,6 +17,8 @@ import { TrueTypeFont } from '../src/render/pdf/ttf.js';
 import { brandFonts } from '../src/render/fonts/index.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
+import { parseRss, clusterHeadlines, sourceFor, PROVIDER as VALOR } from '../src/adapters/valor.js';
+import { buildWhatMattersTable } from '../src/core/events.js';
 
 let pass = 0; let fail = 0;
 const t = (name, fn) => {
@@ -53,6 +55,49 @@ t('the reporting month is the previous calendar month', () => {
   eq(previousMonth('2026-09-07'), '2026-08');
   eq(previousMonth('2026-01-03'), '2025-12');
   eq(monthBounds('2026-08').priorEnd, '2026-07-31');
+});
+
+console.log('\n  Headlines — what the newsroom published, attributed');
+const FEED = `<?xml version="1.0"?><rss><channel><title>valor</title>
+<item><title>Andr&#233; Mendon&#231;a afasta Andrei Rodrigues da dire&#231;&#227;o da PF</title><atom:subtitle>Ministro do STF atendeu pedido</atom:subtitle><link>https://valor.globo.com/politica/noticia/2026/09/08/a.ghtml</link><guid>https://valor.globo.com/politica/noticia/2026/09/08/a.ghtml</guid><description><![CDATA[ <img src="x.jpg" /><br /> ]]> O ministro André Mendonça, do STF, afastou nesta terça o diretor-geral da PF.</description><pubDate>Tue, 08 Sep 2026 11:59:00 -0300</pubDate></item>
+<item><title>AGU deve contestar decis&#227;o de Mendon&#231;a de afastar diretor da PF alegando viola&#231;&#227;o de compet&#234;ncia</title><link>https://valor.globo.com/politica/noticia/2026/09/08/b.ghtml</link><description>A AGU recorreu da decis&#227;o de Mendon&#231;a.</description><pubDate>Tue, 08 Sep 2026 13:47:00 -0300</pubDate></item>
+<item><title>Lula ignora afastamento de Andrei da PF em evento ap&#243;s decis&#227;o de Mendon&#231;a</title><link>https://valor.globo.com/politica/noticia/2026/09/08/c.ghtml</link><description>x</description><pubDate>Tue, 08 Sep 2026 21:15:00 -0300</pubDate></item>
+<item><title>Apple deve lan&#231;ar amanh&#227; seu primeiro celular de tela dob&#225;vel</title><link>https://valor.globo.com/empresas/noticia/2026/09/08/d.ghtml</link><description>y</description><pubDate>Tue, 08 Sep 2026 08:00:00 -0300</pubDate></item>
+<item><title>Valor 1000: Copacol lidera o setor</title><link>https://valor.globo.com/patrocinado/dino/noticia/2026/09/08/e.ghtml</link><description>z</description><pubDate>Tue, 08 Sep 2026 08:00:00 -0300</pubDate></item>
+</channel></rss>`;
+t('the feed parser reads title, subtitle, link, lead and date, decoding entities and dropping markup', () => {
+  const items = parseRss(FEED);
+  eq(items.length, 5);
+  eq(items[0].title, 'André Mendonça afasta Andrei Rodrigues da direção da PF');
+  eq(items[0].subtitle, 'Ministro do STF atendeu pedido');
+  eq(items[0].link, 'https://valor.globo.com/politica/noticia/2026/09/08/a.ghtml');
+  ok(items[0].lead.startsWith('O ministro André Mendonça'), `lead was "${items[0].lead}"`);
+  ok(!items[0].lead.includes('<img'), 'markup leaked into the lead');
+  eq(items[0].publishedAt.toISOString(), '2026-09-08T14:59:00.000Z');
+});
+t('headlines about one story cluster together and the biggest cluster leads with the line that broke it', () => {
+  const items = parseRss(FEED).slice(0, 4).map((it, i) => ({ id: `h${i}`, title: it.title, subtitle: it.subtitle, lead: it.lead, url: it.link, section: 'politica', published: it.publishedAt.toISOString() }));
+  const clusters = clusterHeadlines(items);
+  eq(clusters[0].size, 3, 'PF/STF cluster size');
+  ok(clusters[0].lead.title.startsWith('André Mendonça afasta'), `lead was "${clusters[0].lead.title}"`);
+  eq(clusters.length, 2, 'Apple stays apart');
+});
+t('every headline carries a source record naming the newspaper and the article', () => {
+  const s = sourceFor({ title: 'x', url: 'https://valor.globo.com/politica/noticia/2026/09/08/a.ghtml', published: '2026-09-08T14:59:00.000Z', section: 'politica' });
+  eq(s.provider, VALOR); eq(s.kind, 'news');
+  eq(s.reference, 'https://valor.globo.com/politica/noticia/2026/09/08/a.ghtml');
+  eq(s.last_observation, '2026-09-08');
+});
+t('the story of the day stays on the table even when no portfolio maps to it, and comes first', () => {
+  const portfolios = [{ client_id: 'c1', client_name: 'A', portfolio: { exposures: { 'Equities BR': 0.3 }, positions: [], base_currency: 'BRL' } }];
+  const rows = buildWhatMattersTable([
+    { id: 'e_move', title: 'Brent up', category: 'commodities', asset_classes: ['Equities BR'], importance: 'high', summary: 's' },
+    { id: 'e_top', title: 'Crise no STF', category: 'politics', asset_classes: ['Real Estate'], importance: 'medium', market_wide: true, coverage: 36, summary: 's' },
+    { id: 'e_low', title: 'Nada', category: 'macro', asset_classes: ['Real Estate'], importance: 'medium', summary: 's' },
+  ], [], portfolios);
+  eq(rows.length, 2, 'the unmapped medium event is dropped, the market-wide one is not');
+  eq(rows[0].event_id, 'e_top');
+  eq(rows[0].coverage, 36);
 });
 
 console.log('\n  Return engine');

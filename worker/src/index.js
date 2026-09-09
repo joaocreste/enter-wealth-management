@@ -22,7 +22,6 @@ import { previousMonth, monthBounds } from '../../src/core/format.js';
 import { INDICATORS } from '../../seed/market.mjs';
 import { seedDatabase } from './seed-runner.js';
 import { artefactLinks, verifyArtefactToken } from './links.js';
-import { dailySeries } from '../../src/adapters/yahoo.js';
 import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
 import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
 import { makeSource } from '../../src/core/sources.js';
@@ -227,7 +226,7 @@ async function route(request, env, url, ctx) {
 
   if (path === '/api/advisor/correlations') {
     if (session.role === 'client') return bad(403, 'advisor surface');
-    return ok(await advisorCorrelations(env, url.searchParams.get('window') || '6m'));
+    return ok(await advisorCorrelations(env, url.searchParams.get('window') || '1y'));
   }
 
   // The monitored indicators over any window, from the daily histories kept in R2 (worker/src/series.js).
@@ -315,13 +314,14 @@ async function advisorOverview(env, ctx, session) {
  * Only indicators with a daily price series take part: the Selic target and the
  * monthly IPCA are policy or monthly series and would correlate with nothing
  * meaningful at a daily frequency, so they are listed as excluded rather than
- * silently dropped. Cached for an hour per window; the underlying Yahoo series
- * are cached by the adapter for longer.
+ * silently dropped. The daily closes come from the histories kept in R2
+ * (worker/src/series.js), adjusted for dividends, so a five-year matrix costs
+ * no provider call. Cached for an hour per window.
  */
-const CORRELATION_WINDOWS = { '3m': 91, '6m': 182, '1y': 365 };
+const CORRELATION_WINDOWS = { '1y': 365, '2y': 730, '5y': 1826 };
 
 async function advisorCorrelations(env, windowKey) {
-  const key = CORRELATION_WINDOWS[windowKey] ? windowKey : '6m';
+  const key = CORRELATION_WINDOWS[windowKey] ? windowKey : '1y';
   const days = CORRELATION_WINDOWS[key];
   const to = new Date().toISOString().slice(0, 10);
   const from = addDays(to, -days);
@@ -334,15 +334,16 @@ async function advisorCorrelations(env, windowKey) {
   const excluded = INDICATORS.filter((i) => !i.yahoo_symbol)
     .map((i) => ({ key: i.key, label: i.label, reason: 'série mensal ou de política, não um preço diário' }));
   for (const ind of INDICATORS.filter((i) => i.yahoo_symbol)) {
-    const s = await dailySeries(ind.yahoo_symbol, from, to);
-    if (s.unavailable || s.points.length < 20) {
+    const s = await S.ensureSeries(env, ind, { from });
+    const points = s.unavailable ? [] : s.points.filter((p) => p.date >= from && p.date <= to).map((p) => ({ date: p.date, close: p.adj ?? p.close }));
+    if (s.unavailable || points.length < 20) {
       excluded.push({ key: ind.key, label: ind.label, reason: s.unavailable ? s.reason : 'série insuficiente no período' });
       continue;
     }
     series.push({
       key: ind.key, label: ind.label, group: ind.group, symbol: ind.yahoo_symbol,
-      first: s.points[0].date, last: s.points[s.points.length - 1].date,
-      returns: logReturns(s.points),
+      first: points[0].date, last: points[points.length - 1].date,
+      returns: logReturns(points),
     });
     sources.push(s.source);
   }

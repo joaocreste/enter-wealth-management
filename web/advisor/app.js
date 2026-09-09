@@ -103,6 +103,7 @@ async function viewOverview() {
   const breached = o.triggers.filter((t) => t.status === 'BREACHED').length;
   const modelWrote = o.inference?.mode === 'model';
   const maxDrift = Math.max(0.01, ...o.drift_alerts.map((d) => Math.abs(d.drift)));
+  const driftGroups = groupDrift(o.drift_alerts);
 
   return frag(
     head(`${greeting()}, ${(ME?.user?.name || '').split(' ')[0]}`,
@@ -112,7 +113,7 @@ async function viewOverview() {
 
     h('div.grid.g4', { style: { marginBottom: '48px' } },
       stat('Sob assessoria', money(CLIENTS.reduce((a, c) => a + (c.portfolio_value || 0), 0), { locale: L }), { sub: `${o.clients_count} carteiras` }),
-      stat('Eventos que importam hoje', String(o.what_matters.length), { sub: modelWrote ? 'selecionados pelo agente de inferência' : 'ordenados por relevância e exposição' }),
+      stat('Eventos que importam hoje', String(o.what_matters.length), newsHealth(o.news, modelWrote)),
       stat('Gatilhos acionados', String(breached), { tone: breached ? 'caution' : '', sub: `de ${o.triggers.length} limiares monitorados` }),
       stat('Desvios de alocação', String(o.drift_alerts.length), { tone: o.drift_alerts.length ? 'caution' : '', sub: 'além do gatilho de rebalanceamento' })),
 
@@ -141,9 +142,7 @@ async function viewOverview() {
           o.what_matters.map((r) => h('tr', {},
             h('td', { style: { minWidth: '220px', maxWidth: '300px' } },
               h('span.name', { text: r.event_pt || r.event }),
-              h('span.sub', {}, `${r.date}${r.source_label ? ` · ${r.source_label}` : ''}`),
-              r.source_url ? h('span.sub', {}, h('a.src-link', { href: r.source_url, target: '_blank', rel: 'noopener', title: r.source_url },
-                h('span', { text: r.source_title || hostOf(r.source_url) }), icon('external', { size: 12 }))) : null,
+              sourceCell(r),
               attentionPills(r)),
             h('td', {}, r.current_move ? moveCell(r.current_move) : h('span.muted', { text: '—' })),
             h('td.why', { style: { minWidth: '240px', maxWidth: '360px' }, text: r.why_it_matters_pt || r.why_it_matters }),
@@ -161,7 +160,7 @@ async function viewOverview() {
     // ── triggers + drift, as bars ───────────────────────────────────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Gatilhos e desvios' }),
-        h('span.meta', { text: `${breached} ${breached === 1 ? 'gatilho acionado' : 'gatilhos acionados'} · ${o.drift_alerts.length} ${o.drift_alerts.length === 1 ? 'desvio' : 'desvios'} além do gatilho de rebalanceamento` })),
+        h('span.meta', { text: `${breached} ${breached === 1 ? 'gatilho acionado' : 'gatilhos acionados'} · ${o.drift_alerts.length} ${o.drift_alerts.length === 1 ? 'desvio' : 'desvios'} em ${driftGroups.length} ${driftGroups.length === 1 ? 'carteira' : 'carteiras'} além do gatilho de rebalanceamento` })),
       h('div.grid.g2', {},
         h('div.card', {},
           h('div.card-h', {}, h('h3', { text: 'Gatilhos de mercado' }),
@@ -184,17 +183,22 @@ async function viewOverview() {
 
         h('div.card', {},
           h('div.card-h', {}, h('h3', { text: 'Desvios de alocação' }), h('span.meta', { text: 'contra a política aprovada; as marcas são a tolerância de rebalanceamento' })),
-          o.drift_alerts.length
-            ? h('div', {}, o.drift_alerts.map((d) => h('div.trg.bars', {},
-              h('span.dot.BREACHED'),
-              h('div', {},
-                h('div.lab', {}, h('a', { href: `#/client/${d.client_id}`, text: d.client_name }), h('span.chip.warn', { text: 'ação devida' })),
-                h('div.det.due', {}, h('b', { text: 'Ação: ' }), d.action_pt || d.action)),
-              h('div.barcol', {},
-                driftBar({ drift: d.drift, tolerance: d.threshold_pp ?? 0.05, scale: maxDrift }),
-                h('span.vals', {},
-                  h('span', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }),
-                  h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))
+          driftGroups.length
+            ? h('div', {}, driftGroups.map((g) => h('div.trg-group', {},
+              h('div.trg.bars.group', {},
+                h('span.dot.BREACHED'),
+                h('div.lab', {}, h('a', { href: `#/client/${g.client_id}`, text: g.client_name }),
+                  h('span.chip.warn', { text: `${g.items.length} ${g.items.length === 1 ? 'desvio' : 'desvios'} · ação devida` }))),
+              g.items.map((d) => h('div.trg.bars.sub', {},
+                h('span'),
+                h('div', {},
+                  h('div.lab', { text: cls(d.asset_classes?.[0]) || d.label_pt || d.label }),
+                  h('div.det.due', {}, h('b', { text: 'Ação: ' }), d.action_pt || d.action)),
+                h('div.barcol', {},
+                  driftBar({ drift: d.drift, tolerance: d.threshold_pp ?? 0.05, scale: maxDrift }),
+                  h('span.vals', {},
+                    h('span', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }),
+                    h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))))
             : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' })))),
 
     // ── correlations ────────────────────────────────────────────────────
@@ -244,19 +248,58 @@ function runSummary(run) {
   return `atualizado ${sameDay ? `às ${time}` : `em ${dateLong(run.finished_at.slice(0, 10), L)} às ${time}`} ${TRIGGER_PT[run.trigger] || ''} · automático todos os dias às 07:00`;
 }
 
+/** Where the day's news came from, said in full: the newspaper feed first, the web scan second. */
 function newsNote(news) {
   if (!news) return null;
-  if (news.mode === 'model') return h('span.muted', { text: `${news.kept} ${news.kept === 1 ? 'notícia' : 'notícias'} com fonte verificada ${news.kept === 1 ? 'entrou' : 'entraram'} na análise, em ${news.searches} buscas.` });
-  if (news.mode === 'failed') return h('span.muted', { text: `A varredura de notícias falhou nesta execução: ${news.reason}.` });
-  return h('span.muted', { text: `A varredura de notícias está desligada: ${news.reason}.` });
+  const parts = [];
+  const hl = news.headlines;
+  if (hl) {
+    if (hl.mode === 'feed') {
+      parts.push(`${hl.items} manchetes do ${hl.provider} nas últimas 36 horas; ${hl.kept} ${hl.kept === 1 ? 'entrou' : 'entraram'} na análise, ${hl.classified_by === 'model' ? 'classificadas pelo modelo' : 'classificadas por regra, sem modelo'}${hl.top_story ? `. Notícia do dia: “${hl.top_story.title}”, ${hl.top_story.coverage} manchetes` : ''}.`);
+    } else {
+      parts.push(`As manchetes do ${hl.provider} não puderam ser lidas nesta execução: ${hl.reason}.`);
+    }
+  }
+  if (news.mode === 'model') parts.push(`Imprensa internacional: ${news.kept} ${news.kept === 1 ? 'notícia' : 'notícias'} com fonte verificada em ${news.searches} buscas.`);
+  else if (news.mode === 'failed') parts.push(`A varredura da imprensa internacional falhou nesta execução: ${news.reason}.`);
+  else parts.push(`A varredura da imprensa internacional está desligada: ${news.reason}.`);
+  return h('span.muted', { text: parts.join(' ') });
+}
+
+/** The figure's caption says plainly when the morning ran without any news. */
+function newsHealth(news, modelWrote) {
+  const feedOk = news?.headlines?.mode === 'feed' && news.headlines.kept > 0;
+  const webOk = news?.mode === 'model' && news.kept > 0;
+  if (news && !feedOk && !webOk) return { tone: 'caution', sub: 'sem noticiário nesta execução — só indicadores e eventos curados' };
+  return { sub: modelWrote ? 'selecionados pelo agente de inferência' : 'ordenados por relevância e exposição' };
 }
 
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+
+/**
+ * Every row names where it came from — provider, date, and the article when
+ * there is one. A headline also lists the other lines the newsroom ran on
+ * the same story, each with its own link.
+ */
+function sourceCell(r) {
+  const provider = r.source_provider || (r.source_label ? r.source_label.replace(/:/, ' · ') : null) || 'fonte não registrada';
+  const when = r.published_at && hhmm(r.published_at) ? `${r.date} ${hhmm(r.published_at)}` : r.date;
+  const label = r.kind === 'headline' ? `${provider} · manchete` : r.kind === 'news' ? `${provider} · notícia` : provider;
+  const link = r.source_url ? h('span.sub', {}, h('a.src-link', { href: r.source_url, target: '_blank', rel: 'noopener', title: r.source_url },
+    h('span', { text: r.kind === 'headline' ? `abrir no ${provider}` : (r.source_title || hostOf(r.source_url)) }), icon('external', { size: 12 }))) : null;
+  const related = r.related?.length ? h('details.related', {},
+    h('summary', { text: `+${r.related.length} ${r.related.length === 1 ? 'manchete relacionada' : 'manchetes relacionadas'} no ${provider}` }),
+    h('ul', {}, r.related.map((x) => h('li', {}, h('a.src-link', { href: x.url, target: '_blank', rel: 'noopener' }, h('span', { text: x.title }), icon('external', { size: 11 })),
+      x.published ? h('span.muted', { text: ` ${hhmm(x.published)}` }) : null)))) : null;
+  return frag(h('span.sub', { text: `${when} · ${label}` }), link, related);
+}
 const fmtLevel = (v, unit) => (v == null ? '—' : unit === 'mtd' ? percent(v, { locale: L, decimals: 1 }) : `${num(v, Math.abs(v) >= 1000 ? 0 : 2)}${unit && !['index', 'price', 'mtd'].includes(unit) ? ` ${unit}` : ''}`);
 
 /** Pills mark what deserves a second look; the numbers carry the direction. */
 function attentionPills(r) {
   const pills = [];
+  if (r.market_wide) pills.push(h('span.chip.warn', { text: r.coverage ? `notícia do dia · ${r.coverage} manchetes` : 'notícia do dia' }));
+  if (r.kind === 'headline') pills.push(h('span.chip', { text: `manchete · ${r.source_provider || 'Valor Econômico'}` }));
   if (r.kind === 'news') pills.push(h('span.chip', { text: 'notícia · fonte citada' }));
   if (r.importance === 'high') pills.push(h('span.chip.warn', { text: 'alta relevância' }));
   const mv = r.current_move?.mtdPct ?? r.current_move?.changePct;
@@ -270,7 +313,7 @@ const SHORT = {
   sp500: 'S&P 500', nasdaq: 'Nasdaq', ibovespa: 'Ibovespa', vix: 'VIX', us10y: 'US 10a', hy_etf: 'HYG', ig_etf: 'LQD',
   usdbrl: 'USD/BRL', eurusd: 'EUR/USD', dxy: 'DXY', gold: 'Ouro', brent: 'Brent', wti: 'WTI', copper: 'Cobre', btc: 'Bitcoin', eth: 'Ether',
 };
-const WINDOWS = [['3m', '3 meses'], ['6m', '6 meses'], ['1y', '12 meses']];
+const WINDOWS = [['1y', '1A', 'os últimos 12 meses'], ['2y', '2A', 'os últimos 2 anos'], ['5y', '5A', 'os últimos 5 anos']];
 
 // ── indicators over a window ──────────────────────────────────────────────
 // The strip reads the daily histories the Worker keeps in R2 (Yahoo Finance);
@@ -418,7 +461,7 @@ function indicatorsSection(o) {
 function correlationSection() {
   const box = h('div.card');
   const meta = h('span.meta');
-  const buttons = h('div.split', {}, WINDOWS.map(([k, label]) => h('button.btn.sm', { dataset: { k }, text: label, onclick: () => load(k) })));
+  const buttons = h('div.win', {}, WINDOWS.map(([k, label, title]) => h('button.btn.sm', { dataset: { k }, text: label, title, onclick: () => load(k) })));
   async function load(k) {
     for (const b of buttons.querySelectorAll('button')) b.classList.toggle('on', b.dataset.k === k);
     mount(box, h('div.loading', {}, loader(), h('span', { text: 'Calculando correlações…' })));
@@ -431,16 +474,28 @@ function correlationSection() {
         h('p.chart-caption', {}, `Correlação de Pearson entre retornos diários (logarítmicos), cada par medido nas datas que ambas as séries observaram`,
           obs ? ` · ${obs.min === obs.max ? obs.min : `${obs.min} a ${obs.max}`} observações por par` : '',
           d.excluded?.length ? ` · fora da matriz: ${d.excluded.map((x) => x.label).join(', ')} — ${d.excluded[0].reason}` : '',
-          ' · fonte: Yahoo Finance.'),
+          ' · fonte: Yahoo Finance, fechamentos diários ajustados, das séries mantidas em R2.'),
         sourcesBlock(d.sources, 'Ver fontes das séries'));
     } catch (err) {
       mount(box, h('div.err', { text: `Não foi possível calcular as correlações: ${err.message}` }));
     }
   }
-  load('6m');
+  load('1y');
   return h('section.section', {},
     h('div.section-h', {}, h('h2', { text: 'Correlações entre os indicadores' }), h('div.split', {}, meta, buttons)),
     box);
+}
+
+/** Drift alerts by client: the portfolio with the widest deviation first, and within it the widest first. */
+function groupDrift(alerts) {
+  const byClient = new Map();
+  for (const d of alerts) {
+    if (!byClient.has(d.client_id)) byClient.set(d.client_id, { client_id: d.client_id, client_name: d.client_name, items: [] });
+    byClient.get(d.client_id).items.push(d);
+  }
+  const groups = [...byClient.values()];
+  for (const g of groups) g.items.sort((a, b) => Math.abs(b.drift) - Math.abs(a.drift));
+  return groups.sort((a, b) => Math.abs(b.items[0].drift) - Math.abs(a.items[0].drift));
 }
 
 function triggerOrder(a, b) {

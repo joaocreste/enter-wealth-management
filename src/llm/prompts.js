@@ -12,7 +12,7 @@
  * model's job is language, not arithmetic.
  */
 
-export const PROMPT_VERSION = 'letter-2026-09-a';
+export const PROMPT_VERSION = 'letter-2026-09-b';
 
 export const SYSTEM_GUARDRAIL = `You are the writing layer of a regulated investment-advisory system at Enter Asset Management.
 
@@ -143,7 +143,7 @@ Absolute rules:
 5. Short sentences. Plain language for a financial advisor, not an economist.`,
     template: `# Task: find today's market events that could matter to a Brazilian wealth-management book
 
-Today is {{date}}. Search for market news from the last two trading days on these themes: Brazil (Copom and the Selic rate, IPCA, fiscal news, the real), United States (Fed, Treasury yields, inflation), global equities (S&P 500, Nasdaq, Ibovespa), credit, FX (USD/BRL, dollar index), commodities (Brent, WTI, gold, copper), digital assets (Bitcoin, Ether). Use at most six searches.
+Today is {{date}}. Search for market news from the last two trading days outside Brazil: United States (Fed, Treasury yields, inflation, employment), global equities (S&P 500, Nasdaq), credit, the dollar (dollar index, EUR/USD), commodities (Brent, WTI, gold, copper), digital assets (Bitcoin, Ether), and the geopolitics that moves those markets. Brazilian domestic news — Copom, IPCA, fiscal policy, politics, the real — reaches the system separately, from Valor Econômico's own feed; do not search for it. Use at most six searches.
 
 ## Output
 
@@ -155,7 +155,7 @@ After searching, return STRICT JSON — an array of at most 8 items — and noth
   "summary": "1 to 2 sentences in English, only what the cited page says",
   "summary_pt": "the same in Brazilian Portuguese",
   "date": "YYYY-MM-DD, the date of the event",
-  "category": "equities | rates | credit | fx | commodities | macro | geopolitics | crypto",
+  "category": "equities | rates | credit | fx | commodities | macro | politics | geopolitics | crypto",
   "direction": "positive | negative | mixed — for the asset classes listed",
   "indicator_key": "one of FACTS.indicator_keys, or null",
   "asset_classes": ["from FACTS.asset_classes"],
@@ -164,6 +164,51 @@ After searching, return STRICT JSON — an array of at most 8 items — and noth
   "discussion_prompt_pt": "one question an advisor can put to a client, in Portuguese. Never an instruction to trade.",
   "source_url": "the exact URL of the search result this rests on",
   "source_title": "the title of that page"
+}]
+
+## FACTS
+
+{{facts}}`,
+  },
+
+  /**
+   * Daily agent 1, Brazil — classify the day's headlines from Valor Econômico.
+   * The model never searches here and never adds a fact: it reads headline,
+   * subtitle and first paragraph, and says which ones matter to a wealth book,
+   * how they reach a portfolio, and which one is the story of the day. Every
+   * answer points at a headline id the code handed it; anything else is dropped.
+   */
+  daily_headlines_classify: {
+    id: 'daily_headlines_classify',
+    title: 'Classify today\'s Valor Econômico headlines for a wealth book',
+    language_out: 'pt-BR',
+    system: `You are the data-gathering agent of a regulated investment-advisory system at Enter Asset Management. You read headlines published by Valor Econômico and decide which ones a financial advisor must be ready to discuss with clients today.
+
+Absolute rules:
+1. You know only what FACTS.headlines carries: title, subtitle, first paragraph, section, time, and how many other headlines cover the same story (coverage). Never add a fact, a name, a number or an outcome that is not in those fields.
+2. Every item you return names one headline_id from FACTS.headlines. An id that is not there is discarded by the code.
+3. Coverage is a fact about the newsroom, not your opinion. The headline with the highest coverage is what every client will ask about today; keep it and mark it market_wide, even when its effect on a portfolio is indirect. Explain the mechanism (currency, rates curve, risk premium) rather than dismissing it.
+4. Do not report sponsored content, rankings, service pieces or opinion columns as events.
+5. Short sentences. Plain language for a financial advisor, not an economist.`,
+    template: `# Task: pick today's Brazilian headlines that matter to this wealth book
+
+Today is {{date}}. FACTS.headlines lists the most covered stories in Valor Econômico over the last 36 hours, each with an id. Choose at most 6.
+
+## Output
+
+Return STRICT JSON — an array — and nothing else:
+
+[{
+  "headline_id": "the id from FACTS.headlines",
+  "category": "one of FACTS.categories",
+  "direction": "positive | negative | mixed — for the asset classes listed",
+  "indicator_key": "one of FACTS.indicator_keys the story bears on most directly, or null",
+  "asset_classes": ["from FACTS.asset_classes; never empty"],
+  "importance": "high | medium | low",
+  "market_wide": "true only for the story of the day — the one with the most coverage, or a fired policy decision",
+  "summary_pt": "1 to 2 sentences in Brazilian Portuguese: only what the headline, subtitle and first paragraph say",
+  "impact_note_pt": "1 sentence: the mechanism by which this reaches a client portfolio, in Portuguese",
+  "discussion_prompt_pt": "one question an advisor can put to a client, in Portuguese. Never an instruction to trade."
 }]
 
 ## FACTS
@@ -222,7 +267,9 @@ Return STRICT JSON with this exact shape and nothing else:
 ## Rules specific to this task
 
 - Rank by what matters for THESE portfolios: FACTS.book gives each client's exposure by asset class and FACTS.candidates says which clients each event touches. An event nobody is exposed to is dropped unless it is high importance for the market as a whole.
+- An event with market_wide true is the most covered story in the Brazilian press today (coverage says how many headlines). It is always kept and it comes first, unless a fired threshold in FACTS.triggers outranks it. Write why it matters through the mechanism — the real, the rates curve, the risk premium on Brazilian assets — and never say it is irrelevant because the exposure is small: the clients will ask about it anyway.
 - Keep at most 8 events, ordered by importance. Merge events that share one cause by keeping the one with the better source.
+- Every event you keep is attributed: the source_ids you cite are how the portal names the provider (Valor Econômico, Yahoo Finance, Banco Central) next to the row. An item without a source id is dropped.
 - Quote a level or a move only as the strings FACTS.indicators carry — level, day, mtd — copied verbatim, already formatted for Brazil. Never write a figure in any other form, never with more decimals, and never from memory. For a news event, say only what its summary says.
 - Every source id you cite must exist in FACTS. Never invent one.
 - A fired threshold in FACTS.triggers is always worth an event when one exists for its indicator.
@@ -280,7 +327,7 @@ Return STRICT JSON: an array of event objects.
 [{
   "id": "reuse the id from FACTS when the event came from FACTS.curated_events, otherwise 'evt_synth_<slug>'",
   "title": "under 80 characters, states the finding not the variable",
-  "category": "equities | rates | credit | fx | commodities | macro | geopolitics | crypto | market_move",
+  "category": "equities | rates | credit | fx | commodities | macro | politics | geopolitics | crypto | market_move",
   "why_it_matters": "1 to 2 sentences, for an advisor not an economist",
   "impact_note": "1 to 2 sentences on the mechanism by which this reaches a client portfolio",
   "discussion_prompt": "one question an advisor can put to a client. Never an instruction to trade.",

@@ -94,7 +94,9 @@ export function buildWhatMattersTable(events, indicators, clientPortfolios) {
       ...mapEventToPortfolio(event, cp.portfolio),
     })).filter((r) => r.relevance !== 'none');
 
-    if (!perClient.length && event.importance !== 'high') continue;
+    // A story the whole market is reading stays on the table even when the
+    // exposure arithmetic finds little: the clients will ask about it anyway.
+    if (!perClient.length && event.importance !== 'high' && !event.market_wide) continue;
 
     const indicator = indicators.find((i) => i.key === event.indicator_key) || null;
     rows.push({
@@ -118,6 +120,8 @@ export function buildWhatMattersTable(events, indicators, clientPortfolios) {
       advisor_action: event.discussion_prompt || 'Review exposure and confirm it remains inside the approved policy range.',
       advisor_action_pt: event.discussion_prompt_pt || 'Revisar a exposição e confirmar que ela segue dentro da faixa aprovada na política.',
       importance: event.importance || 'medium',
+      market_wide: !!event.market_wide,
+      coverage: event.coverage ?? null,
       per_client: perClient,
       source_id: event.source_id ?? null,
       source_label: event.source_label ?? null,
@@ -126,6 +130,7 @@ export function buildWhatMattersTable(events, indicators, clientPortfolios) {
   }
   const order = { high: 0, medium: 1, low: 2 };
   return rows.sort((a, b) =>
+    (Number(b.market_wide) - Number(a.market_wide)) ||
     (order[a.importance] - order[b.importance]) ||
     (b.exposure_summary.max_exposure - a.exposure_summary.max_exposure));
 }

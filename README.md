@@ -57,7 +57,10 @@ npm run run:overview
 
 Without a key the narrative is produced by a deterministic Portuguese renderer,
 the report records `narrative_mode: "deterministic_template"`, and the daily
-agents skip the news scan and rank events by rule. To use a model:
+agents skip the web scan of the international press and rank events by rule.
+The Brazilian headlines still arrive: Valor Econômico's feed needs no key, and
+without a model the most covered stories enter classified by rule, summarised
+by the newsroom's own first paragraph. To use a model:
 
 ```bash
 echo 'ANTHROPIC_API_KEY = "sk-ant-..."' >> .dev.vars     # local
@@ -78,6 +81,7 @@ validation.
 | Every listed price (Yahoo Finance, TradingView) | Albert's identity, advisor, risk profile | Monthly quota values for Brazilian funds |
 | CDI, Selic, IPCA, PTAX (Banco Central) | The May 2025 XP position statement, reproduced as snapshot v1 | Return history before the platform existed |
 | TradingView technical ratings and analyst consensus | XP's February 2025 macro projections | The four demo clients other than Albert |
+| The day's headlines (Valor Econômico RSS), each linked to its article | | |
 | The policy benchmark, composed from the above | | |
 
 Simulated data carries `mocked: true` in its source record, shows a `SIMULADO` chip in
@@ -97,6 +101,7 @@ Rivet graph  ──HTTP──▶  Cloudflare Worker  ──▶  D1   relational 
    │                    provider chain: Yahoo → TradingView → DATA UNAVAILABLE
    │                                    BCB (authoritative for BRL rates and FX)
    │                                    CoinGecko (digital assets)
+   │                                    Valor Econômico RSS (Brazilian headlines, linked)
    ▼
 LLM stage: prompts held in the graph, FACTS object built in code
 ```
@@ -214,7 +219,7 @@ each agent is doing while it runs.
 
 | | Agent | What it does | With a model | Without |
 |---|---|---|---|---|
-| 1 | **Dados** | Retrieves every monitored indicator (Yahoo Finance, Banco Central, CoinGecko), the curated events and the events generated from significant moves — each with a source record. With Claude, also scans the web for today's news: every item must carry the URL of a search result, and the code drops any item whose URL was not actually among the results. | Claude with web search, citations verified | indicators and curated events only |
+| 1 | **Dados** | Retrieves every monitored indicator (Yahoo Finance, Banco Central, CoinGecko), the curated events and the events generated from significant moves — each with a source record. Reads the last 36 hours of headlines from **Valor Econômico's public RSS feeds** (capa, política, finanças, brasil, empresas, mundo), groups the lines that name the same people and institutions, and treats the biggest group as the *story of the day* — a fact about the newsroom, computed in code. With Claude, the model classifies the most covered headlines (category, asset classes, mechanism, discussion prompt) and scans the web for the international press; every item must point at a headline id or a search-result URL the code handed over, and anything else is dropped. | Claude classifies the headlines and searches the international press, citations verified | headlines still arrive and are classified by rule, summarised by the newsroom's own first paragraph; no web scan |
 | 2 | **Inferência** | Reads what agent 1 gathered plus every client's exposure by asset class, decides what matters for *this* book today, ranks it, and writes the day's summary and the What Matters rows in Portuguese. The code keeps the exposure arithmetic; the model never gets to write a number that is not in the facts. | Claude (`ANTHROPIC_MODEL`) | a Portuguese template ranked by rule |
 | 3 | **Gatilhos** | Evaluates every configured threshold and every client's allocation drift against their policy, with a *proximity* (1.0 = at the threshold) so the portal draws each as a bar and says plainly when an action is due. | pure code | pure code |
 
@@ -245,7 +250,8 @@ to 1990. Variation is measured on the unadjusted close, the price the strip show
 so a dividend restatement never makes merged history inconsistent. Every response
 carries the source record of each series. `POST /api/advisor/indicators/series/rebuild`
 downloads every history again; the daily cron refreshes the store after it starts
-the overview runs.
+the overview runs. The correlation matrix (1, 2 or 5 years) reads the same store,
+using the adjusted closes.
 
 ### The portal's design
 

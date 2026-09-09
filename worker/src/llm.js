@@ -155,6 +155,26 @@ function normaliseUrl(u) {
   } catch { return String(u).trim().toLowerCase(); }
 }
 
+/**
+ * Daily agent 1, Brazil — the model classifies headlines the code already
+ * fetched from Valor Econômico. No search, no tool: a plain completion over
+ * FACTS.headlines. An answer that names a headline id the code did not hand
+ * over is dropped, the same discipline as the URL check above.
+ */
+export async function classifyHeadlines(env, facts, { maxTokens = 5000 } = {}) {
+  const r = await runPrompt(env, 'daily_headlines_classify', facts, { maxTokens });
+  const items = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.items) ? r.data.items : [];
+  const known = new Map((facts.headlines || []).map((h) => [h.id, h]));
+  const kept = []; const dropped = [];
+  for (const it of items) {
+    const h = it && known.get(it.headline_id);
+    if (!h) { dropped.push({ title: it?.summary_pt?.slice(0, 80) || it?.headline_id || '(sem id)', reason: 'id de manchete não consta do feed' }); continue; }
+    if (kept.some((k) => k.headline_id === it.headline_id)) continue;
+    kept.push(it);
+  }
+  return { items: kept, dropped, model: r.model, prompt_version: r.prompt_version, usage: r.usage };
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Deterministic fallbacks
 // ───────────────────────────────────────────────────────────────────────────

@@ -199,7 +199,8 @@ async function viewMatters() {
         h('span.meta', { text: i.exposure?.total_exposure ? `exposição ${weight(i.exposure.total_exposure, { locale: L, decimals: 1 })}` : '' })),
       h('p.note', { text: i.potential_impact_pt || i.potential_impact }),
       i.exposure?.asset_classes?.length ? h('div.split', { style: { marginTop: '10px' } },
-        i.exposure.asset_classes.map((a) => h('span.chip', { text: `${cls(a.asset_class)} ${weight(a.weight, { locale: L, decimals: 1 })}` }))) : null)))
+        i.exposure.asset_classes.map((a) => h('span.chip', { text: `${cls(a.asset_class)} ${weight(a.weight, { locale: L, decimals: 1 })}` }))) : null,
+      sourceNote(i, c.sources))))
       : h('div.empty', { text: 'Nenhum evento do período teve efeito material sobre as classes de ativo da sua carteira.' }),
 
     h('p.note', { style: { marginTop: '18px' }, text: 'Esta seção descreve o que aconteceu no mercado e como isso se relaciona com a sua carteira. Ela não é uma recomendação de compra ou venda.' }),
@@ -278,6 +279,19 @@ async function viewDocuments() {
             h('a.btn.sm', { href: apiUrl(r.links?.portal || `/api/reports/${r.id}/portal`), target: '_blank' }, icon('external', { size: 13 }), h('span', { text: 'carta' })))))))
       : h('div.empty', { text: 'Nenhuma carta publicada ainda.' }),
   );
+}
+
+/** Every event names its source on the card itself, not only in the ledger at the foot of the page. */
+function sourceNote(i, sources) {
+  const src = (sources || []).find((s) => s.id === i.source_id) || null;
+  const provider = src?.provider || i.source_label || null;
+  const url = src?.reference || i.source_url || null;
+  const when = src?.last_observation ? ` · dados até ${src.last_observation}` : '';
+  return h('p.note.src', { style: { marginTop: '10px' } }, 'Fonte: ',
+    provider
+      ? (url && /^https?:/.test(url) ? h('a.src-link', { href: url, target: '_blank', rel: 'noopener' }, h('span', { text: provider }), icon('external', { size: 12 })) : provider)
+      : 'não registrada',
+    when);
 }
 
 function notPublished() {

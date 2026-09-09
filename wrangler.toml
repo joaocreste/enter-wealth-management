@@ -63,5 +63,7 @@ REPORT_LOCALE = "pt-BR"
 BASE_CURRENCY = "BRL"
 # Set with: wrangler secret put ANTHROPIC_API_KEY
 # ANTHROPIC_MODEL is a plain var so the model in use is visible in the audit trail.
+# The prompt version is not configured here: it is PROMPT_VERSION in
+# src/llm/prompts.js, so the provenance block can never name a version the
+# deployed prompts do not have.
 ANTHROPIC_MODEL = "claude-opus-5"
-LLM_PROMPT_VERSION = "letter-2026-09-a"

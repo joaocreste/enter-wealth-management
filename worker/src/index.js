@@ -23,6 +23,7 @@ import { INDICATORS } from '../../seed/market.mjs';
 import { seedDatabase } from './seed-runner.js';
 import { artefactLinks, verifyArtefactToken } from './links.js';
 import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
+import { PROMPT_VERSION } from '../../src/llm/prompts.js';
 import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
 import { makeSource } from '../../src/core/sources.js';
 import * as A from './agents.js';
@@ -807,7 +808,7 @@ async function pipelineRoutes(env, step, body, session) {
     const month = body.month || previousMonth(new Date().toISOString().slice(0, 10));
     await run(db, 'INSERT INTO graph_runs (id, graph_name, client_id, advisor_id, started_at, status, prompt_version, inputs_json, outputs_json) VALUES (?,?,?,?,?,?,?,?,?)',
       runId, body.graph || 'monthly_client_report', body.client_id ?? null, body.advisor_id ?? null,
-      nowIso(), 'running', body.prompt_version || env.LLM_PROMPT_VERSION || null, JSON.stringify(body), '{}');
+      nowIso(), 'running', body.prompt_version || PROMPT_VERSION || null, JSON.stringify(body), '{}');
     return ok({ run_id: runId, month, started_at: nowIso() });
   }
 
@@ -1061,7 +1062,7 @@ async function pipelineRoutes(env, step, body, session) {
         rationales: body.rationales && Object.keys(body.rationales).length ? body.rationales : LLM.deterministicRationales(facts),
         mode: body.mode || 'model_via_rivet',
         model: body.model || null,
-        prompt_version: body.prompt_version || env.LLM_PROMPT_VERSION,
+        prompt_version: body.prompt_version || PROMPT_VERSION,
       };
     } else {
       narrative = await buildNarrative(env, state, body);
@@ -1275,7 +1276,7 @@ async function buildNarrative(env, state, body) {
     rationales = LLM.deterministicRationales(facts);
     mode = LLM.llmAvailable(env) ? 'deterministic_fallback_after_error' : 'deterministic_template';
   }
-  return { letter, rationales: rationales || {}, mode, model, prompt_version: env.LLM_PROMPT_VERSION, fallback_reason: fallbackReason, facts_digest: Object.keys(facts) };
+  return { letter, rationales: rationales || {}, mode, model, prompt_version: PROMPT_VERSION, fallback_reason: fallbackReason, facts_digest: Object.keys(facts) };
 }
 
 /** The FACTS object. Nothing outside it may appear in the letter. */

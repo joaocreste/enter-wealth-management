@@ -18,7 +18,7 @@ import { brandFonts } from '../src/render/fonts/index.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
 import { parseRss, clusterHeadlines, sourceFor, PROVIDER as VALOR } from '../src/adapters/valor.js';
-import { buildWhatMattersTable } from '../src/core/events.js';
+import { buildWhatMattersTable, notableWindow } from '../src/core/events.js';
 
 let pass = 0; let fail = 0;
 const t = (name, fn) => {
@@ -87,6 +87,19 @@ t('every headline carries a source record naming the newspaper and the article',
   eq(s.provider, VALOR); eq(s.kind, 'news');
   eq(s.reference, 'https://valor.globo.com/politica/noticia/2026/09/08/a.ghtml');
   eq(s.last_observation, '2026-09-08');
+});
+t('the move column shows the day, and a longer window only when notable, always with its timeframe', () => {
+  eq(notableWindow({ d5Pct: 0.012, d30Pct: 0.031 }), null, 'a quiet week and month earn no second line');
+  const five = notableWindow({ d5Pct: -0.034, d30Pct: 0.12 });
+  eq(five.key, '5d'); eq(five.label_pt, 'em 5 sessões');
+  const thirty = notableWindow({ d5Pct: 0.01, d30Pct: 0.09, d30From: '2026-08-09' });
+  eq(thirty.key, '30d'); eq(thirty.label_pt, 'em 30 dias'); eq(thirty.from, '2026-08-09');
+  const portfolios = [{ client_id: 'c1', client_name: 'A', portfolio: { exposures: { Commodities: 0.1 }, positions: [], base_currency: 'BRL' } }];
+  const [row] = buildWhatMattersTable(
+    [{ id: 'e', title: 'Brent', category: 'commodities', asset_classes: ['Commodities'], importance: 'high', indicator_key: 'brent', summary: 's' }],
+    [{ key: 'brent', price: 99.36, unit: 'USD/bbl', changePct: 0.014, d5Pct: 0.02, d30Pct: 0.09, mtdPct: 0.134 }], portfolios);
+  eq(row.current_move.changePct, 0.014, 'the day move is always carried');
+  eq(row.current_move.notable.key, '30d', 'the notable window is decided in code, not in the browser');
 });
 t('the story of the day stays on the table even when no portfolio maps to it, and comes first', () => {
   const portfolios = [{ client_id: 'c1', client_name: 'A', portfolio: { exposures: { 'Equities BR': 0.3 }, positions: [], base_currency: 'BRL' } }];

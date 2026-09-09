@@ -29,6 +29,7 @@ import { NonRetryableError } from 'cloudflare:workflows';
 import { all, first, run, id, json, nowIso, audit, currentSnapshot, snapshotPositions, currentPolicy } from './db.js';
 import * as P from './pipeline.js';
 import * as LLM from './llm.js';
+import * as S from './series.js';
 import { INDICATORS, MACRO_VINTAGE } from '../../seed/market.mjs';
 import { indicatorQuote } from '../../src/adapters/marketdata.js';
 import * as Valor from '../../src/adapters/valor.js';
@@ -157,9 +158,11 @@ async function agentDados(env, runId) {
       indicators.push(await indicatorQuote(ind));
     }
     const retrieved = indicators.filter((i) => !i.unavailable).length;
-    await report(1, 27, `Agente 1 · Dados — ${retrieved} de ${indicators.length} indicadores recuperados; lendo os eventos curados e os movimentos relevantes do mês`);
+    await report(1, 26, `Agente 1 · Dados — ${retrieved} de ${indicators.length} indicadores recuperados; medindo 5 sessões e 30 dias nas séries diárias em R2`);
+    await windowMoves(env, indicators);
+    await report(1, 27, 'Agente 1 · Dados — lendo os eventos curados e os movimentos que se destacam em 5 sessões ou 30 dias');
     const curated = await P.loadMarketEvents(env, { since: addDays(date, -21), limit: 20 });
-    const generated = P.eventsFromIndicatorMoves(indicators);
+    const generated = P.eventsFromIndicatorMoves(indicators, { window: 'notable' });
 
     // Brazil comes from the newsroom, not from a search: Valor Econômico's public feeds.
     await report(1, 29, 'Agente 1 · Dados — lendo as manchetes do Valor Econômico (feeds RSS: capa, política, finanças, brasil, empresas, mundo)');
@@ -290,6 +293,29 @@ async function agentGatilhos(env, runId, s) {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const providerOf = (ind) => (ind.coingecko_id ? 'CoinGecko' : ind.yahoo_symbol ? 'Yahoo Finance' : 'Banco Central do Brasil');
+
+/**
+ * The day move comes with the quote. The five-session and thirty-day moves
+ * come from the daily histories kept in R2 (worker/src/series.js), measured
+ * on the unadjusted close like the indicators strip, so the table and the
+ * strip can never disagree about the same window. A series that fails leaves
+ * the indicator with its day move only.
+ */
+async function windowMoves(env, indicators) {
+  for (const ind of indicators) {
+    const def = INDICATORS.find((i) => i.key === ind.key);
+    if (ind.unavailable || !def?.yahoo_symbol) continue;
+    try {
+      const s = await S.ensureSeries(env, def);
+      if (s.unavailable) continue;
+      const v5 = S.windowView(s, S.windowBounds('5d'));
+      const v30 = S.windowView(s, S.windowBounds('30d'));
+      ind.d5Pct = v5?.change_pct ?? null; ind.d5From = v5?.start.date ?? null;
+      ind.d30Pct = v30?.change_pct ?? null; ind.d30From = v30?.start.date ?? null;
+      ind.windowsAsOf = (v30 || v5)?.end.date ?? null;
+    } catch { /* the day move stands on its own */ }
+  }
+}
 
 async function bookExposures(db, advisorId) {
   const clients = await all(db, 'SELECT * FROM clients WHERE advisor_id = ?', advisorId);
@@ -604,6 +630,7 @@ export function compactIndicator(i) {
   return {
     key: i.key, label: i.label, group: def?.group ?? null,
     unit: i.unit, price: i.price ?? null, changePct: i.changePct ?? null, mtdPct: i.mtdPct ?? null,
+    d5Pct: i.d5Pct ?? null, d5From: i.d5From ?? null, d30Pct: i.d30Pct ?? null, d30From: i.d30From ?? null,
     asOf: i.asOf ?? null, name: i.name ?? null,
     unavailable: !!i.unavailable, reason: i.reason ?? null,
     providers_attempted: i.providers_attempted ?? null,
@@ -629,6 +656,8 @@ function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRo
       key: i.key, label: i.label, unit: i.unit,
       level: levelText(i.price, i.unit),
       day: i.changePct == null ? null : percent(i.changePct, { decimals: 1 }),
+      d5: i.d5Pct == null ? null : percent(i.d5Pct, { decimals: 1 }),
+      d30: i.d30Pct == null ? null : percent(i.d30Pct, { decimals: 1 }),
       mtd: i.mtdPct == null ? null : percent(i.mtdPct, { decimals: 1 }),
       asOf: i.asOf ?? null, unavailable: !!i.unavailable, source_id: i.source?.id ?? null,
     })),

@@ -11,6 +11,21 @@
  * without touching this file.
  */
 
+/** How a move is named beside its figure. A move without its timeframe is a number without a unit. */
+export const MOVE_WINDOWS = { day: 'no dia', '5d': 'em 5 sessões', '30d': 'em 30 dias' };
+
+/**
+ * The one longer window worth showing beside the day move: five sessions when
+ * they moved 3% or more, else thirty days at 5% or more, else nothing. The
+ * day move is always shown; this is the exception that earns a second line.
+ */
+export function notableWindow(ind, { d5 = 0.03, d30 = 0.05 } = {}) {
+  if (!ind) return null;
+  if (ind.d5Pct != null && Math.abs(ind.d5Pct) >= d5) return { key: '5d', pct: ind.d5Pct, label_pt: MOVE_WINDOWS['5d'], from: ind.d5From ?? null };
+  if (ind.d30Pct != null && Math.abs(ind.d30Pct) >= d30) return { key: '30d', pct: ind.d30Pct, label_pt: MOVE_WINDOWS['30d'], from: ind.d30From ?? null };
+  return null;
+}
+
 /**
  * @param {object} event      { id, date, title, category, summary, direction, magnitude, asset_classes, instruments, importance, source_id }
  * @param {object} portfolio  { exposures: {class: weight}, positions: [{ticker, asset_class, weight, currency}], base_currency }
@@ -106,7 +121,13 @@ export function buildWhatMattersTable(events, indicators, clientPortfolios) {
       event_pt: event.title_pt ?? null,
       indicator_key: event.indicator_key ?? null,
       current_move: indicator
-        ? { value: indicator.price, changePct: indicator.changePct, mtdPct: indicator.mtdPct, unit: indicator.unit, asOf: indicator.asOf, unavailable: !!indicator.unavailable }
+        ? {
+          value: indicator.price, unit: indicator.unit, asOf: indicator.asOf, unavailable: !!indicator.unavailable,
+          changePct: indicator.changePct ?? null,               // the day: always shown
+          d5Pct: indicator.d5Pct ?? null, d30Pct: indicator.d30Pct ?? null,
+          notable: notableWindow(indicator),                    // the one longer window worth a second line, timeframe named
+          mtdPct: indicator.mtdPct ?? null,                     // kept for the strip; the table does not show it
+        }
         : (event.move_label ? { label: event.move_label } : null),
       why_it_matters: event.summary,
       why_it_matters_pt: event.summary_pt ?? null,

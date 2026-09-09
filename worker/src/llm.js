@@ -298,11 +298,14 @@ export function deterministicDailyInference(facts) {
   const ind = Object.fromEntries((facts.indicators || []).map((i) => [i.key, i]));
   const fired = (facts.triggers || []).filter((t) => t.status === 'BREACHED');
   const n = (v, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
-  const say = (k, fmt) => {
+  // FACTS.indicators carries the figures as formatted strings (level, day,
+  // d30), so the template quotes exactly what the model would have quoted,
+  // with the timeframe written out.
+  const say = (k) => {
     const i = ind[k];
-    if (!i || i.unavailable || i.price == null) return null;
-    const mtd = i.mtdPct != null ? ` (${i.mtdPct >= 0 ? '+' : MINUS}${n(Math.abs(i.mtdPct * 100), 1)}% no mês)` : '';
-    return `${i.label} em ${fmt(i.price)}${mtd}`;
+    if (!i || i.unavailable || !i.level) return null;
+    const moves = [i.day ? `${i.day} no dia` : null, i.d30 ? `${i.d30} em 30 dias` : null].filter(Boolean);
+    return `${i.label} em ${i.level}${moves.length ? ` (${moves.join('; ')})` : ''}`;
   };
   const join = (...xs) => xs.filter(Boolean).join('; ');
   const headline = fired.length

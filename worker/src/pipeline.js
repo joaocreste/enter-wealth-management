@@ -18,7 +18,7 @@ import { monthlyProfitability, compareToBenchmark, historicalMetrics } from '../
 import { buildRecommendations } from '../../src/core/recommendations.js';
 import { runSuitability } from '../../src/core/suitability.js';
 import { evaluateTrigger, mapTriggersToClients, driftTriggers, TRIGGER_STATUS } from '../../src/core/triggers.js';
-import { buildWhatMattersTable, mapEventToPortfolio } from '../../src/core/events.js';
+import { buildWhatMattersTable, mapEventToPortfolio, notableWindow } from '../../src/core/events.js';
 import { previousMonth, monthBounds } from '../../src/core/format.js';
 import { emptyReport, validateReport, standardDisclosures, REPORT_SCHEMA_VERSION } from '../../src/core/report-schema.js';
 import { useKv } from '../../src/adapters/cache.js';
@@ -296,27 +296,47 @@ export async function loadMarketEvents(env, { since = null, limit = 25 } = {}) {
   }));
 }
 
-/** Turn a significant indicator move into an event row of its own (§6, §8). */
-export function eventsFromIndicatorMoves(indicators, { mtdThreshold = 0.05 } = {}) {
+/**
+ * Turn a significant indicator move into an event row of its own (§6, §8).
+ *
+ * `window: 'mtd'` measures the reporting month, which is what the monthly
+ * letter is about. `window: 'notable'` is for the daily overview: five
+ * sessions at 3% or more, else thirty days at 5% or more (see notableWindow),
+ * and the timeframe is written into the title, because "up 13% this month" on
+ * the sixth session of the month says less than it seems to.
+ */
+export function eventsFromIndicatorMoves(indicators, { mtdThreshold = 0.05, window = 'mtd' } = {}) {
   const out = [];
   for (const ind of indicators) {
-    if (ind.unavailable || ind.mtdPct == null) continue;
-    if (Math.abs(ind.mtdPct) < mtdThreshold) continue;
-    const up = ind.mtdPct > 0;
+    if (ind.unavailable) continue;
+    let pct; let en; let pt; let label;
+    if (window === 'notable') {
+      const w = notableWindow(ind);
+      if (!w) continue;
+      pct = w.pct; label = w.key === '5d' ? '5D' : '30D';
+      en = w.key === '5d' ? 'over 5 sessions' : 'over 30 days';
+      pt = w.label_pt;
+    } else {
+      if (ind.mtdPct == null || Math.abs(ind.mtdPct) < mtdThreshold) continue;
+      pct = ind.mtdPct; label = 'MTD'; en = 'month to date'; pt = 'no mês até aqui';
+    }
+    const up = pct > 0;
+    const abs = (Math.abs(pct) * 100).toFixed(1);
     out.push({
       id: `evt_move_${ind.key}`,
       date: ind.asOf || new Date().toISOString().slice(0, 10),
-      title: `${ind.label} ${up ? 'up' : 'down'} ${(Math.abs(ind.mtdPct) * 100).toFixed(1)}% month to date`,
-      title_pt: `${ind.label}: ${up ? 'alta' : 'queda'} de ${(Math.abs(ind.mtdPct) * 100).toFixed(1).replace('.', ',')}% no mês`,
+      title: `${ind.label} ${up ? 'up' : 'down'} ${abs}% ${en}`,
+      title_pt: `${ind.label}: ${up ? 'alta' : 'queda'} de ${abs.replace('.', ',')}% ${pt}`,
       category: 'market_move',
-      summary: `${ind.label} is at ${formatIndicator(ind)}, a ${up ? 'gain' : 'fall'} of ${(Math.abs(ind.mtdPct) * 100).toFixed(1)}% since the start of the month.`,
-      summary_pt: `${ind.label} está em ${formatIndicator(ind)}, ${up ? 'alta' : 'queda'} de ${(Math.abs(ind.mtdPct) * 100).toFixed(1).replace('.', ',')}% desde o início do mês.`,
+      summary: `${ind.label} is at ${formatIndicator(ind)}, a ${up ? 'gain' : 'fall'} of ${abs}% ${en}.`,
+      summary_pt: `${ind.label} está em ${formatIndicator(ind)}, ${up ? 'alta' : 'queda'} de ${abs.replace('.', ',')}% ${pt}.`,
       direction: up ? 'positive' : 'negative',
-      move_label: `${up ? '+' : '−'}${(Math.abs(ind.mtdPct) * 100).toFixed(1)}% MTD`,
+      move_label: `${up ? '+' : '−'}${abs}% ${label}`,
+      move_window: window === 'notable' ? (label === '5D' ? '5d' : '30d') : 'mtd',
       indicator_key: ind.key,
       asset_classes: ind.asset_classes || [],
       instruments: [],
-      importance: Math.abs(ind.mtdPct) >= 0.10 ? 'high' : 'medium',
+      importance: Math.abs(pct) >= (window === 'notable' && label === '5D' ? 0.06 : 0.10) ? 'high' : 'medium',
       source_id: ind.source?.id ?? null,
       source_label: ind.source ? `${ind.source.provider} · ${ind.source.identifier}` : null,
       discussion_prompt_pt: `Revisar a exposição a ${ind.label} e confirmar que ela segue dentro da faixa aprovada.`,

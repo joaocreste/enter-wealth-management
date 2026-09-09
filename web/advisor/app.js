@@ -302,8 +302,10 @@ function attentionPills(r) {
   if (r.kind === 'headline') pills.push(h('span.chip', { text: `manchete · ${r.source_provider || 'Valor Econômico'}` }));
   if (r.kind === 'news') pills.push(h('span.chip', { text: 'notícia · fonte citada' }));
   if (r.importance === 'high') pills.push(h('span.chip.warn', { text: 'alta relevância' }));
-  const mv = r.current_move?.mtdPct ?? r.current_move?.changePct;
-  if (Number.isFinite(mv) && Math.abs(mv) >= 0.10) pills.push(h('span.chip', { text: 'movimento forte' }));
+  const day = r.current_move?.changePct;
+  const longer = r.current_move?.notable;
+  if (Number.isFinite(day) && Math.abs(day) >= 0.02) pills.push(h('span.chip', { text: 'movimento forte no dia' }));
+  else if (longer && Math.abs(longer.pct) >= (longer.key === '5d' ? 0.06 : 0.10)) pills.push(h('span.chip', { text: `movimento forte ${longer.label_pt}` }));
   if ((r.exposure_summary?.max_exposure ?? 0) >= 0.4) pills.push(h('span.chip.warn', { text: 'exposição alta' }));
   return pills.length ? h('div.pills', {}, pills) : null;
 }
@@ -512,13 +514,24 @@ function formatIndicator(i) {
   return num(i.price, i.price > 1000 ? 0 : 2);
 }
 
+/**
+ * The move is the day's move, named as such. A longer window appears only
+ * when the Worker found it notable (5 sessions at 3%+, else 30 days at 5%+),
+ * and then with its timeframe written out — never a bare percentage.
+ */
 function moveCell(m) {
-  if (m.label) return h('span.move', { class: /−/.test(m.label) ? 'loss' : /\+/.test(m.label) ? 'gain' : '', text: m.label });
+  if (m.label) return h('span.move', { class: /−/.test(m.label) ? 'loss' : /\+/.test(m.label) ? 'gain' : '', text: m.label.replace(/\bMTD$/, 'no mês até aqui').replace(/\b5D$/, 'em 5 sessões').replace(/\b30D$/, 'em 30 dias') });
   if (m.unavailable) return h('span.muted', { text: 'DATA UNAVAILABLE' });
-  const pctv = m.mtdPct ?? m.changePct;
+  const day = m.changePct;
+  const longer = m.notable;
+  const level = `${m.value != null ? num(m.value, m.value > 1000 ? 0 : 2) : '—'}${m.unit && !['index', 'price'].includes(m.unit) ? ` ${m.unit}` : ''}${m.asOf ? ` · ${m.asOf}` : ''}`;
   return h('div', {},
-    h('span.move', { class: toneClass(pctv), text: pctv == null ? '—' : percent(pctv, { locale: L, decimals: 1 }) }),
-    h('span.sub', { text: `${m.value != null ? num(m.value, m.value > 1000 ? 0 : 2) : '—'}${m.unit && !['index', 'price'].includes(m.unit) ? ` ${m.unit}` : ''}${m.asOf ? ` · ${m.asOf}` : ''}` }));
+    day != null
+      ? h('span.move', { class: toneClass(day) }, percent(day, { locale: L, decimals: 1 }), h('small', { text: ' no dia' }))
+      : h('span.move.muted', { text: 'sem variação diária' }),
+    longer ? h('span.move.longer', { class: toneClass(longer.pct), title: longer.from ? `desde o fechamento de ${longer.from}` : '' },
+      percent(longer.pct, { locale: L, decimals: 1 }), h('small', { text: ` ${longer.label_pt}` })) : null,
+    h('span.sub', { text: level }));
 }
 
 // ═══ signals dashboard ═════════════════════════════════════════════════════

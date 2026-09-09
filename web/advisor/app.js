@@ -95,7 +95,7 @@ async function viewOverview() {
     ['Juros e crédito', briefing.rates_credit_pt || briefing.rates_credit],
     ['Câmbio e commodities', briefing.fx_commodities_pt || briefing.fx_commodities],
     ['Macro e política', briefing.macro_political_pt || briefing.macro_political],
-    ['Principal risco ou oportunidade', briefing.main_risk_or_opportunity_pt || briefing.main_risk_or_opportunity],
+    ['Principal risco ou oportunidade', briefing.main_risk_or_opportunity_pt || briefing.main_risk_or_opportunity, 'key'],
   ].filter(([, v]) => v);
 
   const indicatorGroups = {};
@@ -125,13 +125,14 @@ async function viewOverview() {
       h('div.card', {},
         wv?.generated_summary ? h('p.pull', { text: wv.generated_summary }) : null,
         view.summary_pt ? h('p.serif', { style: { margin: '14px 0 24px', color: 'var(--ink-700)' }, text: view.summary_pt }) : null,
-        h('div.grid.g2', {}, blocks.map(([k, v]) => h('div', {},
-          h('div.kicker', { text: k }),
-          h('p.note', { text: v })))),
-        h('p.note', { style: { marginTop: '14px' } },
-          'Este resumo é construído a partir dos dados recuperados pelos agentes, não da memória de um modelo. ',
-          'Cada número acima vem de um provedor identificado abaixo. ', newsNote(o.news)),
-        sourcesBlock(o.sources, 'Ver fontes'))),
+        h('div.brief-blocks', {}, blocks.map(([k, v, key]) => h('div.brief-block', { class: key ? 'key' : '' },
+          h('h4', { text: k }),
+          h('p', { text: v })))),
+        h('div.brief-foot', {},
+          h('p.note', {},
+            'Este resumo é construído a partir dos dados recuperados pelos agentes, não da memória de um modelo. ',
+            'Cada número acima vem de um provedor identificado abaixo. ', newsNote(o.news)),
+          sourcesBlock(o.sources, 'Ver fontes')))),
 
     // ── what matters ────────────────────────────────────────────────────
     h('section.section', {},

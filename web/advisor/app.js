@@ -148,49 +148,49 @@ async function viewOverview() {
     // ── indicators, over the window the advisor picks ───────────────────
     indicatorsSection(o),
 
-    // ── triggers + drift, as bars ───────────────────────────────────────
+    // ── market triggers, as bars ────────────────────────────────────────
     h('section.section', {},
-      h('div.section-h', {}, h('h2', { text: 'Gatilhos e desvios' }),
-        h('span.meta', { text: `${breached} ${breached === 1 ? 'gatilho acionado' : 'gatilhos acionados'} · ${o.drift_alerts.length} ${o.drift_alerts.length === 1 ? 'desvio' : 'desvios'} em ${driftGroups.length} ${driftGroups.length === 1 ? 'carteira' : 'carteiras'} além do gatilho de rebalanceamento` })),
-      h('div.grid.g2', {},
-        h('div.card', {},
-          h('div.card-h', {}, h('h3', { text: 'Gatilhos de mercado' }),
-            h('span.meta', { text: 'a barra mede a distância até o limiar; a marca é o limiar' })),
-          h('div', {}, o.triggers.slice().sort(triggerOrder).map((t) => h('div.trg.bars', {},
-            h('span', { class: `dot ${t.status}` }),
-            h('div', {},
-              h('div.lab', {}, t.label,
-                t.status === 'BREACHED' ? h('span.chip.warn', { text: 'acionado · ação devida' })
-                  : t.status === 'APPROACHING' ? h('span.chip', { text: 'aproximando' }) : null),
-              t.status === 'BREACHED'
-                ? h('div.det.due', {}, h('b', { text: 'Ação: ' }), t.action_pt || t.action || '',
-                  t.affected_clients?.length ? h('span.muted', { text: ` — ${t.affected_clients.length} cliente(s) expostos: ${t.affected_clients.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ')}${t.affected_clients.length > 3 ? ` +${t.affected_clients.length - 3}` : ''}` }) : null)
-                : h('div.det', { text: t.status === 'NO_DATA' ? (t.reason || 'indicador indisponível') : (t.affected_clients?.length ? `${t.affected_clients.length} cliente(s) expostos · ${t.action_pt || t.action || ''}` : (t.action_pt || t.action || '')) })),
-            h('div.barcol', {},
-              t.status === 'NO_DATA' ? h('div.bullet', {}, h('div.track')) : bulletBar({ proximity: t.proximity, status: t.status }),
-              h('span.vals', {},
-                h('span', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? 'sem leitura' : fmtLevel(t.observed, t.unit) }),
-                h('span', { text: `limiar ${fmtLevel(t.threshold, t.unit)}` }))))))),
+      h('div.section-h', {}, h('h2', { text: 'Gatilhos de mercado' }),
+        h('span.meta', { text: `${breached} ${breached === 1 ? 'gatilho acionado' : 'gatilhos acionados'} de ${o.triggers.length} limiares monitorados · a barra mede a distância até o limiar; a marca é o limiar` })),
+      h('div.card.bars-wide', {},
+        h('div', {}, o.triggers.slice().sort(triggerOrder).map((t) => h('div.trg.bars', {},
+          h('span', { class: `dot ${t.status}` }),
+          h('div', {},
+            h('div.lab', {}, t.label,
+              t.status === 'BREACHED' ? h('span.chip.warn', { text: 'acionado · ação devida' })
+                : t.status === 'APPROACHING' ? h('span.chip', { text: 'aproximando' }) : null),
+            t.status === 'BREACHED'
+              ? h('div.det.due', {}, h('b', { text: 'Ação: ' }), t.action_pt || t.action || '',
+                t.affected_clients?.length ? h('span.muted', { text: ` — ${t.affected_clients.length} cliente(s) expostos: ${t.affected_clients.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ')}${t.affected_clients.length > 3 ? ` +${t.affected_clients.length - 3}` : ''}` }) : null)
+              : h('div.det', { text: t.status === 'NO_DATA' ? (t.reason || 'indicador indisponível') : (t.affected_clients?.length ? `${t.affected_clients.length} cliente(s) expostos · ${t.action_pt || t.action || ''}` : (t.action_pt || t.action || '')) })),
+          h('div.barcol', {},
+            t.status === 'NO_DATA' ? h('div.bullet', {}, h('div.track')) : bulletBar({ proximity: t.proximity, status: t.status }),
+            h('span.vals', {},
+              h('span', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? 'sem leitura' : fmtLevel(t.observed, t.unit) }),
+              h('span', { text: `limiar ${fmtLevel(t.threshold, t.unit)}` })))))))),
 
-        h('div.card', {},
-          h('div.card-h', {}, h('h3', { text: 'Desvios de alocação' }), h('span.meta', { text: 'contra a política aprovada; as marcas são a tolerância de rebalanceamento' })),
-          driftGroups.length
-            ? h('div', {}, driftGroups.map((g) => h('div.trg-group', {},
-              h('div.trg.bars.group', {},
-                h('span.dot.BREACHED'),
-                h('div.lab', {}, h('a', { href: `#/client/${g.client_id}`, text: g.client_name }),
-                  h('span.chip.warn', { text: `${g.items.length} ${g.items.length === 1 ? 'desvio' : 'desvios'} · ação devida` }))),
-              g.items.map((d) => h('div.trg.bars.sub', {},
-                h('span'),
-                h('div', {},
-                  h('div.lab', { text: cls(d.asset_classes?.[0]) || d.label_pt || d.label }),
-                  h('div.det.due', {}, h('b', { text: 'Ação: ' }), d.action_pt || d.action)),
-                h('div.barcol', {},
-                  driftBar({ drift: d.drift, tolerance: d.threshold_pp ?? 0.05, scale: maxDrift }),
-                  h('span.vals', {},
-                    h('span', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }),
-                    h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))))
-            : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' })))),
+    // ── allocation drift, per client ────────────────────────────────────
+    h('section.section', {},
+      h('div.section-h', {}, h('h2', { text: 'Desvios de alocação' }),
+        h('span.meta', { text: `${o.drift_alerts.length} ${o.drift_alerts.length === 1 ? 'desvio' : 'desvios'} em ${driftGroups.length} ${driftGroups.length === 1 ? 'carteira' : 'carteiras'} além do gatilho de rebalanceamento · contra a política aprovada; as marcas são a tolerância` })),
+      h('div.card.bars-wide', {},
+        driftGroups.length
+          ? h('div', {}, driftGroups.map((g) => h('div.trg-group', {},
+            h('div.trg.bars.group', {},
+              h('span.dot.BREACHED'),
+              h('div.lab', {}, h('a', { href: `#/client/${g.client_id}`, text: g.client_name }),
+                h('span.chip.warn', { text: `${g.items.length} ${g.items.length === 1 ? 'desvio' : 'desvios'} · ação devida` }))),
+            g.items.map((d) => h('div.trg.bars.sub', {},
+              h('span'),
+              h('div', {},
+                h('div.lab', { text: cls(d.asset_classes?.[0]) || d.label_pt || d.label }),
+                h('div.det.due', {}, h('b', { text: 'Ação: ' }), d.action_pt || d.action)),
+              h('div.barcol', {},
+                driftBar({ drift: d.drift, tolerance: d.threshold_pp ?? 0.05, scale: maxDrift }),
+                h('span.vals', {},
+                  h('span', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }),
+                  h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))))
+          : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' }))),
 
     // ── correlations ────────────────────────────────────────────────────
     correlationSection(),

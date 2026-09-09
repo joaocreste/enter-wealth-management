@@ -385,7 +385,8 @@ table.d.matters .talk{color:var(--ink-900)}
 
 /* ─── bars: thresholds and drift ─────────────────────────────────────── */
 .trg.bars{grid-template-columns:8px minmax(0,1fr) 220px;align-items:center}
-@media (max-width:700px){.trg.bars{grid-template-columns:8px minmax(0,1fr)}.trg.bars .barcol{grid-column:2}}
+.bars-wide .trg.bars{grid-template-columns:8px minmax(0,1fr) 340px}
+@media (max-width:700px){.trg.bars,.bars-wide .trg.bars{grid-template-columns:8px minmax(0,1fr)}.trg.bars .barcol{grid-column:2}}
 .barcol{display:flex;flex-direction:column;gap:6px;min-width:0}
 .barcol .vals{font-family:var(--mono);font-size:11px;color:var(--ink-500);display:flex;justify-content:space-between;flex-wrap:wrap;gap:2px 8px}
 .bullet .track{position:relative;height:10px;background:var(--paper-3);overflow:visible}

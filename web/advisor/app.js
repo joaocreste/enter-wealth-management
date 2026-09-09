@@ -10,7 +10,7 @@ import {
   pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix,
   progressCard, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
-  barChart, allocationBar, bandChart, lineChart, sparkline, sourcesBlock, sourceLine,
+  barChart, allocationBar, bandChart, lineChart, sparkline, scatterChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
 } from '../shared/ui.js';
 
@@ -191,6 +191,9 @@ async function viewOverview() {
                   h('span', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }),
                   h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))))
           : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' }))),
+
+    // ── return against risk, twelve months ──────────────────────────────
+    riskReturnSection(),
 
     // ── correlations ────────────────────────────────────────────────────
     correlationSection(),
@@ -488,6 +491,72 @@ function indicatorsSection(o) {
 }
 
 /** The matrix loads after the page: sixteen daily series take a few seconds cold. */
+/** The four broad classes of the risk/return chart, in the order the Worker lists them. */
+const RISK_CLASS_PT = { equity: 'Renda variável', debt: 'Renda fixa e crédito', fx_commodities: 'Câmbio e commodities', crypto_other: 'Cripto e outros' };
+
+/**
+ * Every monitored asset over the last twelve months: total return up, annualised
+ * volatility across. What is not an asset — the VIX, the 10-year yield, the
+ * monthly and policy series — is named under the chart with the reason.
+ */
+function riskReturnSection() {
+  const box = h('div.card');
+  const meta = h('span.meta');
+  const pct1 = (v) => percent(v, { locale: L, decimals: 1 });
+  const vol = (v) => percent(v, { locale: L, decimals: 1, signed: false });
+  // axis ticks: whole percentages unless the step itself is fractional
+  const tickDecimals = (v) => (Math.round(Math.abs(v) * 1000) % 10 ? 1 : 0);
+  const tickY = (v) => (v === 0 ? '0%' : percent(v, { locale: L, decimals: tickDecimals(v) }));
+  const tickX = (v) => percent(v, { locale: L, decimals: tickDecimals(v), signed: false });
+  const excludedNote = (excluded) => {
+    const byReason = new Map();
+    for (const x of excluded) (byReason.get(x.reason) || byReason.set(x.reason, []).get(x.reason)).push(SHORT[x.key] || x.label);
+    return [...byReason].map(([reason, names]) => `${names.join(', ')} (${reason})`).join('; ');
+  };
+  async function load() {
+    mount(box, h('div.loading', {}, loader(), h('span', { text: 'Calculando retorno e volatilidade…' })));
+    try {
+      const d = await api('/api/advisor/risk-return');
+      meta.textContent = `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)}`;
+      const classes = d.classes.map((c) => ({ key: c.key, label: RISK_CLASS_PT[c.key] || c.label }));
+      const className = (k) => classes.find((c) => c.key === k)?.label || k;
+      const items = d.assets.map((a) => ({ key: a.key, label: SHORT[a.key] || a.label, x: a.volatility, y: a.total_return, cls: a.asset_class, asset: a }));
+      const partial = d.assets.filter((a) => a.partial);
+      const provisional = d.assets.filter((a) => a.provisional);
+      const rows = [...d.assets].sort((a, b) => b.total_return - a.total_return).map((a) => h('tr', {},
+        h('td.name', {}, a.label, h('span.sub', { text: `${className(a.asset_class)} · ${a.symbol}` })),
+        h('td.num', { class: toneClass(a.total_return), text: pct1(a.total_return) }),
+        h('td.num', { text: vol(a.volatility) }),
+        h('td.num', { text: `${a.sessions} · √${a.annualisation_days}` }),
+        h('td', { text: `${dmy(a.from)} a ${dmy(a.to)}${a.partial ? ' · série começa dentro da janela' : ''}${a.provisional ? ' · sessão em curso' : ''}` })));
+      mount(box,
+        scatterChart(items, {
+          classes, xLabel: 'Volatilidade anualizada, 12 meses', yLabel: 'Retorno total, 12 meses', formatX: tickX, formatY: tickY,
+          tip: (p) => [
+            h('b', { text: `${p.asset.label} · ${className(p.cls)}` }),
+            h('span', { text: `Retorno ${pct1(p.y)} · volatilidade ${vol(p.x)}` }), h('br'),
+            h('span', { text: `${p.asset.sessions} sessões · ${dmy(p.asset.from)} a ${dmy(p.asset.to)} · anualizada por √${p.asset.annualisation_days}${p.asset.provisional ? ' · sessão em curso' : ''}` }),
+          ],
+        }),
+        h('p.chart-caption', {},
+          'Retorno total entre o último fechamento até o início da janela e o fechamento mais recente; volatilidade é o desvio-padrão dos retornos diários logarítmicos, anualizado pelas sessões por ano de cada série (√252 em bolsa, √365 em cripto, que não fecha).',
+          partial.length ? ` Série começa dentro da janela: ${partial.map((a) => SHORT[a.key] || a.label).join(', ')}.` : '',
+          provisional.length ? ` Sessão ainda em curso: ${provisional.map((a) => SHORT[a.key] || a.label).join(', ')}.` : '',
+          d.excluded?.length ? ` Fora do gráfico: ${excludedNote(d.excluded)}.` : '',
+          ' Fonte: Yahoo Finance, fechamentos diários ajustados, das séries mantidas em R2.'),
+        h('details.sc-table', {}, h('summary', { text: `Ver tabela (${d.assets.length} ativos)` }),
+          table(['Ativo', { label: 'Retorno 12m', num: true }, { label: 'Volatilidade', num: true }, { label: 'Sessões · anualização', num: true }, 'Período medido'], rows)),
+        sourcesBlock(d.sources, 'Ver fontes das séries'));
+    } catch (err) {
+      mount(box, h('div.err', { text: `Não foi possível calcular retorno e volatilidade: ${err.message}` }));
+    }
+  }
+  load();
+  return h('section.section', {},
+    h('div.section-h', {}, h('h2', { text: 'Retorno e risco em 12 meses' }), meta),
+    box);
+}
+
 function correlationSection() {
   const box = h('div.card');
   const meta = h('span.meta');

@@ -45,6 +45,9 @@
   --cat-1:#12314F; --cat-2:#24756C; --cat-3:#A8623A; --cat-4:#5E4270;
   --cat-5:#7A9463; --cat-6:#6A7885; --cat-7:#9A7B34; --cat-8:#93526A;
 
+  /* the four broad classes of the risk/return chart; their dark steps are chosen, not flipped */
+  --k-equity:#12314F; --k-debt:#A8623A; --k-fx-commodities:#24756C; --k-crypto-other:#5E4270;
+
   --gain-text:var(--g-700); --gain-graphic:var(--g-500);
   --gain-fill:var(--g-100);  --gain-wash:var(--g-25);
   --loss-text:var(--r-600); --loss-graphic:var(--r-500);
@@ -89,6 +92,7 @@ html[data-app="client"]{--t-body:14.5px;--t-data:13.5px;--page-max:1120px}
     --loss-fill:var(--r-900);  --loss-wash:var(--r-950);
     --benchmark:var(--b-300); --caution:var(--a-300); --structure:var(--b-200);
     --caution-wash:rgba(143,107,31,.16);
+    --k-equity:#6E9AC4; --k-debt:#E08F55; --k-fx-commodities:#38B29A; --k-crypto-other:#BE93D6;
     --rail-bg:#090B0C; --rail-on:#1C2124; --board:#080A0B;
     color-scheme:dark;
   }
@@ -105,6 +109,7 @@ html[data-app="client"]{--t-body:14.5px;--t-data:13.5px;--page-max:1120px}
   --loss-fill:var(--r-900);  --loss-wash:var(--r-950);
   --benchmark:var(--b-300); --caution:var(--a-300); --structure:var(--b-200);
   --caution-wash:rgba(143,107,31,.16);
+  --k-equity:#6E9AC4; --k-debt:#E08F55; --k-fx-commodities:#38B29A; --k-crypto-other:#BE93D6;
   --rail-bg:#090B0C; --rail-on:#1C2124; --board:#080A0B;
   color-scheme:dark;
 }
@@ -517,6 +522,28 @@ figure svg text{font-family:var(--sans);font-variant-numeric:tabular-nums}
 .chart-tip .b{color:var(--b-300)}
 :root[data-theme="dark"] .chart-tip{background:var(--paper-2);color:var(--ink-950);border:1px solid var(--rule)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chart-tip{background:var(--paper-2);color:var(--ink-950);border:1px solid var(--rule)}}
+
+/* ─── risk / return scatter ──────────────────────────────────────────── */
+.sc .k-equity,.sc-legend .k-equity{color:var(--k-equity)}
+.sc .k-debt,.sc-legend .k-debt{color:var(--k-debt)}
+.sc .k-fx_commodities,.sc-legend .k-fx_commodities{color:var(--k-fx-commodities)}
+.sc .k-crypto_other,.sc-legend .k-crypto_other{color:var(--k-crypto-other)}
+.sc-dot{fill:currentColor;stroke:var(--paper-2);stroke-width:2}
+.sc-lbl{fill:var(--ink-800);font-weight:500}
+.sc-leader{stroke:var(--ink-300);stroke-width:1}
+.sc-mark{outline:none;cursor:default}
+.sc-mark.on .sc-lbl{fill:var(--ink-950);font-weight:600}
+.sc-mark.on .sc-dot{stroke:var(--ink-950)}
+.sc-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 14px;font-size:12px;color:var(--ink-600)}
+.sc-key{display:inline-flex;align-items:center;gap:7px}
+.sc-key svg{display:inline-block;overflow:visible;flex:none}
+.sc-table{margin-top:14px}
+.sc-table summary{font-size:12.5px;color:var(--ink-500);cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:8px;transition:color var(--dur) var(--ease)}
+.sc-table summary:hover{color:var(--ink-950)}
+.sc-table summary::-webkit-details-marker{display:none}
+.sc-table summary::before{content:"+";font-family:var(--mono);width:14px;text-align:center;color:var(--ink-400)}
+.sc-table[open] summary::before{content:"−"}
+.sc-table .tw{margin-top:12px}
 .alloc-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:12px}
 .alloc-key{font-size:12px;color:var(--ink-600);display:inline-flex;align-items:center;gap:7px}
 .alloc-key i{width:10px;height:10px;display:inline-block;flex:none}

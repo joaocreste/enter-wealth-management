@@ -26,6 +26,7 @@ import { artefactLinks, verifyArtefactToken } from './links.js';
 import { cacheGet, cacheSet } from '../../src/adapters/cache.js';
 import { PROMPT_VERSION } from '../../src/llm/prompts.js';
 import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
+import { riskReturn, riskClassOf, RISK_CLASSES } from '../../src/core/risk.js';
 import { makeSource } from '../../src/core/sources.js';
 import * as A from './agents.js';
 import * as S from './series.js';
@@ -231,6 +232,12 @@ async function route(request, env, url, ctx) {
     return ok(await advisorCorrelations(env, url.searchParams.get('window') || '1y'));
   }
 
+  // Trailing-twelve-month return against volatility, one point per monitored asset.
+  if (path === '/api/advisor/risk-return') {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    return ok(await advisorRiskReturn(env));
+  }
+
   // The monitored indicators over any window, from the daily histories kept in R2 (worker/src/series.js).
   if (path === '/api/advisor/indicators/series') {
     if (session.role === 'client') return bad(403, 'advisor surface');
@@ -367,6 +374,64 @@ async function advisorCorrelations(env, windowKey) {
       provider: 'Enter Asset Management (derivado)', kind: 'derived', instrument: 'Matriz de correlação',
       identifier: `corr-${key}`, requested_range: `${from}..${to}`, last_observation: to,
       notes: 'Pearson sobre retornos diários logarítmicos; cada par medido nas datas que ambas as séries observaram',
+    })],
+  };
+  await cacheSet(cacheKey, result, 3600);
+  return result;
+}
+
+/**
+ * Trailing-twelve-month return and volatility of every monitored asset, for the
+ * risk/return chart. Same store and same adjusted closes as the correlation
+ * matrix. The return spans the twelve months exactly: it is measured from the
+ * last close on or before the window's start, the way the indicator strip does.
+ * What is not an asset is listed as excluded with its reason — the VIX and the
+ * 10-year yield are levels you can watch but not hold, and the Selic target and
+ * the monthly IPCA have no daily price. Cached for an hour.
+ */
+async function advisorRiskReturn(env) {
+  const to = new Date().toISOString().slice(0, 10);
+  const bounds = S.windowBounds('1y', to);
+  const cacheKey = `riskret:1y:${to}`;
+  const cached = await cacheGet(cacheKey, 3600);
+  if (cached) return { ...cached, from_cache: true };
+
+  const assets = [];
+  const sources = [];
+  const excluded = [];
+  for (const ind of INDICATORS) {
+    if (!ind.yahoo_symbol) { excluded.push({ key: ind.key, label: ind.label, reason: 'série mensal ou de política, não um preço diário' }); continue; }
+    if (ind.investable === false) { excluded.push({ key: ind.key, label: ind.label, reason: 'nível de mercado (volatilidade implícita ou taxa de juro), não um ativo que se possa deter' }); continue; }
+    const s = await S.ensureSeries(env, ind, { from: bounds.from });
+    if (s.unavailable) { excluded.push({ key: ind.key, label: ind.label, reason: s.reason }); continue; }
+    const pts = s.points.filter((p) => p.date <= to);
+    let startIdx = 0;
+    for (let i = 0; i < pts.length && pts[i].date <= bounds.from; i += 1) startIdx = i;
+    const slice = pts.slice(startIdx).map((p) => ({ date: p.date, close: p.adj ?? p.close }));
+    const m = riskReturn(slice);
+    if (!m) { excluded.push({ key: ind.key, label: ind.label, reason: 'série insuficiente no período' }); continue; }
+    assets.push({
+      key: ind.key, label: ind.label, group: ind.group, asset_class: riskClassOf(ind.group),
+      symbol: ind.yahoo_symbol, currency: s.currency ?? null,
+      ...m,
+      partial: pts.length > 0 && pts[0].date > bounds.from,                       // history starts inside the window
+      provisional: s.last_provisional === true && m.to === s.last,                // the last close is a session still open
+    });
+    sources.push(s.source);
+  }
+
+  const result = {
+    window: { ...bounds, label: '12 meses' },
+    method: 'retorno total entre o último fechamento até a data inicial e o mais recente; volatilidade é o desvio-padrão amostral dos retornos diários logarítmicos, anualizado pela raiz das sessões por ano observadas na própria série (≈252 em bolsa, 365 em cripto)',
+    basis: 'fechamentos diários ajustados por dividendos, das séries mantidas em R2',
+    classes: RISK_CLASSES.map(({ key, label }) => ({ key, label })),
+    assets,
+    excluded,
+    computed_at: nowIso(),
+    sources: [...sources, makeSource({
+      provider: 'Enter Asset Management (derivado)', kind: 'derived', instrument: 'Retorno e volatilidade em 12 meses',
+      identifier: 'risk-return-1y', requested_range: `${bounds.from}..${bounds.to}`, last_observation: to,
+      notes: 'retorno total e desvio-padrão dos retornos diários logarítmicos anualizado pelas sessões por ano observadas (≈√252 em bolsa, √365 em cripto), sobre fechamentos ajustados',
     })],
   };
   await cacheSet(cacheKey, result, 3600);

@@ -6,13 +6,15 @@
  * into D1 at seed time and read back by the pipeline.
  */
 
-/** The monitored indicator set. Each row names its provider chain. */
+/** The monitored indicator set. Each row names its provider chain.
+ * `investable: false` marks a level that is not an asset — the VIX and a yield can be
+ * watched but not held — so return-and-risk views leave it out with a reason. */
 export const INDICATORS = [
   { key: 'sp500', label: 'S&P 500', group: 'Equities', yahoo_symbol: '^GSPC', unit: 'index', asset_classes: ['Equities Global'] },
   { key: 'nasdaq', label: 'Nasdaq Composite', group: 'Equities', yahoo_symbol: '^IXIC', unit: 'index', asset_classes: ['Equities Global'] },
   { key: 'ibovespa', label: 'Ibovespa', group: 'Equities', yahoo_symbol: '^BVSP', unit: 'index', asset_classes: ['Equities BR'] },
-  { key: 'vix', label: 'VIX', group: 'Equities', yahoo_symbol: '^VIX', unit: 'index', asset_classes: ['Equities Global', 'Equities BR'] },
-  { key: 'us10y', label: 'US 10-year Treasury', group: 'Rates & Credit', yahoo_symbol: '^TNX', unit: '%', asset_classes: ['Fixed Income', 'Equities Global'] },
+  { key: 'vix', label: 'VIX', group: 'Equities', yahoo_symbol: '^VIX', unit: 'index', investable: false, asset_classes: ['Equities Global', 'Equities BR'] },
+  { key: 'us10y', label: 'US 10-year Treasury', group: 'Rates & Credit', yahoo_symbol: '^TNX', unit: '%', investable: false, asset_classes: ['Fixed Income', 'Equities Global'] },
   { key: 'hy_etf', label: 'US high yield (HYG)', group: 'Rates & Credit', yahoo_symbol: 'HYG', unit: 'price', asset_classes: ['Fixed Income'] },
   { key: 'ig_etf', label: 'US investment grade (LQD)', group: 'Rates & Credit', yahoo_symbol: 'LQD', unit: 'price', asset_classes: ['Fixed Income'] },
   { key: 'selic', label: 'Selic — Copom target', group: 'Rates & Credit', bcb_series: 'SELIC_TARGET', unit: '% a.a.', asset_classes: ['Fixed Income', 'Cash'] },

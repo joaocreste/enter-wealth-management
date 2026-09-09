@@ -720,6 +720,128 @@ export function correlationMatrix(data, { locale = 'pt-BR', short = (x) => x.lab
   return fig;
 }
 
+// ── scatter ───────────────────────────────────────────────────────────────
+// Identity never rides on colour alone: every mark carries its name, each class
+// has its own marker shape, and the legend shows both. Colour comes from the
+// class token (--k-*) through CSS, so a theme change repaints without a render.
+const SHAPES = ['circle', 'square', 'diamond', 'triangle'];
+function marker(shape, cx, cy, r, attrs = {}) {
+  const f = (v) => Number(v.toFixed(1));
+  if (shape === 'square') return svgEl('rect', { x: f(cx - r), y: f(cy - r), width: f(2 * r), height: f(2 * r), ...attrs });
+  if (shape === 'diamond') return svgEl('rect', { x: f(cx - r), y: f(cy - r), width: f(2 * r), height: f(2 * r), transform: `rotate(45 ${f(cx)} ${f(cy)})`, ...attrs });
+  if (shape === 'triangle') return svgEl('path', { d: `M${f(cx)},${f(cy - r * 1.25)} L${f(cx + r * 1.2)},${f(cy + r * 0.85)} L${f(cx - r * 1.2)},${f(cy + r * 0.85)} Z`, ...attrs });
+  return svgEl('circle', { cx: f(cx), cy: f(cy), r, ...attrs });
+}
+
+/** Round ticks that cover [lo, hi] in about `n` steps of 1, 2, 2.5 or 5 × 10^k. */
+function niceTicks(lo, hi, n = 5) {
+  const span = Math.max(1e-9, hi - lo);
+  const raw = span / n;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || 10 * mag;
+  const out = [];
+  for (let v = Math.floor(lo / step) * step; v <= Math.ceil(hi / step) * step + step / 2; v += step) out.push(Number(v.toFixed(10)));
+  return out;
+}
+
+/**
+ * `items` are { key, label, x, y, cls }; `classes` are { key, label } in legend
+ * order, which also fixes each class's marker shape and colour slot. `tip(item)`
+ * returns the tooltip's children; `formatX` / `formatY` render the axis ticks.
+ */
+export function scatterChart(items, {
+  classes = [], xLabel = '', yLabel = '', formatX = (v) => String(v), formatY = formatX,
+  title = null, caption = null, width = 720, height = 400, tip: tipFor = null,
+} = {}) {
+  const pts = items.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (pts.length < 2) return h('div.empty', { text: 'Séries insuficientes para o gráfico.' });
+  const pad = { l: 60, r: 84, t: 30, b: 46 };
+  const plotW = width - pad.l - pad.r; const plotH = height - pad.t - pad.b;
+  const xTicks = niceTicks(0, Math.max(...pts.map((p) => p.x)) * 1.06, 5);
+  const yTicks = niceTicks(Math.min(0, ...pts.map((p) => p.y)), Math.max(0, ...pts.map((p) => p.y)), 5);
+  const x0 = xTicks[0]; const x1 = xTicks[xTicks.length - 1];
+  const y0 = yTicks[0]; const y1 = yTicks[yTicks.length - 1];
+  const sx = (v) => pad.l + ((v - x0) / (x1 - x0)) * plotW;
+  const sy = (v) => pad.t + (1 - (v - y0) / (y1 - y0)) * plotH;
+  const slot = (cls) => Math.max(0, classes.findIndex((c) => c.key === cls));
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', role: 'img', 'aria-label': title || `${yLabel} × ${xLabel}`, class: 'sc' });
+  // grid: recessive rules at the ticks, the zero line in ink
+  for (const v of yTicks) {
+    svg.append(svgEl('line', { x1: pad.l, x2: width - pad.r, y1: sy(v).toFixed(1), y2: sy(v).toFixed(1), class: v === 0 ? 'c-zero' : 'c-rule', 'stroke-width': 1 }));
+    svg.append(text({ x: pad.l - 8, y: sy(v) + 3.5, 'text-anchor': 'end', 'font-size': 10.5, class: v === 0 ? 'c-lbl' : 'c-muted' }, formatY(v)));
+  }
+  for (const v of xTicks) {
+    if (v !== x0) svg.append(svgEl('line', { x1: sx(v).toFixed(1), x2: sx(v).toFixed(1), y1: pad.t, y2: height - pad.b, class: 'c-rule', 'stroke-width': 1, 'stroke-dasharray': '2 4' }));
+    svg.append(text({ x: sx(v), y: height - pad.b + 16, 'text-anchor': 'middle', 'font-size': 10.5, class: 'c-muted' }, formatX(v)));
+  }
+  svg.append(svgEl('line', { x1: pad.l, x2: pad.l, y1: pad.t, y2: height - pad.b, class: 'c-rule', 'stroke-width': 1 }));
+  if (yLabel) svg.append(text({ x: pad.l - 8, y: pad.t - 12, 'text-anchor': 'start', 'font-size': 11, class: 'c-lbl strong' }, yLabel));
+  if (xLabel) svg.append(text({ x: pad.l + plotW / 2, y: height - 6, 'text-anchor': 'middle', 'font-size': 11, class: 'c-lbl strong' }, xLabel));
+
+  // labels: to the right of the mark, flipped left near the edge. In a dense
+  // cluster a label steps down until it clears every label placed before it and
+  // every other mark; a label that moved away from its mark gets a hairline back.
+  const LINE = 12; const MR = 7;
+  const labels = pts.map((p) => ({ p, w: String(p.label).length * 6.4, x: sx(p.x) + 10, y: sy(p.y) + 4, anchor: 'start' }));
+  for (const l of labels) if (l.x + l.w > width - 2) { l.x = sx(l.p.x) - 10; l.anchor = 'end'; }
+  labels.sort((a, b) => a.y - b.y);
+  const left = (l) => (l.anchor === 'start' ? l.x : l.x - l.w);
+  const boxOf = (l) => ({ x0: left(l), x1: left(l) + l.w, y0: l.y - 9, y1: l.y + 2 });
+  const markBoxes = pts.map((p) => ({ p, x0: sx(p.x) - MR, x1: sx(p.x) + MR, y0: sy(p.y) - MR, y1: sy(p.y) + MR }));
+  const hits = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  for (let i = 0; i < labels.length; i += 1) {
+    const b = labels[i];
+    for (let guard = 0; guard < 40; guard += 1) {
+      const box = boxOf(b);
+      const label = labels.slice(0, i).find((a) => hits(boxOf(a), box));
+      if (label) { b.y = label.y + LINE; continue; }
+      const mark = markBoxes.find((m) => m.p !== b.p && hits(m, box));
+      if (mark) { b.y = mark.y1 + 9; continue; }
+      break;
+    }
+  }
+
+  const tip = h('div.chart-tip');
+  const marks = svgEl('g');
+  for (const l of labels) {
+    const p = l.p; const cx = sx(p.x); const cy = sy(p.y);
+    const k = slot(p.cls);
+    const g = svgEl('g', { class: `sc-mark k-${p.cls}`, tabindex: 0, role: 'img', 'aria-label': `${p.label}: ${formatY(p.y)}, ${formatX(p.x)}` });
+    if (l.y - 4 - cy > 8) {
+      const lx = l.anchor === 'start' ? l.x - 3 : l.x + 3;
+      g.append(svgEl('line', { x1: cx.toFixed(1), y1: (cy + MR).toFixed(1), x2: lx.toFixed(1), y2: (l.y - 4).toFixed(1), class: 'sc-leader' }));
+    }
+    g.append(marker(SHAPES[k % SHAPES.length], cx, cy, 5, { class: 'sc-dot' }));
+    g.append(text({ x: l.x.toFixed(1), y: l.y.toFixed(1), 'text-anchor': l.anchor, 'font-size': 11, class: 'sc-lbl' }, p.label));
+    g.append(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: 14, class: 'c-hit' }));
+    const show = () => {
+      g.classList.add('on');
+      tip.replaceChildren(...(tipFor ? tipFor(p) : [h('b', { text: p.label }), h('span', { text: `${yLabel} ${formatY(p.y)}` }), h('br'), h('span', { text: `${xLabel} ${formatX(p.x)}` })]));
+      const r = svg.getBoundingClientRect();
+      const px = (cx / width) * r.width; const py = (cy / height) * r.height;
+      const flip = px > r.width * 0.62;
+      tip.style.display = 'block';
+      tip.style.left = `${px}px`;
+      tip.style.top = `${r.top - tip.parentElement.getBoundingClientRect().top + py}px`;
+      tip.style.transform = flip ? 'translate(calc(-100% - 12px), -50%)' : 'translate(12px, -50%)';
+    };
+    const hide = () => { g.classList.remove('on'); tip.style.display = 'none'; };
+    g.addEventListener('mouseenter', show); g.addEventListener('mouseleave', hide);
+    g.addEventListener('focus', show); g.addEventListener('blur', hide);
+    marks.append(g);
+  }
+  svg.append(marks);
+
+  const legend = classes.length > 1 ? h('div.sc-legend', {}, classes.map((c, k) => {
+    const sw = svgEl('svg', { viewBox: '0 0 16 16', width: 14, height: 14, class: `k-${c.key}`, 'aria-hidden': 'true' });
+    sw.append(marker(SHAPES[k % SHAPES.length], 8, 8, 5, { class: 'sc-dot' }));
+    return h('span.sc-key', {}, sw, h('span', { text: c.label }));
+  })) : null;
+
+  return h('figure.sc-fig', {}, title && h('figcaption.chart-title', { text: title }), legend, svg, tip, caption && h('figcaption.chart-caption', { text: caption }));
+}
+
 // ── source provenance (§29) ───────────────────────────────────────────────
 export function sourceLine(s) {
   const bits = [s.provider];

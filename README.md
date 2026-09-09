@@ -251,7 +251,14 @@ so a dividend restatement never makes merged history inconsistent. Every respons
 carries the source record of each series. `POST /api/advisor/indicators/series/rebuild`
 downloads every history again; the daily cron refreshes the store after it starts
 the overview runs. The correlation matrix (1, 2 or 5 years) reads the same store,
-using the adjusted closes.
+using the adjusted closes. So does `GET /api/advisor/risk-return`: the trailing
+twelve-month total return and annualised volatility (sample standard deviation of
+daily log returns, scaled by the square root of the sessions per year the series
+itself shows — about 252 for an exchange, 365 for crypto) of every monitored
+asset, grouped into four broad classes
+for the scatter on the World Overview. Levels that are not assets — the VIX and
+the 10-year yield — are excluded with the reason, alongside the monthly and
+policy series.
 
 ### The portal's design
 

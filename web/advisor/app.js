@@ -698,7 +698,7 @@ async function viewSignals() {
       table(headers, body(conflicts))) : null,
 
     h('section.section', {},
-      h('div.section-h', {}, h('h2', { text: 'Universo monitorado' })),
+      h('div.section-h', {}, h('h2', { text: 'Universo e Sinais monitorados' })),
       table(headers, body(rows))),
   );
 }

@@ -3,19 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Enter Asset Management — Portal de investimentos</title>
+<title>Enter Asset Management — O vento não se escolhe. O rumo, sim.</title>
+<meta name="description" content="A Enter Asset Management é o braço de capital do grupo Enter. Área do cliente e do assessor.">
 <meta name="theme-color" content="#0B0D0E">
 <script>try{var t=localStorage.getItem("ew_theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared/app.css">
+<link rel="preload" as="image" href="assets/vela-guanabara.jpg">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23F5F6F5'/%3E%3Cg fill='none' stroke='%230B0D0E' stroke-width='9' transform='translate(18 18) scale(.64)'%3E%3Cpath d='M8 30 L8 8 L30 8'/%3E%3Cpath d='M92 70 L92 92 L70 92'/%3E%3Cpath d='M72 34 L72 56 L36 56'/%3E%3Cpath d='M48 44 L36 56 L48 68'/%3E%3C/g%3E%3C/svg%3E">
 </head>
 <body>
-<main class="login-wrap" id="root"></main>
+<div class="site" id="root"></div>
 <script type="module">
-import { h, mount, api, auth, logo, symbol, icon, avatar, advisorUrl, clientUrl } from './shared/ui.js';
+import { h, mount, api, auth, logo, icon, avatar, advisorUrl, clientUrl } from './shared/ui.js';
 
 const DEMO = [
   { role: 'Assessor', name: 'Antonio Bicudo', email: 'antonio.bicudo@enteram.com.br', password: 'enter2026' },
@@ -56,41 +58,177 @@ async function go(e) {
   }
 }
 
-// §13 — one orchestrated moment per surface: the return arrow completing its turn.
-const mark = symbol({ size: 200, className: 'mark' });
+// The page reads as a crossing: the wind is the market (01), the sails are the
+// strategy (02), the course is a destination that tacks do not change (03), the
+// logbook is the monthly letter (04) and the anchors are the trust block (05).
+const NAV = [['#vento', 'o vento'], ['#velas', 'as velas'], ['#rumo', 'o rumo'], ['#diario', 'diário de bordo'], ['#ancoras', 'âncoras']];
+
+// A tacking course drawn in ink hairlines: five boards against the wind, a
+// destination straight upwind, and the straight line the wind does not allow.
+const TACK = `<svg viewBox="0 0 640 480" role="img" aria-label="Carta de bordejo desenhada à mão: o barco ziguezagueia contra o vento de norte e chega ao destino">
+  <defs>
+    <filter id="hand" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="3" seed="11" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.4" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3"/><feColorMatrix values="0 0 0 0 0.35  0 0 0 0 0.3  0 0 0 0 0.22  0 0 0 .07 0"/></filter>
+    <clipPath id="sea"><rect x="20" y="20" width="600" height="440"/></clipPath>
+    <path id="coast" d="M20 236 C48 246 62 262 54 286 C46 312 74 326 78 350 C82 376 62 392 84 412 C102 428 92 446 72 460"/>
+  </defs>
+  <rect class="paper" x="0" y="0" width="640" height="480"/>
+  <rect x="0" y="0" width="640" height="480" filter="url(#grain)"/>
+  <g class="ink" filter="url(#hand)" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="12" y="12" width="616" height="456" stroke-width="1.6"/>
+    <rect x="20" y="20" width="600" height="440" stroke-width=".8"/>
+    <rect x="16" y="16" width="608" height="448" stroke-width="8" stroke-dasharray="1 29" stroke-linecap="butt" opacity=".75"/>
+    <g clip-path="url(#sea)" opacity=".16" stroke-width=".8">
+      <path d="M110 96 L640 96 M110 96 L640 316 M110 96 L500 480 M110 96 L280 480 M110 96 L110 480 M110 96 L640 -120 M110 96 L330 -120 M110 96 L-200 220 M110 96 L-200 -30 M110 96 L620 -40"/>
+    </g>
+    <g clip-path="url(#sea)">
+      <path class="land" d="M20 236 C48 246 62 262 54 286 C46 312 74 326 78 350 C82 376 62 392 84 412 C102 428 92 446 72 460 L20 460 Z" stroke="none"/>
+      <use href="#coast" stroke-width="1.4"/>
+      <use href="#coast" stroke-width="7" stroke-dasharray="1 5" stroke-linecap="butt" opacity=".55" transform="translate(-3 0)"/>
+    </g>
+    <g transform="translate(110 96)">
+      <circle r="36" stroke-width=".8"/><circle r="30" stroke-width=".8"/><circle r="3" fill="currentColor"/>
+      <path d="M0 -30 L-6 0 L0 -6 Z M0 30 L6 0 L0 6 Z M30 0 L0 -6 L6 0 Z M-30 0 L0 6 L-6 0 Z" fill="currentColor" opacity=".9"/>
+      <path d="M0 -30 L6 0 L0 -6 Z M0 30 L-6 0 L0 6 Z M30 0 L0 6 L6 0 Z M-30 0 L0 -6 L-6 0 Z"/>
+      <path class="north" d="M0 -30 L-6 0 L0 -6 Z" fill="var(--brass-400)" stroke="none"/>
+      <path d="M21 -21 L0 -4 L4 0 Z M21 21 L4 0 L0 4 Z M-21 21 L0 4 L-4 0 Z M-21 -21 L-4 0 L0 -4 Z" stroke-width=".8"/>
+    </g>
+    <g class="wind" stroke-width="1.1" opacity=".7">
+      <path d="M330 34 c 12 18 -14 30 -2 52 M328 80 l-6 -8 M328 80 l8 -6"/>
+      <path d="M420 34 c 12 18 -14 30 -2 52 M418 80 l-6 -8 M418 80 l8 -6"/>
+      <path d="M510 34 c 12 18 -14 30 -2 52 M508 80 l-6 -8 M508 80 l8 -6"/>
+    </g>
+    <path class="direct" d="M110 400 L420 95" stroke-dasharray="1 5" opacity=".45"/>
+    <path class="course" d="M110 400 L270 320 L190 265 L360 190 L270 145 L420 95" stroke-width="1.8"/>
+    <path d="M266 314 l8 12 M186 259 l8 12 M356 184 l8 12 M266 139 l8 12"/>
+    <g transform="translate(110 400)"><path d="M-5 -5 L5 5 M-5 5 L5 -5" stroke-width="1.6"/><circle r="7" stroke-width=".9"/></g>
+    <g transform="translate(420 95)"><path d="M0 0 L0 -26 M0 -26 L16 -21 L0 -15" fill="currentColor"/><circle r="4" fill="currentColor"/><circle r="9" stroke-width=".9"/></g>
+    <g class="waves" opacity=".45" stroke-width=".9">
+      <path d="M470 250 q5 -4 10 0 t10 0 M500 300 q5 -4 10 0 t10 0 M180 170 q5 -4 10 0 t10 0 M560 200 q5 -4 10 0 t10 0 M240 420 q5 -4 10 0 t10 0 M400 330 q5 -4 10 0 t10 0"/>
+    </g>
+    <g transform="translate(250 436)" stroke-width="1"><path d="M0 0 h120 M0 -4 v8 M40 -4 v8 M80 -4 v8 M120 -4 v8"/><rect x="0" y="-3" width="40" height="6" fill="currentColor" opacity=".8" stroke="none"/><rect x="80" y="-3" width="40" height="6" fill="currentColor" opacity=".8" stroke="none"/></g>
+    <rect x="440" y="378" width="164" height="68" stroke-width="1.2"/><rect x="445" y="383" width="154" height="58" stroke-width=".6"/>
+  </g>
+  <g class="lbl">
+    <text x="110" y="52" text-anchor="middle" class="rose">N</text>
+    <text x="110" y="146" text-anchor="middle" class="rose">S</text>
+    <text x="156" y="100" text-anchor="middle" class="rose">L</text>
+    <text x="64" y="100" text-anchor="middle" class="rose">O</text>
+    <text x="418" y="28" text-anchor="middle">vento de norte</text>
+    <text x="126" y="418">partida</text>
+    <text x="446" y="88">destino</text>
+    <text x="190" y="378">bordo 01</text>
+    <text x="196" y="300" text-anchor="end">bordo 02</text>
+    <text x="290" y="248">bordo 03</text>
+    <text x="238" y="182" text-anchor="end">bordo 04</text>
+    <text x="352" y="128">bordo 05</text>
+    <text x="330" y="262" class="muted" transform="rotate(-44.5 330 262)">rumo direto, se o vento deixasse</text>
+    <g class="sound"><text x="470" y="232">12</text><text x="520" y="176">15</text><text x="560" y="286">9</text><text x="150" y="212">7</text><text x="330" y="372">11</text><text x="560" y="340">14</text><text x="230" y="120">8</text></g>
+    <text x="250" y="454" class="small">0</text><text x="290" y="454" class="small">5</text><text x="330" y="454" class="small">10</text><text x="374" y="454" class="small">milhas</text>
+    <text x="522" y="404" text-anchor="middle" class="title">Carta de bordejo</text>
+    <text x="522" y="422" text-anchor="middle" class="small">rumo declarado · vento variável</text>
+    <text x="522" y="436" text-anchor="middle" class="small">Enter Asset Management</text>
+  </g>
+</svg>`;
+
+// Providers the portal reads today, then the desks and registries the house follows.
+const SOURCES = ['B3', 'Yahoo Finance', 'TradingView', 'Banco Central do Brasil', 'CoinGecko', 'Valor Econômico'];
+const WATCHED = ['Google Finance', 'Bloomberg', 'Reuters', 'ETFdb', 'Morningstar', 'CVM', 'ANBIMA', 'FRED'];
+
+const num = (n) => h('span.ln', { text: String(n).padStart(2, '0') });
+const secH = (n, title, meta) => h('div.sec-h', {}, num(n), h('h2', { text: title }), meta && h('span.meta', { text: meta }));
+const term = (dt, dd) => h('div', {}, h('dt', { text: dt }), h('dd', { text: dd }));
 
 mount(root,
-  h('section.login-hero', {},
-    logo({ size: 26 }),
-    h('div.hero-mark', {}, mark),
-    h('h1.hero-title', {}, 'A inteligência evolui. Seu patrimônio acompanha e ', h('em', { text: 'cresce' }), '.'),
-    h('p.hero-sub', { text: 'Quanto rendeu, o que mudou no mercado e o que decidir a seguir. Todo mês, para você e para o seu assessor.' }),
-    // §3.3 — the three house values a reader can hold the portal to, in investor
-    // language: show the work, own the downside first, someone signs.
-    h('dl.hero-facts', {},
-      h('div', { 'data-n': '01' }, h('dt', { text: 'Cada número tem fonte' }), h('dd', { text: 'Período, base e origem em toda cifra: bolsa, Banco Central e extrato do custodiante.' })),
-      h('div', { 'data-n': '02' }, h('dt', { text: 'A perda vem primeiro' }), h('dd', { text: 'Quando a carteira cai, você lê isso na primeira linha. Sem eufemismo.' })),
-      h('div', { 'data-n': '03' }, h('dt', { text: 'Seu assessor assina' }), h('dd', { text: 'Nenhuma recomendação chega até você sem o nome de quem a aprovou.' }))),
-    h('footer.hero-foot', {}, h('span', { text: 'Enter Asset Management' }), h('span', { text: 'Portal de investimentos · v1.0' }))),
+  h('div.hero-wrap', {},
+    h('section.hero', { 'aria-label': 'Apresentação' },
+      h('img.hero-photo', { src: 'assets/vela-guanabara.jpg', alt: 'Veleiro adernado na Baía de Guanabara, com o Pão de Açúcar ao fundo', width: 2200, height: 1467, decoding: 'async', fetchpriority: 'high' }),
+      h('header.site-top', {},
+        logo({ size: 26 }),
+        h('nav.site-nav', { 'aria-label': 'Seções' }, NAV.map(([href, text]) => h('a', { href, text })))),
+      h('div.hero-copy', {},
+        h('p.hero-kicker', { text: 'Enter Asset Management · São Paulo' }),
+        h('h1.hero-title', {}, 'O vento não se escolhe. ', h('em', { text: 'O rumo, sim.' })),
+        h('p.hero-sub', { text: 'Ajustamos as velas todo mês para que a sua carteira siga rumo ao destino, mesmo quando o vento muda.' })),
+      h('span.hero-place', { text: 'Baía de Guanabara, Rio de Janeiro' })),
 
-  h('section.login-pane', {},
-    h('div.login', {},
-      h('h1', { text: 'Entrar' }),
-      h('p.lede', { text: 'Assessores e clientes entram pela mesma porta. Um assessor vê apenas os clientes sob sua responsabilidade; um cliente vê apenas os próprios dados.' }),
-      notice,
-      resume,
-      h('form', { onsubmit: go, novalidate: true },
-        h('div.field', {}, h('label', { for: 'email', text: 'E-mail' }), email),
-        h('div.field', {}, h('label', { for: 'password', text: 'Senha' }), password),
-        submit),
-      error,
-      h('div.demo', {},
-        h('div.kicker', { text: 'Acessos de demonstração' }),
-        h('div.demo-list', {}, DEMO.map((d) => h('button.demo-acct', {
-          type: 'button', title: `Entrar como ${d.name}`,
-          onclick: () => { email.value = d.email; password.value = d.password; go(); },
-        }, avatar(d.name), h('span', {}, h('b', { text: d.name }), h('small', { text: `${d.role} · ${d.email}` })), icon('arrow', { size: 15 })))),
-        h('p.note', { text: 'Em produção este login fica atrás do Cloudflare Access; o par e-mail/senha existe para que a demonstração rode sem um tenant configurado.' })))));
+    h('aside.login-card', { 'aria-label': 'Entrar' },
+      h('div.login', {},
+        h('div.kicker', { text: 'Área do cliente e do assessor' }),
+        h('h2', { text: 'Entrar' }),
+        h('p.lede', { text: 'A bordo, cada um vê o que lhe cabe: o assessor, as carteiras sob seu leme; o cliente, a própria.' }),
+        notice,
+        resume,
+        h('form', { onsubmit: go, novalidate: true },
+          h('div.field', {}, h('label', { for: 'email', text: 'E-mail' }), email),
+          h('div.field', {}, h('label', { for: 'password', text: 'Senha' }), password),
+          submit),
+        error,
+        h('div.demo', {},
+          h('div.kicker', { text: 'Acessos de demonstração' }),
+          h('div.demo-list', {}, DEMO.map((d) => h('button.demo-acct', {
+            type: 'button', title: `Entrar como ${d.name}`,
+            onclick: () => { email.value = d.email; password.value = d.password; go(); },
+          }, avatar(d.name), h('span', {}, h('b', { text: d.name }), h('small', { text: `${d.role} · ${d.email}` })), icon('arrow', { size: 15 })))),
+          h('p.note', { text: 'Em produção este login fica atrás do Cloudflare Access; o par e-mail/senha existe para que a demonstração rode sem um tenant configurado.' }))))),
+
+  h('section.sec', { id: 'vento' },
+    secH(1, 'O vento'),
+    h('div.sec-body.two', {},
+      h('p.pull', { text: 'O mercado é o vento. Não o controlamos; lemos. Quem não lê o vento navega por sorte.' }),
+      h('div.col', {},
+        h('p.body', { text: 'Toda leitura tem fonte e data. Os preços vêm da B3 via Yahoo Finance e da TradingView; as séries, do Banco Central do Brasil; os ativos digitais, da CoinGecko; as manchetes, do Valor Econômico. Nenhum número chega até você sem dizer de onde veio.' }),
+        h('div.kicker', { text: 'Fontes que alimentam o portal' }),
+        h('ul.srcs', {}, SOURCES.map((t) => h('li', { text: t }))),
+        h('div.kicker', { text: 'Outras leituras que acompanhamos' }),
+        h('ul.srcs.quiet', {}, WATCHED.map((t) => h('li', { text: t })))))),
+
+  h('section.sec.alt', { id: 'velas' },
+    secH(2, 'As velas'),
+    h('div.sec-body.two', {},
+      h('p.pull', { text: 'Estratégia é o ajuste das velas. Duas frentes, um só barco.' }),
+      h('dl.mandate', {},
+        term('O casco · frente privada', 'Posições concentradas em empresas AI-native na América Latina e no sul da Europa. É o que dá peso e direção.'),
+        term('A vela · frente líquida', 'Exposição pública de longo prazo à mesma tese. Dá impulso ao casco e o estabiliza quando o vento vira.'),
+        term('Quem ajusta', 'Uma gestora nascida de uma empresa que opera em escala nacional. Lê o vento no convés, não no relatório.')))),
+
+  h('section.sec', { id: 'rumo' },
+    secH(3, 'O rumo'),
+    h('div.sec-body.rumo', {},
+      h('div.col', {},
+        h('p.pull', { text: 'Desviar não é se perder.' }),
+        // §5.1 — own the downside first: the loss is the first sentence, the metaphor the second.
+        h('p.body', { text: 'Quando a carteira cai, você lê isso na primeira linha, sem eufemismo. Na segunda, lê por que o destino continua o mesmo.' }),
+        h('p.body', { text: 'Contra o vento, nenhum veleiro anda em linha reta. Ele bordeja: vai e volta, e a cada bordo chega mais perto. Um mês negativo é um bordo. Dizemos quanto custou e para onde ele nos levou.' })),
+      h('figure.tack', { html: TACK }))),
+
+  h('section.band', { 'aria-label': 'Regata em Ilhabela' },
+    h('img', { src: 'assets/regata-ilhabela.jpg', alt: 'Regata da Semana Internacional de Vela de Ilhabela vista do alto', width: 2000, height: 1333, loading: 'lazy', decoding: 'async' }),
+    h('div.band-copy', {},
+      h('span.band-line', { text: 'Cada barco, um bordo. O mesmo destino.' }),
+      h('span.band-place', { text: 'Semana Internacional de Vela de Ilhabela, São Paulo' }))),
+
+  h('section.sec.alt', { id: 'diario' },
+    secH(4, 'Diário de bordo', 'Todo mês, para você e para o seu assessor'),
+    h('ol.questions', {},
+      h('li', {}, h('h3', { text: 'Quanto andamos.' }), h('p', { text: 'Rentabilidade apurada em código, com período, base e origem em cada cifra. A perda vem primeiro.' })),
+      h('li', {}, h('h3', { text: 'O que o vento fez.' }), h('p', { text: 'Só os eventos que tocam as suas posições, com a fonte de cada um. O modelo escreve e explica; nunca calcula.' })),
+      h('li', {}, h('h3', { text: 'O que ajustar no próximo bordo.' }), h('p', { text: 'Pontos para discutir na reunião. Nenhuma recomendação chega sem o nome de quem está ao leme.' })))),
+
+  h('section.sec', { id: 'ancoras' },
+    secH(5, 'Âncoras', 'O que não se move quando o vento muda'),
+    // §14.3 — the trust block: four facts, stated flat.
+    h('div.trust', {},
+      h('div.trust-panel', {}, h('h3', { text: 'Custódia independente' }), h('p', { text: 'O extrato que você lê é o do custodiante, não o nosso.' })),
+      h('div.trust-panel', {}, h('h3', { text: 'Auditoria anual, auditor nomeado' }), h('p', { text: 'Demonstrações auditadas todo ano, com o auditor identificado.' })),
+      h('div.trust-panel', {}, h('h3', { text: 'Política escrita de avaliação' }), h('p', { text: 'Posições sem cotação pública seguem uma política documentada.' })),
+      h('div.trust-panel', {}, h('h3', { text: 'Registros e canal de denúncias' }), h('p', { text: 'Disponíveis na área do cliente.' })))),
+
+  h('footer.site-foot', {},
+    h('div.foot-legal', {}, h('b', { text: 'Enter Asset Management Ltda.' }), ' · São Paulo, SP · Portal de investimentos · v1.0'),
+    // §15.3 — the disclosure is body-adjacent in size and colour, never grey.
+    h('p.disclosure', { text: 'Este portal é de uso exclusivo de clientes e assessores da gestora e não constitui oferta pública de valores mobiliários. Rentabilidade obtida no passado não representa garantia de resultados futuros. Toda cifra apresentada na área do cliente traz período, base e fonte.' }),
+    h('p.credit', { text: 'Fotografias: Baía de Guanabara — Marinelson Almeida, CC BY 2.0 · Semana Internacional de Vela de Ilhabela — Marinha do Brasil, CC BY-SA 2.0.' })));
 
 // A session already open in this browser is offered, never assumed: the page
 // shows who is signed in and lets you continue or switch accounts.

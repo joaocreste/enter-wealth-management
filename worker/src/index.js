@@ -33,6 +33,7 @@ import { makeSource, SourceLedger } from '../../src/core/sources.js';
 import * as A from './agents.js';
 import * as S from './series.js';
 import * as R from './report-agent.js';
+import { gateEnabled, gatePassed, gateSubmit, gatePage } from './gate.js';
 import { hydrateRecommendation, allocationOf, meetingPrep, runProfitabilityLive } from './client-analysis.js';
 import { assetRiskReturn } from './risk-return.js';
 export { OverviewAgents } from './agents.js';
@@ -106,6 +107,12 @@ export default {
     const { pathname } = url;
 
     if (!pathname.startsWith('/api/')) {
+      // The whole portal sits behind one password when SITE_PASSWORD is set:
+      // no page, script, style or photograph is served before it is given.
+      if (gateEnabled(env)) {
+        if (pathname === '/gate' && request.method === 'POST') return gateSubmit(request, env, url);
+        if (!(await gatePassed(request, env))) return gatePage(url);
+      }
       return env.ASSETS ? env.ASSETS.fetch(request) : bad(404, 'not found');
     }
     if (request.method === 'OPTIONS') {

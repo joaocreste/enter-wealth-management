@@ -26,8 +26,9 @@ npm run demo                                      # the whole §37 journey, narr
 ```
 
 Then open **http://127.0.0.1:8788/** — or the deployed portal at
-**https://joaocreste.github.io/enter-wealth-management/**, which runs against the
-deployed Worker rather than your local one.
+**https://enter-wealth-advisor.joaocreste-8da.workers.dev/**, which sits behind an
+access password shared separately (the Worker checks it before serving any page
+or asset; the former GitHub Pages address only redirects there).
 
 | | |
 |---|---|
@@ -192,14 +193,18 @@ which level it needed. The contribution chart is the last thing to go.
 
 ## Deploying
 
-The portal and the API live on different origins by design: static files on
-**GitHub Pages**, everything with state on a **Cloudflare Worker** with D1, R2 and KV.
+The portal and the API are served by one **Cloudflare Worker** with D1, R2 and KV.
+The Worker asks for an access password before it serves any page or asset
+(`worker/src/gate.js`; the password is the `SITE_PASSWORD` secret, never in the
+code), and the API keeps its own per-user sessions behind it. The former GitHub
+Pages address is kept only as a redirect, because a static host cannot ask for a
+password.
 
 **Live:**
 
 | | |
 |---|---|
-| Portal | **https://joaocreste.github.io/enter-wealth-management/** |
+| Portal | **https://enter-wealth-advisor.joaocreste-8da.workers.dev/** — behind the access password (`SITE_PASSWORD` secret) |
 | API | https://enter-wealth-advisor.joaocreste-8da.workers.dev |
 
 Advisor `antonio.bicudo@xpi.com.br` / `xp2026` · client

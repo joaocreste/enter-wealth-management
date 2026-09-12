@@ -593,6 +593,7 @@ async function advisorClients(env, session) {
       next_review: nextMeeting?.date ?? c.next_review_at ?? null,
       policy_version: policy?.version ?? null,
       snapshot_date: snap?.effective_date ?? null,
+      priced_at: snap?.created_at ?? null,           // when the positions were last valued: the snapshot's creation
       report_status: report?.status ?? 'not_generated',
       report_id: report?.id ?? null,
       alerts,
@@ -795,7 +796,7 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
     if (report) {
       const canonical = json(report.canonical_report_json, {});
       if (!isAdvisor && report.status !== 'published') return bad(404, 'report not available');
-      return ok({ month, from_report: true, report_id: report.id, performance: canonical.portfolio_performance, attribution: canonical.performance_attribution, benchmark: canonical.benchmark, metrics: canonical.portfolio_metrics, sources: canonical.sources });
+      return ok({ month, from_report: true, report_id: report.id, report_created_at: report.created_at, performance: canonical.portfolio_performance, attribution: canonical.performance_attribution, benchmark: canonical.benchmark, metrics: canonical.portfolio_metrics, sources: canonical.sources });
     }
     if (!isAdvisor) return bad(404, 'no published report for this month');
     const live = await runProfitabilityLive(env, client.id, month);
@@ -857,7 +858,7 @@ function hydrateRecommendation(r) {
     signal_conflict: !!r.signal_conflict, current_weight: r.current_weight,
     rationale: r.rationale, factors: json(r.factors_json, []), flags: json(r.flags_json, []),
     statement: json(r.statement_json, null), advisor_status: r.advisor_status, advisor_note: r.advisor_note,
-    decided_at: r.decided_at, recommendation_set_id: r.recommendation_set_id,
+    decided_at: r.decided_at, created_at: r.created_at, recommendation_set_id: r.recommendation_set_id,
   };
 }
 

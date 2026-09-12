@@ -18,7 +18,11 @@ import { brandFonts } from '../src/render/fonts/index.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
 import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, efficientFrontier } from '../src/core/risk.js';
-import { parseRss, clusterHeadlines, sourceFor, PROVIDER as VALOR } from '../src/adapters/valor.js';
+import { parseRss, clusterHeadlines, sourceFor, distinctStories, isServicePiece, PROVIDER as VALOR } from '../src/adapters/valor.js';
+import { splitTitle, feedUrl } from '../src/adapters/googlenews.js';
+import { articleUrl } from '../src/adapters/bingnews.js';
+import { describeLevelSeries } from '../src/adapters/marketdata.js';
+import { monthToDate } from '../src/adapters/yahoo.js';
 import { buildWhatMattersTable, notableWindow } from '../src/core/events.js';
 
 let pass = 0; let fail = 0;
@@ -473,6 +477,49 @@ if (process.argv.includes('--live')) {
     eq(res.status, 403);
   });
 }
+
+console.log('\n  Indicators — a rate has a level and a last change, never a day move');
+t('the Selic is a step: the day it changed and the value before it, no percentage', () => {
+  const pts = [['2026-07-30', 14.25], ['2026-07-31', 14.25], ['2026-08-06', 14.0], ['2026-08-07', 14.0], ['2026-09-11', 14.0]].map(([date, value]) => ({ date, value }));
+  const l = describeLevelSeries(pts);
+  eq(l.kind, 'policy_rate'); eq(l.since, '2026-08-06'); eq(l.prev_value, 14.25); close(l.delta, -0.25, 1e-9);
+});
+t('the IPCA is one number a month: the reference month and the month before, never −557%', () => {
+  const pts = [{ date: '2026-06-01', value: 0.26 }, { date: '2026-07-01', value: 0.07 }, { date: '2026-08-01', value: -0.32 }];
+  const l = describeLevelSeries(pts, { monthly: true });
+  eq(l.kind, 'monthly_index'); eq(l.period, '2026-08'); eq(l.prev_period, '2026-07'); eq(l.prev_value, 0.07);
+  ok(!('changePct' in l), 'no percentage change on a percentage');
+});
+t('month to date is measured from the last close of the previous month', () => {
+  const bars = [{ date: '2026-08-28', close: 100 }, { date: '2026-08-31', close: 110 }, { date: '2026-09-01', close: 120 }, { date: '2026-09-11', close: 121 }];
+  const m = monthToDate(bars, 121, '2026-09');
+  eq(m.from, '2026-08-31'); close(m.pct, 0.1, 1e-9);
+  eq(monthToDate(bars.slice(2), 121, '2026-09').pct, null, 'no previous-month close in the window');
+});
+
+console.log('\n  Headlines — coverage counts stories, and service pieces are not events');
+t('thirty candidate lists filled from one template are one story', () => {
+  const items = ['Acre (AC)', 'Alagoas (AL)', 'Amapá (AP)'].map((uf, i) => ({ id: `h${i}`, title: `Candidatos a senador pelo ${uf}: veja lista das eleições 2026` }));
+  eq(distinctStories(items), 1);
+  eq(distinctStories([{ title: 'Copom corta a Selic para 14%' }, { title: 'Dólar cai com corte da Selic' }]), 2);
+  ok(isServicePiece('Candidatos a senador pelo Acre (AC): veja lista das eleições 2026'));
+  ok(!isServicePiece('Copom corta a Selic para 14,00% ao ano'));
+});
+t('a Google News item keeps its publisher and loses the " - Publisher" suffix', () => {
+  const xml = '<rss><channel><item><title>Fed poised to raise rates - WSJ</title><link>https://news.google.com/rss/articles/abc?oc=5</link><pubDate>Fri, 11 Sep 2026 21:21:41 GMT</pubDate><source url="https://www.wsj.com">WSJ</source></item></channel></rss>';
+  const [it] = parseRss(xml);
+  eq(it.source, 'WSJ'); eq(it.sourceUrl, 'https://www.wsj.com');
+  const s = splitTitle(it.title, it.source);
+  eq(s.title, 'Fed poised to raise rates'); eq(s.publisher, 'WSJ');
+  ok(feedUrl({ q: 'Fed', region: 'intl' }, 48).includes('when%3A2d'), 'the 48-hour window goes into the query');
+});
+t('a Bing News item names its publisher and links to the article, not to Bing', () => {
+  const xml = '<rss><channel><item><title>Ibovespa vai &#224;s m&#237;nimas</title><link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3a%2f%2fvalor.globo.com%2ffinancas%2fnoticia%2f2026%2f09%2f11%2fx.ghtml&amp;c=1</link><pubDate>Fri, 11 Sep 2026 16:47:00 GMT</pubDate><News:Source>Valor Econ&#244;mico</News:Source></item></channel></rss>';
+  const [it] = parseRss(xml);
+  eq(it.title, 'Ibovespa vai às mínimas'); eq(it.source, 'Valor Econômico');
+  eq(articleUrl(it.link), 'https://valor.globo.com/financas/noticia/2026/09/11/x.ghtml');
+  eq(articleUrl('https://example.com/a'), 'https://example.com/a');
+});
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

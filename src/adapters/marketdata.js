@@ -229,6 +229,34 @@ async function priceFromAccrual(asset, startIso, endIso, ctx) {
   };
 }
 
+/**
+ * A policy rate or a monthly index has no "day move". The Selic is a step
+ * function and the IPCA is one number a month; what the reader needs is the
+ * level, when it last changed (or which month it refers to) and the value
+ * before it. A percentage change between two readings of a rate is never
+ * computed: 0.07% to −0.32% is not "−557%".
+ */
+export function describeLevelSeries(points, { monthly = false } = {}) {
+  if (!points?.length) return null;
+  const last = points[points.length - 1];
+  if (monthly) {
+    const prev = points.length > 1 ? points[points.length - 2] : null;
+    return {
+      kind: 'monthly_index', period: last.date.slice(0, 7),
+      prev_value: prev?.value ?? null, prev_period: prev ? prev.date.slice(0, 7) : null,
+      delta: prev ? last.value - prev.value : null,
+    };
+  }
+  let i = points.length - 1;
+  while (i > 0 && points[i - 1].value === last.value) i -= 1;   // back to the first day at the current level
+  const prev = i > 0 ? points[i - 1] : null;
+  return {
+    kind: 'policy_rate', since: points[i].date,
+    prev_value: prev?.value ?? null, delta: prev ? last.value - prev.value : null,
+    since_is_window_start: !prev,                                  // unchanged for the whole window fetched
+  };
+}
+
 /** Live quote for a World Overview indicator. Chain: CoinGecko (crypto) → Yahoo → BCB. */
 export async function indicatorQuote(ind) {
   if (ind.coingecko_id) {
@@ -242,15 +270,17 @@ export async function indicatorQuote(ind) {
   }
   if (ind.bcb_series) {
     const to = new Date().toISOString().slice(0, 10);
-    const s = await bcb.series(ind.bcb_series, widen(to, 45), to);
+    const monthly = /MONTHLY/.test(ind.bcb_series);
+    // Long enough to reach the previous step of a policy rate, or the previous month of an index.
+    const s = await bcb.series(ind.bcb_series, widen(to, monthly ? 200 : 120), to);
     if (!s.unavailable && s.points.length) {
       const last = s.points[s.points.length - 1];
-      const first = s.points[0];
       return {
         key: ind.key, label: ind.label, unit: ind.unit,
         symbol: `BCB-SGS-${s.code}`, name: s.name, price: last.value,
-        changePct: first.value ? last.value / first.value - 1 : null,
-        mtdPct: null, asOf: last.date, source: s.source,
+        changePct: null, mtdPct: null,                       // a rate has a level and a last change, never a day move
+        level: describeLevelSeries(s.points, { monthly }),
+        asOf: last.date, source: s.source,
       };
     }
   }

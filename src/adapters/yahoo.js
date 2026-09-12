@@ -82,6 +82,13 @@ export async function dailySeries(symbol, fromIso, toIsoDate, { cacheTtl = null 
       points,
       dividends,
       session,
+      // The same response carries the live quote; a caller that already has the series need not ask again.
+      quote: Number.isFinite(m.regularMarketPrice) ? {
+        price: m.regularMarketPrice,
+        changePct: Number.isFinite(m.regularMarketChangePercent) ? m.regularMarketChangePercent / 100 : null,
+        asOf: Number.isFinite(lastTrade) ? iso(lastTrade) : points[points.length - 1].date,
+        fromCache: !!fromCache,
+      } : null,
       fromCache: !!fromCache,
       source: makeSource({
         provider: 'Yahoo Finance',
@@ -106,6 +113,17 @@ export async function dailySeries(symbol, fromIso, toIsoDate, { cacheTtl = null 
   }
 }
 
+/**
+ * Month to date: the move since the last close of the previous month, not
+ * since the first bar of a trailing window. `points` are daily bars in order;
+ * `month` is the YYYY-MM the price belongs to.
+ */
+export function monthToDate(points, price, month) {
+  let base = null;
+  for (const p of points) if (p.date.slice(0, 7) < month && Number.isFinite(p.close)) base = p;
+  return base ? { pct: price / base.close - 1, from: base.date } : { pct: null, from: null };
+}
+
 /** Latest quote snapshot — the World Overview indicator strip. */
 export async function quote(symbol) {
   try {
@@ -113,16 +131,19 @@ export async function quote(symbol) {
     const r = json?.chart?.result?.[0];
     const m = r?.meta;
     if (!Number.isFinite(m?.regularMarketPrice)) throw new Error('no quote');
-    const closes = (r.indicators?.adjclose?.[0]?.adjclose || r.indicators?.quote?.[0]?.close || []).filter(Number.isFinite);
+    const closesAll = r.indicators?.adjclose?.[0]?.adjclose || r.indicators?.quote?.[0]?.close || [];
     const ts = r.timestamp || [];
-    const first = closes.length ? closes[0] : null;
+    const bars = ts.map((t, k) => ({ date: iso(t), close: closesAll[k] })).filter((b) => Number.isFinite(b.close));
+    const asOf = Number.isFinite(m.regularMarketTime) ? iso(m.regularMarketTime) : (ts.length ? iso(ts[ts.length - 1]) : null);
+    const mtd = asOf ? monthToDate(bars, m.regularMarketPrice, asOf.slice(0, 7)) : { pct: null, from: null };
     return {
       symbol,
       name: m.longName || m.shortName || symbol,
       currency: m.currency || null,
       price: m.regularMarketPrice,
       changePct: Number.isFinite(m.regularMarketChangePercent) ? m.regularMarketChangePercent / 100 : null,
-      mtdPct: first ? m.regularMarketPrice / first - 1 : null,
+      mtdPct: mtd.pct,
+      mtdFrom: mtd.from,
       fiftyTwoWeekHigh: m.fiftyTwoWeekHigh ?? null,
       fiftyTwoWeekLow: m.fiftyTwoWeekLow ?? null,
       asOf: ts.length ? iso(ts[ts.length - 1]) : null,

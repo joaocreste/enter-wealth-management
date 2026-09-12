@@ -110,6 +110,7 @@ async function fetchPoints(ind, from, to, { cacheTtl = null } = {}) {
     name: s.name, currency: s.currency, exchange: s.exchange,
     fallback_for: s.source?.fallback_for ?? null,
     in_progress: s.session?.in_progress === true,
+    quote: s.quote ?? null,
   };
 }
 
@@ -172,7 +173,7 @@ export async function ensureSeries(env, ind, { from = null, force = false } = {}
       const got = await fetchPoints(ind, addDays(need, -OVERLAP_DAYS) < EARLIEST ? EARLIEST : addDays(need, -OVERLAP_DAYS), to);
       stored = finish(ind, null, got.points, { ...got, covers_from: need, last_provisional: got.in_progress });
       await writeStored(env, ind, stored);
-      return { ...stored, action: force ? 'rebuilt' : 'built' };
+      return { ...stored, action: force ? 'rebuilt' : 'built', live_quote: got.quote };
     } catch (err) {
       return { key: ind.key, symbol: ind.yahoo_symbol, label: ind.label, group: ind.group, unit: ind.unit, unavailable: true, reason: err.message, providers_attempted: ['Yahoo Finance'] };
     }
@@ -182,6 +183,7 @@ export async function ensureSeries(env, ind, { from = null, force = false } = {}
   let action = 'stored';
   let error = null;
   let provisional = stored.last_provisional === true;
+  let liveQuote = null;   // the quote that came with today's refresh, when there was one
 
   // the caller asks for history older than the store holds: extend backwards
   const coversFrom = stored.covers_from || stored.first;
@@ -202,6 +204,7 @@ export async function ensureSeries(env, ind, { from = null, force = false } = {}
       const got = await fetchPoints(ind, addDays(stored.last, -OVERLAP_DAYS), to, { cacheTtl: REFRESH_CACHE_TTL });
       points = mergePoints(points, got.points);
       provisional = got.in_progress;
+      liveQuote = got.quote;
       action = action === 'extended' ? 'extended+refreshed' : 'refreshed';
     } catch (err) { error = `atualização falhou: ${err.message}`; }
   }
@@ -210,7 +213,7 @@ export async function ensureSeries(env, ind, { from = null, force = false } = {}
     stored = finish(ind, stored, points, { covers_from: extendedTo, last_provisional: provisional });
     await writeStored(env, ind, stored);
   }
-  return { ...stored, action, refresh_error: error };
+  return { ...stored, action, refresh_error: error, live_quote: liveQuote };
 }
 
 // ── windows over the store ──────────────────────────────────────────────────

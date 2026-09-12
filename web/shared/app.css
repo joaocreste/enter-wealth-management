@@ -131,6 +131,15 @@ button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--structure);outline-offset:2px}
 ::selection{background:var(--ink-950);color:var(--paper-2)}
 .mono{font-family:var(--mono)}
+
+/* debug: the date behind every figure and headline, in red — html.dbg-dates switches it on (ui.js debugDates) */
+.dbg{display:none}
+html.dbg-dates .dbg{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:500;line-height:1.35;letter-spacing:0;text-transform:none;color:#D0202E;background:rgba(208,32,46,.07);border:1px solid rgba(208,32,46,.45);border-radius:3px;padding:0 4px;margin-left:6px;vertical-align:middle;white-space:nowrap}
+html.dbg-dates .dbg.block{display:block;width:max-content;max-width:100%;margin:4px 0 0;white-space:normal}
+html.dbg-dates td.num .dbg.block{margin-left:auto}
+html.dbg-dates .dbg.none{border-style:dashed}
+@media (prefers-color-scheme:dark){html.dbg-dates:not([data-theme="light"]) .dbg{color:#FF7A85;background:rgba(255,122,133,.1);border-color:rgba(255,122,133,.55)}}
+html.dbg-dates[data-theme="dark"] .dbg{color:#FF7A85;background:rgba(255,122,133,.1);border-color:rgba(255,122,133,.55)}
 .serif{font-family:var(--serif);font-size:17px;line-height:1.6}
 hr{border:0;border-top:1px solid var(--rule);margin:var(--s-5) 0}
 svg.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter;flex:none}
@@ -617,7 +626,7 @@ iframe.doc{width:100%;border:1px solid var(--rule);background:#fff;display:block
 .site{display:flex;flex-direction:column;min-height:100vh;background:var(--paper)}
 .site>*{min-width:0}
 .hero-wrap{position:relative}
-.hero{position:relative;background:var(--rail-bg);color:#fff;min-height:min(92vh,900px);display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;isolation:isolate}
+section.hero{position:relative;background:var(--rail-bg);color:#fff;min-height:min(92vh,900px);display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;isolation:isolate}
 .hero-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 58%;z-index:-1;animation:settle 1200ms var(--ease) both}
 @keyframes settle{from{opacity:0;transform:scale(1.03)}to{opacity:1;transform:none}}
 .site-top{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:26px 56px}
@@ -744,7 +753,7 @@ iframe.doc{width:100%;border:1px solid var(--rule);background:#fff;display:block
 @media (max-width:900px){
   .site-top{padding:16px 24px}
   .site-nav{display:none}
-  .hero{min-height:min(72vh,600px)}
+  section.hero{min-height:min(72vh,600px)}
   .hero-copy{padding:40px 24px 48px;max-width:none}
   .hero-place{display:none}
   .hero-photo{object-position:72% 58%}

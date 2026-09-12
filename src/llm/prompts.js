@@ -12,7 +12,7 @@
  * model's job is language, not arithmetic.
  */
 
-export const PROMPT_VERSION = 'letter-2026-09-b';
+export const PROMPT_VERSION = 'letter-2026-09-c';
 
 export const SYSTEM_GUARDRAIL = `You are the writing layer of a regulated investment-advisory system at Enter Asset Management.
 
@@ -143,7 +143,7 @@ Absolute rules:
 5. Short sentences. Plain language for a financial advisor, not an economist.`,
     template: `# Task: find today's market events that could matter to a Brazilian wealth-management book
 
-Today is {{date}}. Search for market news from the last two trading days outside Brazil: United States (Fed, Treasury yields, inflation, employment), global equities (S&P 500, Nasdaq), credit, the dollar (dollar index, EUR/USD), commodities (Brent, WTI, gold, copper), digital assets (Bitcoin, Ether), and the geopolitics that moves those markets. Brazilian domestic news — Copom, IPCA, fiscal policy, politics, the real — reaches the system separately, from Valor Econômico's own feed; do not search for it. Use at most six searches.
+Today is {{date}}. Search for market news from the last 48 hours outside Brazil (anything older is discarded by the code): United States (Fed, Treasury yields, inflation, employment), global equities (S&P 500, Nasdaq), credit, the dollar (dollar index, EUR/USD), commodities (Brent, WTI, gold, copper), digital assets (Bitcoin, Ether), and the geopolitics that moves those markets. Brazilian domestic news — Copom, IPCA, fiscal policy, politics, the real — reaches the system separately, from Valor Econômico's own feed; do not search for it. Use at most six searches.
 
 ## Output
 
@@ -180,19 +180,19 @@ After searching, return STRICT JSON — an array of at most 8 items — and noth
    */
   daily_headlines_classify: {
     id: 'daily_headlines_classify',
-    title: 'Classify today\'s Valor Econômico headlines for a wealth book',
+    title: 'Classify today\'s headlines for a wealth book',
     language_out: 'pt-BR',
-    system: `You are the data-gathering agent of a regulated investment-advisory system at Enter Asset Management. You read headlines published by Valor Econômico and decide which ones a financial advisor must be ready to discuss with clients today.
+    system: `You are the data-gathering agent of a regulated investment-advisory system at Enter Asset Management. You read headlines published in the last 48 hours — Valor Econômico's own feed, and Brazilian and international outlets surfaced by Google News — and decide which ones a financial advisor must be ready to discuss with clients today.
 
 Absolute rules:
-1. You know only what FACTS.headlines carries: title, subtitle, first paragraph, section, time, and how many other headlines cover the same story (coverage). Never add a fact, a name, a number or an outcome that is not in those fields.
+1. You know only what FACTS.headlines carries: title, subtitle, first paragraph (when the feed had them), publisher, region (br or intl), time, and how many distinct newsrooms cover the same story (coverage). Never add a fact, a name, a number or an outcome that is not in those fields.
 2. Every item you return names one headline_id from FACTS.headlines. An id that is not there is discarded by the code.
 3. Coverage is a fact about the newsroom, not your opinion. The headline with the highest coverage is what every client will ask about today; keep it and mark it market_wide, even when its effect on a portfolio is indirect. Explain the mechanism (currency, rates curve, risk premium) rather than dismissing it.
 4. Do not report sponsored content, rankings, service pieces or opinion columns as events.
 5. Short sentences. Plain language for a financial advisor, not an economist.`,
     template: `# Task: pick today's Brazilian headlines that matter to this wealth book
 
-Today is {{date}}. FACTS.headlines lists the most covered stories in Valor Econômico over the last 36 hours, each with an id. Choose at most 6.
+Today is {{date}}. FACTS.headlines lists the most covered stories of the last 48 hours, each with an id, a publisher and a region. Choose at most 8: the Brazilian stories that matter to this book and, when FACTS.headlines has region "intl" items, at least two international ones. Write summary_pt in Portuguese even when the headline is in English.
 
 ## Output
 

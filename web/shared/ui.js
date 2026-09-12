@@ -44,6 +44,53 @@ export function mount(root, ...children) {
   return root;
 }
 
+// ── debug: the date behind every figure and every headline ────────────────
+// While the freshness of the data is under review, every number and every
+// news line on both portals carries, in red, the date it was observed,
+// published or priced. Switched from the rail and remembered per browser;
+// on by default.
+const DBG_KEY = 'ew_debug_dates';
+export const debugDates = {
+  get on() { try { return localStorage.getItem(DBG_KEY) !== '0'; } catch { return true; } },
+  set(on) { try { localStorage.setItem(DBG_KEY, on ? '1' : '0'); } catch { /* a per-browser convenience only */ } this.apply(); },
+  apply() { document.documentElement.classList.toggle('dbg-dates', this.on); },
+};
+debugDates.apply();
+
+/** "2026-09-08 12:18:08" (SQLite) and "2026-09-12T10:05:01.123Z" both print as "2026-09-12 10:05Z"; a bare date stays a date. */
+export function isoShort(v) {
+  if (v == null || v === '') return null;
+  const s = String(v);
+  const m = s.match(/^(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d)/);
+  return m ? `${m[1]} ${m[2]}Z` : s;
+}
+
+/**
+ * The red mark. Each argument is a value or a [label, value] pair; an empty
+ * value is skipped, and a mark left with nothing says "sem data", because a
+ * figure that carries no date is itself a finding.
+ */
+export function when(...parts) {
+  const bits = [];
+  for (const p of parts) {
+    if (p == null || p === false) continue;
+    const [label, raw] = Array.isArray(p) ? p : [null, p];
+    const v = isoShort(raw);
+    if (v) bits.push(label ? `${label} ${v}` : v);
+  }
+  return h('span.dbg', { class: bits.length ? '' : 'none', text: bits.length ? bits.join(' · ') : 'sem data' });
+}
+/** The same mark on a line of its own, under a figure. */
+export function whenBlock(...parts) { const el = when(...parts); el.classList.add('block'); return el; }
+
+export function debugToggle() {
+  const btn = h('button.btn.sm', { type: 'button', title: 'Mostrar ou esconder, em vermelho, a data por trás de cada número e notícia' });
+  const paint = () => { mount(btn, h('span', { text: debugDates.on ? 'datas: on' : 'datas: off' })); btn.classList.toggle('on', debugDates.on); };
+  btn.addEventListener('click', () => { debugDates.set(!debugDates.on); paint(); });
+  paint();
+  return btn;
+}
+
 // ── session ───────────────────────────────────────────────────────────────
 // The session lives in sessionStorage, so it ends with the browser window. A new
 // tab asks the open ones for it over a BroadcastChannel, so the portal is signed
@@ -301,6 +348,7 @@ export function railFoot({ name, sub, onLogout }) {
   return h('div.rail-foot', {},
     h('div.who', {}, avatar(name), h('div', {}, h('div.nm', { text: name }), sub && h('div.rl', { text: sub }))),
     h('div.rail-tools', {},
+      debugToggle(),
       themeToggle(),
       h('button.btn.sm', { type: 'button', title: 'Sair', onclick: onLogout }, icon('logout', { size: 15 }), h('span', { text: 'sair' }))));
 }
@@ -340,11 +388,12 @@ export function dateWithWeekday(iso, locale = 'pt-BR') {
 }
 
 // ── figures ───────────────────────────────────────────────────────────────
-export function stat(label, value, { tone = '', sub = null, small = false, hero = false } = {}) {
+export function stat(label, value, { tone = '', sub = null, small = false, hero = false, dbg = null } = {}) {
   return h('div.stat', { class: hero ? 'hero' : '' },
     h('span.lbl', { text: label }),
     h('span.val', { class: `${tone || ''} ${small ? 'sm' : ''}`.trim(), text: value }),
-    sub && h('span.sub', { text: sub }));
+    sub && h('span.sub', { text: sub }),
+    dbg);
 }
 
 export function signed(value, kind = 'percent', locale = 'pt-BR') {

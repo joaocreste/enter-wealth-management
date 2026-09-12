@@ -12,6 +12,7 @@ import {
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, lineChart, sourcesBlock,
   apiUrl, loginUrl, advisorUrl,
+  when, whenBlock,
 } from '../shared/ui.js';
 
 const root = document.getElementById('root');
@@ -81,12 +82,13 @@ async function viewPortfolio() {
   return frag(
     head(`${greeting()}, ${(d.client.name || '').split(' ')[0]}`,
       `Perfil ${d.client.risk_profile} · política de investimentos versão ${d.policy?.version}${SUMMARY?.advisor?.name ? ` · seu assessor é ${SUMMARY.advisor.name}` : ''}`,
-      null, [h('b', { text: 'Minha carteira' }), sep(), `posição em ${dateLong(d.snapshot?.effective_date, L)}`]),
+      null, [h('b', { text: 'Minha carteira' }), sep(), `posição em ${dateLong(d.snapshot?.effective_date, L)}`,
+        when(['posição de', d.snapshot?.effective_date], ['precificada em', d.snapshot?.created_at])]),
 
     h('div.grid.g3', { style: { marginBottom: '32px' } },
-      stat('Patrimônio', money(d.total_value, { locale: L }), { hero: true }),
-      stat(last ? `Rentabilidade em ${monthLabel(last.month, L)}` : 'Rentabilidade', last ? percent(last.portfolio, { locale: L }) : '—', { hero: true, tone: toneClass(last?.portfolio) }),
-      stat('Carteira de referência', last?.benchmark != null ? percent(last.benchmark, { locale: L }) : '—', { hero: true, tone: 'bench', sub: 'a referência da sua política, no mesmo mês' })),
+      stat('Patrimônio', money(d.total_value, { locale: L }), { hero: true, dbg: whenBlock(['posição de', d.snapshot?.effective_date], ['precificada em', d.snapshot?.created_at]) }),
+      stat(last ? `Rentabilidade em ${monthLabel(last.month, L)}` : 'Rentabilidade', last ? percent(last.portfolio, { locale: L }) : '—', { hero: true, tone: toneClass(last?.portfolio), dbg: whenBlock(['mês', last?.month]) }),
+      stat('Carteira de referência', last?.benchmark != null ? percent(last.benchmark, { locale: L }) : '—', { hero: true, tone: 'bench', sub: 'a referência da sua política, no mesmo mês', dbg: whenBlock(['mês', last?.month]) })),
 
     h('div.grid.g2', {},
       h('div.card', {}, allocationBar(d.allocation.map((a) => ({ label: cls(a.asset_class), weight: a.weight })), {
@@ -104,7 +106,7 @@ async function viewPortfolio() {
         holdings.holdings.map((p) => h('tr', {},
           h('td', {}, h('span.name', { text: p.name }), p.ticker ? h('span.sub', { text: p.ticker }) : null),
           h('td', { text: cls(p.asset_class) }),
-          h('td.num', { text: money(p.market_value, { locale: L }) }),
+          h('td.num', {}, money(p.market_value, { locale: L }), whenBlock(['preço de', d.snapshot?.created_at])),
           h('td.num', { text: weight(p.weight, { locale: L }) }))))),
 
     h('section.section', {},
@@ -143,13 +145,14 @@ async function viewMonth() {
 
   return frag(
     head(`Seu mês em ${monthLabel(c.reporting_period?.month, L)}`, `Apurado em ${dateLong(c.reporting_period?.end, L)} · moeda ${c.client?.base_currency}`,
-      null, [h('b', { text: 'Último mês' }), sep(), `${c.reporting_period?.start} a ${c.reporting_period?.end}`]),
+      null, [h('b', { text: 'Último mês' }), sep(), `${c.reporting_period?.start} a ${c.reporting_period?.end}`,
+        when(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`], ['carta publicada', r.meta.published_at])]),
 
     h('div.grid.g4', { style: { marginBottom: '20px' } },
-      stat('Rentabilidade', percent(perf?.monthly_return, { locale: L }), { tone: toneClass(perf?.monthly_return) }),
-      stat('Resultado', money(perf?.absolute_pnl, { locale: L, signed: true }), { tone: toneClass(perf?.absolute_pnl) }),
-      stat('Carteira de referência', bench?.value == null ? '—' : percent(bench.value, { locale: L }), { tone: 'bench' }),
-      stat('Diferença', excess == null ? '—' : pp(excess, { locale: L }), { tone: toneClass(excess) })),
+      stat('Rentabilidade', percent(perf?.monthly_return, { locale: L }), { tone: toneClass(perf?.monthly_return), dbg: whenBlock(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`]) }),
+      stat('Resultado', money(perf?.absolute_pnl, { locale: L, signed: true }), { tone: toneClass(perf?.absolute_pnl), dbg: whenBlock(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`]) }),
+      stat('Carteira de referência', bench?.value == null ? '—' : percent(bench.value, { locale: L }), { tone: 'bench', dbg: whenBlock(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`]) }),
+      stat('Diferença', excess == null ? '—' : pp(excess, { locale: L }), { tone: toneClass(excess), dbg: whenBlock(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`]) })),
 
     h('div.card', { style: { marginBottom: '24px' } },
       h('p.pull', { text: c.letter?.performance || '' })),
@@ -188,7 +191,7 @@ async function viewMatters() {
 
   return frag(
     head('O que importa para a sua carteira', `Eventos do período de ${monthLabel(c.reporting_period?.month, L)} com efeito sobre o que você tem hoje`,
-      null, [h('b', { text: 'O que importa' }), sep(), monthLabel(c.reporting_period?.month, L)]),
+      null, [h('b', { text: 'O que importa' }), sep(), monthLabel(c.reporting_period?.month, L), when(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`], ['carta publicada', r.meta.published_at])]),
     h('div.card', { style: { marginBottom: '24px' } },
       h('p.pull', { text: c.letter?.markets || '' }),
       h('p.serif', { style: { marginTop: '16px', color: 'var(--ink-700)' }, text: c.letter?.meaning || '' })),
@@ -219,7 +222,7 @@ async function viewLetter() {
     head(`Carta de ${monthLabel(c.reporting_period?.month, L)}`, `Escrita por ${c.advisor?.name} e publicada em ${shortDate(r.meta.published_at)}. Este é o documento exato que foi aprovado; ele não muda depois de publicado.`,
       [h('a.btn.primary', { href: apiUrl(r.links.pdf || `/api/reports/${r.meta.id}/pdf`), target: '_blank' }, icon('download', { size: 15 }), h('span', { text: 'baixar em pdf' })),
         h('a.btn', { href: apiUrl(r.links.portal || `/api/reports/${r.meta.id}/portal`), target: '_blank' }, icon('external', { size: 15 }), h('span', { text: 'ver a carta formatada' }))],
-      [h('b', { text: 'Carta do assessor' }), sep(), monthLabel(c.reporting_period?.month, L)]),
+      [h('b', { text: 'Carta do assessor' }), sep(), monthLabel(c.reporting_period?.month, L), when(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`], ['publicada', r.meta.published_at])]),
 
     h('article.card.letter-card', {},
       h('div.letter-mast', {},
@@ -272,7 +275,7 @@ async function viewDocuments() {
       ? table(['Mês', 'Publicada em', { label: 'Páginas', num: true }, 'Formatos'],
         published.map((r) => h('tr', {},
           h('td.name', { text: monthLabel(r.reporting_month, L) }),
-          h('td', { text: shortDate(r.published_at) }),
+          h('td', {}, shortDate(r.published_at), whenBlock(['publicada', r.published_at])),
           h('td.num', { text: r.page_count ?? '—' }),
           h('td', {}, h('div.split', {},
             h('a.btn.sm', { href: apiUrl(r.links?.pdf || `/api/reports/${r.id}/pdf`), target: '_blank' }, icon('download', { size: 13 }), h('span', { text: 'pdf' })),
@@ -286,12 +289,13 @@ function sourceNote(i, sources) {
   const src = (sources || []).find((s) => s.id === i.source_id) || null;
   const provider = src?.provider || i.source_label || null;
   const url = src?.reference || i.source_url || null;
-  const when = src?.last_observation ? ` · dados até ${src.last_observation}` : '';
+  const upto = src?.last_observation ? ` · dados até ${src.last_observation}` : '';
   return h('p.note.src', { style: { marginTop: '10px' } }, 'Fonte: ',
     provider
       ? (url && /^https?:/.test(url) ? h('a.src-link', { href: url, target: '_blank', rel: 'noopener' }, h('span', { text: provider }), icon('external', { size: 12 })) : provider)
       : 'não registrada',
-    when);
+    upto,
+    when(['evento de', i.date], ['dados até', src?.last_observation], ['obtido', src?.retrieval_timestamp]));
 }
 
 function notPublished() {

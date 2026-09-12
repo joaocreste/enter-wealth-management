@@ -97,12 +97,10 @@ export async function signals(tvSymbols) {
     let tech = {}, weekly = {}, analyst = {};
     let techErr = null, analystErr = null;
 
-    try { tech = await scan(scannerKey, tickers, TECHNICAL_COLUMNS); }
-    catch (err) { techErr = err.message; }
-    try { weekly = await scan(scannerKey, tickers, TECHNICAL_WEEKLY); }
-    catch { /* weekly is supplementary; daily is the contract */ }
-    try { analyst = await scan(scannerKey, tickers, ANALYST_COLUMNS); }
-    catch (err) { analystErr = err.message; }
+    // One call per scanner carries every column of both families; the two
+    // families stay separate fields of the record, never combined.
+    try { tech = weekly = analyst = await scan(scannerKey, tickers, [...TECHNICAL_COLUMNS, ...TECHNICAL_WEEKLY, ...ANALYST_COLUMNS]); }
+    catch (err) { techErr = err.message; analystErr = err.message; }
 
     for (const t of tickers) {
       const T = tech[t];

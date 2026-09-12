@@ -22,6 +22,13 @@ export function llmAvailable(env) {
  * runs adaptive thinking by default and rejects sampling parameters, so none
  * are sent.
  */
+/**
+ * One Messages call, streamed. A turn that runs several web searches takes
+ * longer than the gateway in front of the API allows for a silent response
+ * (HTTP 524 after about 100 seconds); a stream keeps bytes flowing and the
+ * blocks are reassembled here into the same shape the non-streamed answer
+ * would have had, server-tool blocks included, so a paused turn can be resent.
+ */
 async function anthropicMessages(env, body, { timeoutMs = 120000 } = {}) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -30,13 +37,57 @@ async function anthropicMessages(env, body, { timeoutMs = 120000 } = {}) {
       'x-api-key': env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, stream: true }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const data = await res.json();
+  const data = await readEventStream(res);
   if (data.stop_reason === 'refusal') throw new Error(`Anthropic declined the request${data.stop_details?.category ? ` (${data.stop_details.category})` : ''}`);
   return data;
+}
+
+async function readEventStream(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const msg = { content: [], stop_reason: null, usage: {} };
+  const partialJson = new Map();
+  const handle = (evt) => {
+    if (evt.type === 'message_start') {
+      Object.assign(msg, { id: evt.message?.id, model: evt.message?.model, role: 'assistant', usage: evt.message?.usage || {} });
+    } else if (evt.type === 'content_block_start') {
+      msg.content[evt.index] = { ...evt.content_block };
+      if (['server_tool_use', 'tool_use'].includes(evt.content_block?.type)) partialJson.set(evt.index, '');
+    } else if (evt.type === 'content_block_delta') {
+      const b = msg.content[evt.index]; const d = evt.delta || {};
+      if (!b) return;
+      if (d.type === 'text_delta') b.text = (b.text || '') + d.text;
+      else if (d.type === 'citations_delta') (b.citations ||= []).push(d.citation);
+      else if (d.type === 'input_json_delta') partialJson.set(evt.index, (partialJson.get(evt.index) || '') + d.partial_json);
+    } else if (evt.type === 'content_block_stop') {
+      const j = partialJson.get(evt.index);
+      if (j != null) { try { msg.content[evt.index].input = j ? JSON.parse(j) : {}; } catch { msg.content[evt.index].input = {}; } partialJson.delete(evt.index); }
+    } else if (evt.type === 'message_delta') {
+      if (evt.delta?.stop_reason) msg.stop_reason = evt.delta.stop_reason;
+      if (evt.delta?.stop_details) msg.stop_details = evt.delta.stop_details;
+      if (evt.usage) msg.usage = { ...msg.usage, ...evt.usage };
+    } else if (evt.type === 'error') {
+      throw new Error(`Anthropic stream error: ${evt.error?.message || JSON.stringify(evt.error)}`);
+    }
+  };
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+      const payload = chunk.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+      if (payload) handle(JSON.parse(payload));
+    }
+  }
+  msg.content = msg.content.filter(Boolean);
+  return msg;
 }
 
 const textOf = (data) => (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
@@ -111,7 +162,7 @@ export async function runPrompt(env, promptKey, facts, { maxTokens = 2400 } = {}
  * never reaches the advisor. Requires the Anthropic API; there is no fallback
  * because a news item without a verifiable source is worse than no news.
  */
-export async function scanNews(env, facts, { maxSearches = 6 } = {}) {
+export async function scanNews(env, facts, { maxSearches = 4 } = {}) {
   if (!env.ANTHROPIC_API_KEY) throw new Error('the news scan needs the Anthropic API');
   const p = renderPrompt('daily_news_scan', facts);
   const model = env.ANTHROPIC_MODEL || 'claude-opus-5';
@@ -124,7 +175,7 @@ export async function scanNews(env, facts, { maxSearches = 6 } = {}) {
   let data = null; let searches = 0;
   // A search-heavy turn can pause; resend the assistant content unchanged to resume.
   for (let turn = 0; turn < 4; turn += 1) {
-    data = await anthropicMessages(env, { model, max_tokens: 8000, system: p.system, messages, tools }, { timeoutMs: 180000 });
+    data = await anthropicMessages(env, { model, max_tokens: 8000, system: p.system, messages, tools }, { timeoutMs: 300000 });
     for (const block of data.content || []) {
       if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
         for (const r of block.content) if (r.type === 'web_search_result' && r.url) found.set(normaliseUrl(r.url), { url: r.url, title: r.title, page_age: r.page_age });
@@ -304,7 +355,8 @@ export function deterministicDailyInference(facts) {
   const say = (k) => {
     const i = ind[k];
     if (!i || i.unavailable || !i.level) return null;
-    const moves = [i.day ? `${i.day} no dia` : null, i.d30 ? `${i.d30} em 30 dias` : null].filter(Boolean);
+    // A rate or a monthly index says when it last changed, never a day move.
+    const moves = i.level_note ? [i.level_note] : [i.day ? `${i.day} no dia` : null, i.d30 ? `${i.d30} em 30 dias` : null].filter(Boolean);
     return `${i.label} em ${i.level}${moves.length ? ` (${moves.join('; ')})` : ''}`;
   };
   const join = (...xs) => xs.filter(Boolean).join('; ');
@@ -314,10 +366,19 @@ export function deterministicDailyInference(facts) {
   const events = (facts.events || []).slice();
   const order = { high: 0, medium: 1, low: 2 };
   const candidates = new Map((facts.candidates || []).map((c) => [c.event_id, c]));
-  const whatMatters = events
+  // Ranked by importance and exposure, but the table is not allowed to fill
+  // up with indicator moves: the news of each region gets its seats first.
+  const pool = events
     .filter((e) => candidates.has(e.id))
-    .sort((a, b) => (order[a.importance] ?? 1) - (order[b.importance] ?? 1) || (candidates.get(b.id).max_exposure - candidates.get(a.id).max_exposure))
-    .slice(0, 8)
+    .sort((a, b) => Number(!!b.market_wide) - Number(!!a.market_wide) || (order[a.importance] ?? 1) - (order[b.importance] ?? 1) || (candidates.get(b.id).max_exposure - candidates.get(a.id).max_exposure));
+  const isNews = (e) => e.kind === 'headline' || e.kind === 'news';
+  const pick = [];
+  const take = (pred, n) => { for (const e of pool) { if (pick.length >= 10) break; if (!pick.includes(e) && pred(e) && pick.filter(pred).length < n) pick.push(e); } };
+  take((e) => isNews(e) && e.region === 'br', 3);
+  take((e) => isNews(e) && e.region === 'intl', 3);
+  take(() => true, 10);
+  const whatMatters = pick
+    .sort((a, b) => pool.indexOf(a) - pool.indexOf(b))
     .map((e) => ({ event_id: e.id, importance: e.importance || 'medium', why_it_matters_pt: null, advisor_action_pt: null, source_ids: e.source_id ? [e.source_id] : [] }));
   return {
     headline_pt: headline,

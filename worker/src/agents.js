@@ -33,9 +33,12 @@ import * as S from './series.js';
 import { INDICATORS, MACRO_VINTAGE } from '../../seed/market.mjs';
 import { indicatorQuote } from '../../src/adapters/marketdata.js';
 import * as Valor from '../../src/adapters/valor.js';
+import * as Google from '../../src/adapters/googlenews.js';
+import * as Bing from '../../src/adapters/bingnews.js';
+import { monthToDate } from '../../src/adapters/yahoo.js';
 import { triggerProximity } from '../../src/core/triggers.js';
 import { makeSource } from '../../src/core/sources.js';
-import { percent, num } from '../../src/core/format.js';
+import { percent, num, pp, monthLabel } from '../../src/core/format.js';
 
 export const AGENTS = [
   { step: 1, key: 'dados', title: 'Agente 1 · Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },
@@ -43,9 +46,12 @@ export const AGENTS = [
   { step: 3, key: 'gatilhos', title: 'Agente 3 · Gatilhos', what: 'limiares de mercado e desvios de alocação' },
 ];
 const STALE_MS = 10 * 60 * 1000;
+/** Nothing older than this reaches "O que importa hoje": a headline, a scanned story or a curated event. */
+const NEWS_WINDOW_HOURS = 48;
 const ASSET_CLASSES = ['Cash', 'Fixed Income', 'Equities BR', 'Equities Global', 'Alternatives', 'Real Estate', 'Commodities', 'Digital Assets'];
 const CATEGORIES = new Set(['equities', 'rates', 'credit', 'fx', 'commodities', 'macro', 'politics', 'geopolitics', 'crypto', 'market_move']);
 const IMPORTANCE = { high: 0, medium: 1, low: 2 };
+const WHAT_MATTERS_ROWS = 10;
 
 const today = () => new Date().toISOString().slice(0, 10);
 function addDays(iso, days) {
@@ -151,21 +157,44 @@ async function agentDados(env, runId) {
   const date = today();
   try {
     P.attachKv(env);
+    // The Worker may make fifty outbound calls per run, all three agents
+    // included. A Yahoo indicator therefore costs one call: the daily history
+    // in R2 is brought up to date and the quote is read off that same
+    // response; the quote endpoint is asked only when the store was already
+    // fresh and nothing was fetched.
     const indicators = [];
+    const series = new Map();
     for (let i = 0; i < INDICATORS.length; i += 1) {
       const ind = INDICATORS[i];
       await report(1, 2 + (i / INDICATORS.length) * 24, `Agente 1 · Dados — consultando ${providerOf(ind)}: ${ind.label} (${i + 1} de ${INDICATORS.length})`);
-      indicators.push(await indicatorQuote(ind));
+      if (ind.yahoo_symbol) {
+        let s = null;
+        try { s = await S.ensureSeries(env, ind); } catch { /* the quote endpoint still answers */ }
+        if (s && !s.unavailable) series.set(ind.key, s);
+        const fromSeries = quoteFromSeries(ind, s);
+        indicators.push(fromSeries || await indicatorQuote(ind));
+      } else {
+        indicators.push(await indicatorQuote(ind));
+      }
     }
     const retrieved = indicators.filter((i) => !i.unavailable).length;
-    await report(1, 26, `Agente 1 · Dados — ${retrieved} de ${indicators.length} indicadores recuperados; medindo 5 sessões e 30 dias nas séries diárias em R2`);
-    await windowMoves(env, indicators);
-    await report(1, 27, 'Agente 1 · Dados — lendo os eventos curados e os movimentos que se destacam em 5 sessões ou 30 dias');
-    const curated = await P.loadMarketEvents(env, { since: addDays(date, -21), limit: 20 });
+    await report(1, 26, `Agente 1 · Dados — ${retrieved} de ${indicators.length} indicadores recuperados (${indicators.filter((i) => i.from_series).length} cotações lidas da própria série diária); medindo 5 sessões e 30 dias nas séries em R2`);
+    await windowMoves(env, indicators, series);
+    // The signal dashboard reads the newest capture per instrument; without this it would show the capture made at seed time forever.
+    await report(1, 27, 'Agente 1 · Dados — recapturando na TradingView a leitura técnica e o consenso de analistas de cada instrumento');
+    let signalsCaptured = 0;
+    try {
+      const assets = await all(db, 'SELECT * FROM assets WHERE tv_symbol IS NOT NULL');
+      signalsCaptured = Object.keys(await P.fetchSignals(env, assets)).length;
+    } catch (err) {
+      await report(1, 27, `Agente 1 · Dados — sinais da TradingView indisponíveis nesta execução (${String(err.message).slice(0, 80)}); o painel segue com a captura anterior`);
+    }
+    await report(1, 28, `Agente 1 · Dados — ${signalsCaptured} sinais recapturados; lendo os eventos curados das últimas 48 horas e os movimentos que se destacam em 5 sessões ou 30 dias`);
+    const curated = (await P.loadMarketEvents(env, { since: addDays(date, -1), limit: 20 })).filter((e) => withinNewsWindow(e.date, date));
     const generated = P.eventsFromIndicatorMoves(indicators, { window: 'notable' });
 
-    // Brazil comes from the newsroom, not from a search: Valor Econômico's public feeds.
-    await report(1, 29, 'Agente 1 · Dados — lendo as manchetes do Valor Econômico (feeds RSS: capa, política, finanças, brasil, empresas, mundo)');
+    // The headlines come from newsrooms, not from a search: Valor Econômico's own feeds and the Google News feeds, Brazil and abroad.
+    await report(1, 29, 'Agente 1 · Dados — lendo as manchetes das últimas 48 horas: Valor Econômico (RSS) e Google News (Brasil e internacional)');
     const brazil = await gatherHeadlines(env, { date, modelOn: !!env.ANTHROPIC_API_KEY || !!env.OPENAI_API_KEY, report });
 
     let newsEvents = []; let newsSources = [];
@@ -181,10 +210,13 @@ async function agentDados(env, runId) {
           // A gateway timeout on a search-heavy turn is the usual failure; one more try, with fewer searches.
           if (!/\b5\d\d\b|timeout|timed out|abort/i.test(err.message)) throw err;
           await report(1, 41, `Agente 1 · Dados — a varredura na web falhou (${err.message.slice(0, 60)}); tentando de novo com menos buscas`);
-          scan = await LLM.scanNews(env, facts, { maxSearches: 4 });
+          scan = await LLM.scanNews(env, facts, { maxSearches: 2 });
         }
-        ({ events: newsEvents, sources: newsSources } = newsToEvents(scan.items, date));
-        news = { mode: 'model', model: scan.model, searches: scan.searches, items: newsEvents.map(compactNews), dropped: scan.dropped, urls: scan.urls };
+        // The model is asked for the last 48 hours; whatever it brings from before that is dropped here, and the drop is recorded.
+        const fresh = scan.items.filter((it) => withinNewsWindow(it.date, date));
+        const stale = scan.items.filter((it) => !withinNewsWindow(it.date, date)).map((it) => ({ title: it.title || '(sem título)', reason: `mais de ${NEWS_WINDOW_HOURS} horas (${it.date})` }));
+        ({ events: newsEvents, sources: newsSources } = newsToEvents(fresh, date));
+        news = { mode: 'model', model: scan.model, searches: scan.searches, items: newsEvents.map(compactNews), dropped: [...scan.dropped, ...stale], urls: scan.urls };
         await report(1, 44, `Agente 1 · Dados — ${newsEvents.length} notícias internacionais com fonte verificada em ${scan.searches} buscas${scan.dropped.length ? `; ${scan.dropped.length} descartadas por falta de fonte` : ''}`);
       } catch (err) {
         news = { mode: 'failed', reason: err.message, items: [], dropped: [], searches: 0 };
@@ -276,7 +308,7 @@ async function agentGatilhos(env, runId, s) {
       sources: s.sources,
       news: {
         mode: news.mode, model: news.model ?? null, reason: news.reason ?? null, searches: news.searches ?? 0, kept: news.items?.length ?? 0, dropped: news.dropped ?? [],
-        headlines: hl ? { provider: hl.provider, mode: hl.mode, reason: hl.reason ?? null, feeds: hl.feeds, items: hl.items, clusters: hl.clusters, kept: hl.kept, classified_by: hl.classified_by, model: hl.model ?? null, dropped: hl.dropped ?? [], top_story: hl.top_story ?? null } : null,
+        headlines: hl ? { provider: hl.provider, providers: hl.providers ?? [], window_hours: hl.window_hours ?? NEWS_WINDOW_HOURS, mode: hl.mode, reason: hl.reason ?? null, feeds: hl.feeds, items: hl.items, clusters: hl.clusters, kept: hl.kept, classified_by: hl.classified_by, model: hl.model ?? null, dropped: hl.dropped ?? [], top_story: hl.top_story ?? null } : null,
       },
       inference: s.inference,
       events_count: s.events.length,
@@ -294,6 +326,15 @@ async function agentGatilhos(env, runId, s) {
 // ── helpers ──────────────────────────────────────────────────────────────────
 const providerOf = (ind) => (ind.coingecko_id ? 'CoinGecko' : ind.yahoo_symbol ? 'Yahoo Finance' : 'Banco Central do Brasil');
 
+/** A date (or timestamp) is news when it falls inside the window ending today; a bare date counts from its midnight. */
+function withinNewsWindow(when, today) {
+  if (!when) return false;
+  const stamp = String(when).length > 10 ? Date.parse(when) : Date.parse(`${String(when).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(stamp)) return false;
+  const end = Date.parse(`${today}T23:59:59Z`);
+  return stamp >= end - NEWS_WINDOW_HOURS * 3600 * 1000 && stamp <= end;
+}
+
 /**
  * The day move comes with the quote. The five-session and thirty-day moves
  * come from the daily histories kept in R2 (worker/src/series.js), measured
@@ -301,12 +342,12 @@ const providerOf = (ind) => (ind.coingecko_id ? 'CoinGecko' : ind.yahoo_symbol ?
  * strip can never disagree about the same window. A series that fails leaves
  * the indicator with its day move only.
  */
-async function windowMoves(env, indicators) {
+async function windowMoves(env, indicators, series = new Map()) {
   for (const ind of indicators) {
     const def = INDICATORS.find((i) => i.key === ind.key);
     if (ind.unavailable || !def?.yahoo_symbol) continue;
     try {
-      const s = await S.ensureSeries(env, def);
+      const s = series.get(ind.key) || await S.ensureSeries(env, def);
       if (s.unavailable) continue;
       const v5 = S.windowView(s, S.windowBounds('5d'));
       const v30 = S.windowView(s, S.windowBounds('30d'));
@@ -315,6 +356,26 @@ async function windowMoves(env, indicators) {
       ind.windowsAsOf = (v30 || v5)?.end.date ?? null;
     } catch { /* the day move stands on its own */ }
   }
+}
+
+/** The indicator record built from a series refresh that carried the live quote; null when there was no fetch this run. */
+function quoteFromSeries(ind, s) {
+  const q = s?.live_quote;
+  if (!q || !Number.isFinite(q.price)) return null;
+  const bars = (s.points || []).map((p) => ({ date: p.date, close: p.close }));
+  const mtd = monthToDate(bars, q.price, q.asOf.slice(0, 7));
+  return {
+    key: ind.key, label: ind.label, unit: ind.unit,
+    symbol: ind.yahoo_symbol, name: s.name || ind.label, currency: s.currency || null,
+    price: q.price, changePct: q.changePct, mtdPct: mtd.pct, mtdFrom: mtd.from, asOf: q.asOf,
+    from_series: true,
+    source: makeSource({
+      provider: 'Yahoo Finance', kind: 'market_price', instrument: s.name || ind.label, identifier: ind.yahoo_symbol,
+      requested_range: 'daily history, refreshed today', last_observation: q.asOf,
+      reference: `https://finance.yahoo.com/quote/${encodeURIComponent(ind.yahoo_symbol)}`,
+      notes: 'cotação lida da mesma resposta que atualizou a série diária mantida em R2',
+    }),
+  };
 }
 
 async function bookExposures(db, advisorId) {
@@ -357,33 +418,50 @@ export function providerName(host) {
 }
 
 /**
- * Fetch, cluster, classify. Returns events with a source record each and a
- * meta block the portal shows verbatim, so a morning without headlines is a
- * visible fact rather than a quiet gap.
+ * Fetch, cluster, classify. Two newsrooms feed the same table: Valor
+ * Econômico's own RSS (Brazil, with subtitle and lead) and the Google News
+ * feeds (Brazil and abroad, breadth). Everything is capped at 48 hours.
+ * Returns events with a source record each and a meta block the portal shows
+ * verbatim, so a morning without headlines is a visible fact rather than a
+ * quiet gap.
  */
 async function gatherHeadlines(env, { date, modelOn, report }) {
-  const meta = { provider: Valor.PROVIDER, mode: 'feed', reason: null, feeds: [], items: 0, clusters: 0, kept: 0, classified_by: 'rule', model: null, dropped: [], top_story: null };
-  let feed;
-  try {
-    feed = await Valor.headlines({ windowHours: 36 });
-  } catch (err) {
-    return { events: [], sources: [], meta: { ...meta, mode: 'failed', reason: err.message } };
-  }
-  meta.feeds = feed.feeds;
-  meta.items = feed.items.length;
-  if (!feed.items.length) {
+  const meta = { provider: `${Valor.PROVIDER} e ${Google.PROVIDER}`, window_hours: NEWS_WINDOW_HOURS, mode: 'feed', reason: null, feeds: [], providers: [], items: 0, clusters: 0, kept: 0, classified_by: 'rule', model: null, dropped: [], top_story: null };
+  const failed = (name) => (err) => ({ provider: name, items: [], feeds: [{ key: name, label: name, ok: false, count: 0, error: err.message }] });
+  // Google News first; when Google refuses this server (it answers Cloudflare with HTTP 503), Bing News answers the same questions.
+  const [valor, google] = await Promise.all([
+    Valor.headlines({ windowHours: NEWS_WINDOW_HOURS }).catch(failed(Valor.PROVIDER)),
+    Google.headlines({ windowHours: NEWS_WINDOW_HOURS }).catch(failed(Google.PROVIDER)),
+  ]);
+  const bing = google.items.length ? null : await Bing.headlines({ windowHours: NEWS_WINDOW_HOURS }).catch(failed(Bing.PROVIDER));
+  const engine = bing || google;
+  meta.provider = `${Valor.PROVIDER} e ${engine.provider}`;
+  meta.feeds = [...valor.feeds, ...google.feeds, ...(bing ? bing.feeds : [])];
+  const describe = (src) => ({ name: src.provider, items: src.items.length, feeds_ok: src.feeds.filter((f) => f.ok).length, feeds: src.feeds.length, error: src.feeds.find((f) => f.error)?.error ?? null, regions: { br: src.items.filter((i) => i.region === 'br').length, intl: src.items.filter((i) => i.region === 'intl').length } });
+  meta.providers = [
+    { name: Valor.PROVIDER, items: valor.items.length, feeds_ok: valor.feeds.filter((f) => f.ok).length, feeds: valor.feeds.length, error: valor.feeds.find((f) => f.error)?.error ?? null },
+    describe(google),
+    ...(bing ? [describe(bing)] : []),
+  ];
+  const items = [...valor.items, ...engine.items].filter((it) => withinNewsWindow(it.published, date));
+  meta.items = items.length;
+  if (!items.length) {
     meta.mode = 'failed';
-    meta.reason = feed.feeds.map((f) => f.error).filter(Boolean)[0] || 'nenhuma manchete nas últimas 36 horas';
-    await report(1, 33, `Agente 1 · Dados — manchetes do Valor indisponíveis (${meta.reason.slice(0, 80)})`);
+    meta.reason = meta.feeds.map((f) => f.error).filter(Boolean)[0] || `nenhuma manchete nas últimas ${NEWS_WINDOW_HOURS} horas`;
+    await report(1, 33, `Agente 1 · Dados — manchetes indisponíveis (${meta.reason.slice(0, 80)})`);
     return { events: [], sources: [], meta };
   }
-  const clusters = Valor.clusterHeadlines(feed.items);
+  const clusters = Valor.clusterHeadlines(items).map((c) => ({ ...c, region: regionOfCluster(c), lead: preferredLead(c) }));
   meta.clusters = clusters.length;
-  const candidates = pickCandidates(clusters, 25);
-  const okFeeds = feed.feeds.filter((f) => f.ok).length;
+  const candidates = [
+    ...pickCandidates(clusters.filter((c) => c.region === 'br'), 16),
+    ...pickCandidates(clusters.filter((c) => c.region === 'intl'), 14),
+  ].sort((a, b) => b.coverage - a.coverage || (b.lead.published || '').localeCompare(a.lead.published || ''))
+    .map((c, rank) => ({ ...c, rank }));
+  const okFeeds = meta.feeds.filter((f) => f.ok).length;
   let classified = null;
   if (modelOn) {
-    await report(1, 33, `Agente 1 · Dados — ${feed.items.length} manchetes do Valor em ${okFeeds} seções; o modelo classifica as ${candidates.length} mais cobertas`);
+    await report(1, 33, `Agente 1 · Dados — ${items.length} manchetes (${valor.items.length} do Valor, ${engine.items.length} do ${engine.provider}) em ${okFeeds} feeds; o modelo classifica as ${candidates.length} mais cobertas`);
     try {
       const r = await LLM.classifyHeadlines(env, {
         date,
@@ -397,81 +475,130 @@ async function gatherHeadlines(env, { date, modelOn, report }) {
       meta.reason = `classificação pelo modelo falhou (${err.message.slice(0, 80)}); manchetes classificadas por regra`;
     }
   } else {
-    await report(1, 33, `Agente 1 · Dados — ${feed.items.length} manchetes do Valor em ${okFeeds} seções; sem modelo, as mais cobertas entram classificadas por regra`);
+    await report(1, 33, `Agente 1 · Dados — ${items.length} manchetes (${valor.items.length} do Valor, ${engine.items.length} do ${engine.provider}) em ${okFeeds} feeds; sem modelo, as mais cobertas entram classificadas por regra`);
   }
-  const items = classified && classified.length ? classified : ruleClassify(candidates);
-  const { events, sources } = headlinesToEvents(items, candidates, date);
+  const picked = classified && classified.length ? classified : ruleClassify(candidates);
+  const { events, sources } = headlinesToEvents(picked, candidates, date);
   meta.kept = events.length;
   const top = events.find((e) => e.market_wide);
-  if (top) meta.top_story = { title: top.title_pt, url: top.source_url, coverage: top.coverage };
-  await report(1, 35, `Agente 1 · Dados — ${events.length} manchetes do Valor entram como eventos${top ? `; notícia do dia: “${top.title_pt.slice(0, 70)}” (${top.coverage} manchetes)` : ''}`);
+  if (top) meta.top_story = { title: top.title_pt, url: top.source_url, coverage: top.coverage, provider: top.source_provider };
+  await report(1, 35, `Agente 1 · Dados — ${events.length} manchetes entram como eventos (${events.filter((e) => e.region === 'br').length} Brasil, ${events.filter((e) => e.region === 'intl').length} internacional)${top ? `; notícia do dia: “${top.title_pt.slice(0, 70)}” (${top.coverage} manchetes, ${top.source_provider})` : ''}`);
   return { events, sources, meta };
 }
 
 /**
- * The most covered stories first, then the freshest single lines from the
- * market sections. Two clusters that name the same people are one story told
- * from two angles: the second folds into the first and its lines count
- * towards the coverage, so the portal says "51 manchetes", not three rows.
+ * The line that represents a story on the portal comes from an established
+ * newsroom when one covered it: the same story from Valor or Folha and from
+ * a site nobody has heard of is attributed to the former. Among equals, the
+ * earliest line — the one that broke it.
  */
+const PUBLISHER_RANK = [
+  /^Valor Econômico$/i, /^Folha de S\.Paulo$/i, /^Estadão$/i, /^O Globo$/i, /^g1$/i, /^InfoMoney$/i, /^Exame$/i, /^CNN Brasil$/i, /^Agência Brasil$/i, /^UOL$/i, /^Money Times$/i, /^Poder360$/i, /^Bloomberg Línea$/i,
+  /^Reuters$/i, /^Bloomberg/i, /^Financial Times$/i, /^The Wall Street Journal$|^WSJ$/i, /^CNBC$/i, /^The New York Times$/i, /^Investing\.com/i, /^MarketWatch$/i, /^Yahoo Finance$/i, /^Barron's$/i, /^The Guardian$/i, /^BBC/i, /^AP News$|^Associated Press$/i,
+];
+// Unranked newsrooms come after the ranked ones; a publisher that is only a domain (a local TV site syndicating a wire story) comes last.
+const publisherRank = (name) => { const i = PUBLISHER_RANK.findIndex((re) => re.test(String(name || ''))); return i >= 0 ? i : /\.[a-z]{2,4}$/i.test(String(name || '')) ? PUBLISHER_RANK.length + 1 : PUBLISHER_RANK.length; };
+function preferredLead(c) {
+  const top = new Set(c.entities.slice(0, 3));
+  const carries = (it) => top.size === 0 || Valor.entitiesOf(it).some((e) => top.has(e));
+  const pool = c.items.filter(carries);
+  const ranked = (pool.length ? pool : c.items).slice().sort((a, b) => publisherRank(a.provider) - publisherRank(b.provider) || (a.published || '').localeCompare(b.published || ''));
+  return ranked[0] || c.lead;
+}
+
+/** A cluster belongs to the region most of its lines came from; the lead line breaks a tie. */
+function regionOfCluster(c) {
+  const intl = c.items.filter((i) => i.region === 'intl').length;
+  return intl > c.items.length / 2 || (intl * 2 === c.items.length && c.lead.region === 'intl') ? 'intl' : 'br';
+}
+
+/**
+ * The most covered stories first, then the freshest single lines from the
+ * market sections. Coverage counts distinct stories, not lines: thirty
+ * headlines filled from one template are one story (Valor.distinctStories).
+ * Two clusters that name the same people are one story told from two angles:
+ * the second folds into the first and its lines count towards the coverage.
+ */
+const MARKET_SECTIONS = new Set(['financas', 'brasil', 'politica', 'empresas', 'agronegocios', 'internacional']);
 function pickCandidates(clusters, limit) {
   const out = [];
   const seen = new Set();
   const sameStory = (a, b) => a.entities.slice(0, 6).filter((e) => b.entities.slice(0, 6).includes(e)).length >= 2;
+  const stories = (c) => Valor.distinctStories(c.items);
   const push = (c) => {
     if (seen.has(c.lead.id) || out.length >= limit) return;
     seen.add(c.lead.id);
-    const twin = c.size >= 2 ? out.find((o) => o.cluster && sameStory(o.cluster, c)) : null;
+    const n = stories(c);
+    const twin = n >= 2 ? out.find((o) => o.cluster && sameStory(o.cluster, c)) : null;
     if (twin) {
-      twin.coverage += c.size;
+      twin.coverage += n;
       twin.related = [...twin.related, ...c.items].filter((x, i, arr) => x.id !== twin.lead.id && arr.findIndex((y) => y.id === x.id) === i);
       return;
     }
-    out.push({ id: c.lead.id, lead: c.lead, cluster: c, related: c.items.filter((x) => x.id !== c.lead.id), coverage: c.size, rank: out.length, sections: c.sections });
+    out.push({ id: c.lead.id, lead: c.lead, cluster: c, related: c.items.filter((x) => x.id !== c.lead.id), coverage: n, rank: out.length, sections: c.sections, region: c.region });
   };
-  for (const c of clusters) if (c.size >= 2) push(c);
-  const MARKET = new Set(['financas', 'brasil', 'politica', 'empresas', 'agronegocios']);
-  for (const c of clusters) if (c.size === 1 && MARKET.has(c.lead.section)) push(c);
+  const ranked = clusters.slice().sort((a, b) => stories(b) - stories(a) || (b.latest || '').localeCompare(a.latest || ''));
+  for (const c of ranked) if (stories(c) >= 2) push(c);
+  for (const c of ranked) if (stories(c) === 1 && MARKET_SECTIONS.has(c.lead.section)) push(c);
   for (const o of out) { o.related = o.related.sort((a, b) => (b.published || '').localeCompare(a.published || '')).slice(0, 10); delete o.cluster; }
   return out;
 }
 
 const candidateFacts = (c) => ({
   id: c.id, title: c.lead.title, subtitle: c.lead.subtitle, lead: c.lead.lead, section: c.lead.section, published: c.lead.published,
+  publisher: c.lead.provider, region: c.region || c.lead.region || 'br',
   coverage: c.coverage, related_titles: c.related.slice(0, 5).map((r) => r.title),
 });
 
-const SECTION_CATEGORY = { politica: 'politics', financas: 'macro', brasil: 'macro', empresas: 'equities', mundo: 'geopolitics', agronegocios: 'commodities' };
+const SECTION_CATEGORY = { politica: 'politics', financas: 'macro', brasil: 'macro', empresas: 'equities', mundo: 'geopolitics', agronegocios: 'commodities', internacional: 'macro' };
 const CATEGORY_CLASSES = {
   politics: ['Equities BR', 'Fixed Income', 'FX'], macro: ['Fixed Income', 'Equities BR'], rates: ['Fixed Income', 'Cash'], credit: ['Fixed Income'],
   fx: ['FX', 'Equities Global'], equities: ['Equities BR'], geopolitics: ['Equities Global', 'Commodities'], commodities: ['Commodities', 'Equities BR'], crypto: ['Digital Assets'],
 };
 const CATEGORY_INDICATOR = { politics: 'usdbrl', fx: 'usdbrl', rates: 'selic', equities: 'ibovespa', commodities: 'brent', crypto: 'btc', macro: null, credit: null, geopolitics: null };
+/** The indicator a headline names outright beats the one its category implies. */
+const INDICATOR_WORDS = [
+  [/\bipca\b|inflação|deflação/i, 'ipca'], [/\binflation\b|\bcpi\b|\bpce\b/i, 'us10y'], [/\bselic\b|\bcopom\b/i, 'selic'], [/ibovespa|\bb3\b|bolsa brasileira/i, 'ibovespa'],
+  [/dólar|câmbio|\bptax\b/i, 'usdbrl'], [/\bdxy\b|dollar index/i, 'dxy'], [/euro\b.*dólar|eur\/usd/i, 'eurusd'],
+  [/treasury|treasuries|\byields?\b|\bfed\b|federal reserve|rate (hike|cut)/i, 'us10y'], [/s&p 500|\bs&p\b/i, 'sp500'], [/nasdaq/i, 'nasdaq'], [/\bvix\b|volatility index/i, 'vix'],
+  [/\bbrent\b|petróleo|\boil\b|\bopec\b/i, 'brent'], [/\bwti\b/i, 'wti'], [/\bouro\b|\bgold\b/i, 'gold'], [/\bcobre\b|\bcopper\b/i, 'copper'],
+  [/bitcoin|\bbtc\b/i, 'btc'], [/\bether\b|ethereum|\beth\b/i, 'eth'], [/high.yield|junk bond|\bhyg\b/i, 'hy_etf'],
+];
+function indicatorByRule(c, category) {
+  const t = `${c.lead.title} ${c.lead.subtitle || ''}`;
+  const hit = INDICATOR_WORDS.find(([re]) => re.test(t));
+  return hit ? hit[1] : (CATEGORY_INDICATOR[category] ?? null);
+}
 
-/** Category from the words of the headline when the section is ambiguous. */
+/** Category from the words of the headline when the section is ambiguous; Portuguese and English, since both feeds land here. */
 function categoryByRule(c) {
   const t = `${c.lead.title} ${c.lead.subtitle || ''}`.toLowerCase();
-  if (/selic|copom|juro|treasury|curva/.test(t)) return 'rates';
-  if (/dólar|câmbio|real\b|ptax/.test(t)) return 'fx';
-  if (/ibovespa|bolsa|ações|b3\b/.test(t)) return 'equities';
-  if (/petróleo|brent|minério|soja|commodit/.test(t)) return 'commodities';
-  if (/bitcoin|cripto|ether/.test(t)) return 'crypto';
-  if (/ipca|inflação|pib|fiscal|arcabouço|déficit|orçamento/.test(t)) return 'macro';
-  if (/stf|senado|câmara|congresso|governo|ministro|eleição|eleições|pf\b|polícia federal|lula|bolsonaro/.test(t)) return 'politics';
+  if (/selic|copom|\bjuros?\b|treasury|treasuries|\bfed\b|federal reserve|rate (hike|cut)|interest rate|\byields?\b|curva/.test(t)) return 'rates';
+  if (/dólar|câmbio|\breal\b|ptax|\bdollar\b|\byen\b|\beuro\b|\bforex\b/.test(t)) return 'fx';
+  if (/ibovespa|\bbolsa\b|ações|\bb3\b|s&p 500|nasdaq|dow jones|wall street|\bstocks?\b|\bequit/.test(t)) return 'equities';
+  if (/petróleo|brent|\bwti\b|minério|soja|commodit|\boil\b|opec|\bgold\b|copper|iron ore/.test(t)) return 'commodities';
+  if (/bitcoin|cripto|crypto|\bether\b|ethereum/.test(t)) return 'crypto';
+  if (/ipca|inflação|\bpib\b|fiscal|arcabouço|déficit|orçamento|inflation|\bcpi\b|\bgdp\b|jobs report|payrolls|unemployment/.test(t)) return 'macro';
+  if (/tariff|sanction|trade war|\bwar\b|\biran\b|geopolit|missile|ceasefire/.test(t)) return 'geopolitics';
+  if (/stf|senado|câmara|congresso|governo|ministro|eleição|eleições|\bpf\b|polícia federal|lula|bolsonaro|datafolha|tarcísio|haddad/.test(t)) return 'politics';
   return SECTION_CATEGORY[c.lead.section] || 'macro';
 }
 
 /**
- * Without a model: the story of the day plus the biggest clusters and the
- * freshest market lines, summarised by the newsroom's own first paragraph.
- * Nothing is written here that the feed did not publish.
+ * Without a model: per region, the biggest clusters and the freshest market
+ * lines, summarised by the newsroom's own first paragraph when the feed had
+ * one. The story of the day is the most covered story overall. Nothing is
+ * written here that a feed did not publish.
  */
 function ruleClassify(candidates) {
   const out = [];
-  const big = candidates.filter((c) => c.coverage >= 3).slice(0, 3);
-  for (const c of big) out.push(ruleItem(c, c.rank === 0 ? 'high' : 'medium', c.rank === 0));
-  const market = candidates.filter((c) => !big.includes(c) && ['financas', 'brasil'].includes(c.lead.section)).slice(0, 2);
-  for (const c of market) out.push(ruleItem(c, c.coverage >= 2 ? 'medium' : 'low', false));
+  for (const region of ['br', 'intl']) {
+    const mine = candidates.filter((c) => (c.region || 'br') === region);
+    const big = mine.filter((c) => c.coverage >= 3).slice(0, 3);
+    for (const c of big) out.push(ruleItem(c, c.rank === 0 ? 'high' : 'medium', c.rank === 0));
+    const market = mine.filter((c) => !big.includes(c) && MARKET_SECTIONS.has(c.lead.section)).slice(0, 2);
+    for (const c of market) out.push(ruleItem(c, c.coverage >= 2 ? 'medium' : 'low', false));
+  }
   if (!out.length && candidates[0]) out.push(ruleItem(candidates[0], 'medium', candidates[0].coverage >= 3));
   return out;
 }
@@ -523,10 +650,20 @@ function ruleItem(c, importance, marketWide) {
   const category = categoryByRule(c);
   const text = RULE_TEXT[category] || RULE_TEXT.macro;
   return {
-    headline_id: c.id, category, direction: null, indicator_key: CATEGORY_INDICATOR[category] ?? null,
+    headline_id: c.id, category, direction: null, indicator_key: indicatorByRule(c, category),
     asset_classes: CATEGORY_CLASSES[category] || ['Equities BR'], importance, market_wide: marketWide,
-    summary_pt: c.lead.lead || c.lead.subtitle || c.lead.title, impact_note_pt: text.impact, discussion_prompt_pt: text.prompt,
+    summary_pt: c.lead.lead || c.lead.subtitle || coverageSentence(c), impact_note_pt: text.impact, discussion_prompt_pt: text.prompt,
   };
+}
+/**
+ * A Google News line carries only its title. Rather than repeat the title as
+ * its own summary, say the one thing the feed does establish: who else is
+ * covering the story, and how widely.
+ */
+function coverageSentence(c) {
+  const others = [...new Set(c.related.map((r) => r.provider).filter((p) => p && p !== c.lead.provider))].slice(0, 4);
+  if (c.coverage <= 1 && !others.length) return `Manchete publicada por ${c.lead.provider} nas últimas 48 horas; só o título foi lido.`;
+  return `${c.coverage} ${c.coverage === 1 ? 'manchete' : 'manchetes'} sobre o assunto nas últimas 48 horas${others.length ? `, também em ${others.join(', ')}` : ''}; só os títulos foram lidos.`;
 }
 
 /** A classified headline becomes an event; its title is the newsroom's, verbatim, and its source is the article. */
@@ -540,9 +677,11 @@ function headlinesToEvents(items, candidates, date) {
     const category = CATEGORIES.has(it.category) && it.category !== 'market_move' ? it.category : categoryByRule(c);
     const classes = (it.asset_classes || []).filter((k) => ASSET_CLASSES.includes(k) || k === 'FX');
     const marketWide = it.market_wide === true || it.market_wide === 'true' || (c.rank === 0 && c.coverage >= 3);
+    const provider = h.provider || Valor.PROVIDER;
     events.push({
-      id: `evt_valor_${h.id.replace(/^vlr_/, '')}`,
+      id: `evt_hl_${h.id.replace(/^(vlr|gn|bn)_/, '')}`,
       date: (h.published || date).slice(0, 10),
+      region: c.region || h.region || 'br',
       title: h.title, title_pt: h.title,
       category,
       summary: it.summary_pt || h.lead || h.subtitle || h.title,
@@ -558,13 +697,14 @@ function headlinesToEvents(items, candidates, date) {
       impact_note_pt: it.impact_note_pt || null,
       discussion_prompt_pt: it.discussion_prompt_pt || null,
       source_id: h.source.id,
-      source_provider: Valor.PROVIDER,
-      source_label: `${Valor.PROVIDER} · manchete`,
+      source_provider: provider,
+      source_via: h.via || null,
+      source_label: `${provider} · manchete${h.via ? ` via ${h.via}` : ''}`,
       source_url: h.url,
       source_title: h.title,
       published_at: h.published,
       section: h.section,
-      related: c.related.map((r) => ({ title: r.title, url: r.url, published: r.published, section: r.section, provider: Valor.PROVIDER })),
+      related: c.related.map((r) => ({ title: r.title, url: r.url, published: r.published, section: r.section, provider: r.provider || Valor.PROVIDER, via: r.via || null })),
       kind: 'headline',
     });
     sources.push(h.source);
@@ -578,6 +718,7 @@ function newsToEvents(items, date) {
   for (const it of items) {
     const url = it.source_url;
     let host = 'fonte';
+    const region = 'intl';                                   // the scan is asked for the world outside Brazil
     try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* keep the placeholder */ }
     const provider = providerName(host);
     const source = makeSource({
@@ -599,6 +740,7 @@ function newsToEvents(items, date) {
       asset_classes: (it.asset_classes || []).filter((k) => ASSET_CLASSES.includes(k)),
       instruments: [],
       importance: IMPORTANCE[it.importance] != null ? it.importance : 'medium',
+      region,
       impact_note_pt: it.impact_note_pt || null,
       discussion_prompt_pt: it.discussion_prompt_pt || null,
       source_id: source.id,
@@ -631,6 +773,7 @@ export function compactIndicator(i) {
     key: i.key, label: i.label, group: def?.group ?? null,
     unit: i.unit, price: i.price ?? null, changePct: i.changePct ?? null, mtdPct: i.mtdPct ?? null,
     d5Pct: i.d5Pct ?? null, d5From: i.d5From ?? null, d30Pct: i.d30Pct ?? null, d30From: i.d30From ?? null,
+    mtdFrom: i.mtdFrom ?? null, level: i.level ?? null,
     asOf: i.asOf ?? null, name: i.name ?? null,
     unavailable: !!i.unavailable, reason: i.reason ?? null,
     providers_attempted: i.providers_attempted ?? null,
@@ -649,12 +792,31 @@ function levelText(price, unit) {
   return num(price, { decimals: price >= 1000 ? 0 : 2 });
 }
 
+/**
+ * What a rate or a monthly index says instead of a day move, as a sentence
+ * the model and the template both quote verbatim.
+ */
+const dmy = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+function levelNote(i) {
+  const l = i.level;
+  if (!l) return null;
+  if (l.kind === 'policy_rate') {
+    if (l.prev_value == null) return `sem mudança desde ${dmy(l.since)}, pelo menos`;
+    return `${pp(l.delta / 100)} em ${dmy(l.since)}, de ${num(l.prev_value, { decimals: 2 })}% para ${num(i.price, { decimals: 2 })}%`;
+  }
+  if (l.kind === 'monthly_index') {
+    return `referente a ${monthLabel(l.period)}${l.prev_value != null ? `; ${monthLabel(l.prev_period)}: ${num(l.prev_value, { decimals: 2 })}%` : ''}`;
+  }
+  return null;
+}
+
 function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRows }) {
   return {
     date,
     indicators: indicators.map((i) => ({
       key: i.key, label: i.label, unit: i.unit,
       level: levelText(i.price, i.unit),
+      level_note: levelNote(i),
       day: i.changePct == null ? null : percent(i.changePct, { decimals: 1 }),
       d5: i.d5Pct == null ? null : percent(i.d5Pct, { decimals: 1 }),
       d30: i.d30Pct == null ? null : percent(i.d30Pct, { decimals: 1 }),
@@ -666,7 +828,7 @@ function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRo
       observed: levelText(t.observed, t.unit === 'mtd' ? '%' : t.unit), threshold: levelText(t.threshold, t.unit === 'mtd' ? '%' : t.unit),
     })),
     events: events.map((e) => ({
-      id: e.id, kind: e.kind || (e.generated ? 'move' : 'curated'), date: e.date, title: e.title, title_pt: e.title_pt ?? null,
+      id: e.id, kind: e.kind || (e.generated ? 'move' : 'curated'), region: e.region ?? null, date: e.date, title: e.title, title_pt: e.title_pt ?? null,
       category: e.category, summary: e.summary, summary_pt: e.summary_pt ?? null, importance: e.importance,
       market_wide: !!e.market_wide, coverage: e.coverage ?? null,
       indicator_key: e.indicator_key ?? null, asset_classes: e.asset_classes || [],
@@ -699,6 +861,8 @@ function mergeInference(baseRows, inference, events) {
       source_url: ev.source_url ?? null,
       source_title: ev.source_title ?? null,
       source_provider: ev.source_provider ?? null,
+      source_via: ev.source_via ?? null,
+      region: ev.region ?? base.region ?? null,
       published_at: ev.published_at ?? null,
       related: ev.related ?? [],
       market_wide: !!ev.market_wide,
@@ -725,9 +889,26 @@ function mergeInference(baseRows, inference, events) {
       if (!base.market_wide || picked.some((p) => p.event_id === base.event_id)) continue;
       picked.unshift({ ...base, ...attributed(base), source_ids: base.source_id ? [base.source_id] : [], inferred: false });
     }
-    return picked.slice(0, 8);
+    // The model's choice stands, but the news of each region keeps a seat:
+    // two headline or news rows per region are guaranteed when the data
+    // agent found them, and an indicator move gives way before a headline.
+    const isNews = (r) => r.kind === 'headline' || r.kind === 'news';
+    for (const region of ['br', 'intl']) {
+      for (const base of baseRows) {
+        if (picked.filter((r) => isNews(r) && r.region === region).length >= 2) break;
+        const ev = eventById.get(base.event_id) || {};
+        if (!['headline', 'news'].includes(ev.kind) || (ev.region ?? base.region) !== region || picked.some((p) => p.event_id === base.event_id)) continue;
+        picked.push({ ...base, ...attributed(base), source_ids: base.source_id ? [base.source_id] : [], inferred: false });
+      }
+    }
+    while (picked.length > WHAT_MATTERS_ROWS) {
+      let i = picked.length - 1;
+      while (i > 0 && isNews(picked[i])) i -= 1;
+      picked.splice(i, 1);
+    }
+    return picked;
   }
-  return baseRows.map((r) => ({ ...r, ...attributed(r), source_ids: r.source_id ? [r.source_id] : [], inferred: false })).slice(0, 8);
+  return baseRows.map((r) => ({ ...r, ...attributed(r), source_ids: r.source_id ? [r.source_id] : [], inferred: false })).slice(0, WHAT_MATTERS_ROWS);
 }
 
 async function upsertWorldView(db, advisorId, date, inference, meta) {
@@ -742,7 +923,7 @@ async function upsertWorldView(db, advisorId, date, inference, meta) {
     generated_without_model: !!inference.generated_without_model,
     news: {
       mode: meta.news.mode, searches: meta.news.searches ?? 0, kept: meta.news.items?.length ?? 0,
-      headlines: meta.news.headlines ? { provider: meta.news.headlines.provider, mode: meta.news.headlines.mode, items: meta.news.headlines.items, kept: meta.news.headlines.kept, top_story: meta.news.headlines.top_story ?? null } : null,
+      headlines: meta.news.headlines ? { provider: meta.news.headlines.provider, providers: meta.news.headlines.providers ?? [], window_hours: meta.news.headlines.window_hours ?? NEWS_WINDOW_HOURS, mode: meta.news.headlines.mode, items: meta.news.headlines.items, kept: meta.news.headlines.kept, top_story: meta.news.headlines.top_story ?? null } : null,
     },
     generated_at: nowIso(),
   };

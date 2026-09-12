@@ -150,6 +150,7 @@ export function buildWhatMattersTable(events, indicators, clientPortfolios) {
           d5Pct: indicator.d5Pct ?? null, d30Pct: indicator.d30Pct ?? null,
           notable: notableWindow(indicator),                    // the one longer window worth a second line, timeframe named
           mtdPct: indicator.mtdPct ?? null,                     // kept for the strip; the table does not show it
+          level: indicator.level ?? null,                       // a policy rate or a monthly index: level, last change, previous value
         }
         : (event.move_label ? { label: event.move_label } : null),
       why_it_matters: event.summary,

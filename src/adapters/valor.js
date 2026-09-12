@@ -34,6 +34,22 @@ export const FEEDS = [
 /** Paths the feeds carry that are not news: sponsored content and the annual rankings. */
 const NOT_NEWS = [/\/patrocinado\//, /\/dino\//, /\/conteudo-de-marca\//];
 const NOT_NEWS_TITLE = /^(Valor 1000|Valor Inova|Valor Carreira|Anuário|Especial Publicitário)\b/i;
+/**
+ * Service journalism is not an event: a list of candidates per state, a
+ * "veja como", a lottery result. Thirty of them in one afternoon look like the
+ * story of the day to a counter and like nothing to an advisor.
+ */
+const SERVICE_PIECE = [
+  /^(veja|confira|saiba|entenda|descubra)\b/i, /^(watch|listen|podcast|video|live)\b\s*:?/i,
+  /\bveja (a |as )?lista/i, /\blista (completa )?d[eo]s? candidatos/i,
+  /^candidatos? (a|à|ao) (senador|governador|deputad|prefeit|vereador)/i,
+  /\b(horóscopo|loteria|mega-sena|quina|lotofácil)\b/i,
+  /\b(how to|what to know|explained|explainer|here's what|everything you need)\b/i,
+  // machine-written broker notes and filings digests: one template per ticker, thousands a day
+  /\((NASDAQ|NYSE|NYSEARCA|NYSEMKT|OTCMKTS|TSE|LON|BMFBOVESPA):[A-Z0-9.]+\)/,
+  /\b(given (an? )?(average|consensus) (rating|recommendation)|shares (sold|bought|acquired|purchased) by|(raises|lowers|trims|boosts|increases|reduces) (its )?(stake|position|holdings) in|price target (raised|lowered|cut|set)|short interest (up|down|update)|(upgraded|downgraded) (by|to)|stock rating (upgraded|downgraded))\b/i,
+];
+export const isServicePiece = (title) => SERVICE_PIECE.some((re) => re.test(String(title || '')));
 
 /**
  * Fetch every feed, merge, deduplicate by URL, keep the last `windowHours`.
@@ -60,7 +76,7 @@ export async function headlines({ windowHours = 36, now = new Date(), feeds = FE
     let kept = 0;
     for (const it of items) {
       if (!it.link || !it.title) continue;
-      if (NOT_NEWS.some((re) => re.test(it.link)) || NOT_NEWS_TITLE.test(it.title)) continue;
+      if (NOT_NEWS.some((re) => re.test(it.link)) || NOT_NEWS_TITLE.test(it.title) || isServicePiece(it.title)) continue;
       if (it.publishedAt && it.publishedAt.getTime() < since) continue;
       kept += 1;
       const key = normaliseUrl(it.link);
@@ -75,6 +91,10 @@ export async function headlines({ windowHours = 36, now = new Date(), feeds = FE
         section: sectionOf(it.link),
         published: it.publishedAt ? it.publishedAt.toISOString() : null,
         feeds: [feed.key],
+        provider: PROVIDER,
+        provider_url: 'https://valor.globo.com',
+        via: null,
+        region: 'br',
       });
     }
     report.push({ key: feed.key, label: feed.label, ok: true, count: kept, error: null });
@@ -173,15 +193,37 @@ export function clusterHeadlines(items) {
   }).sort((a, b) => b.size - a.size || (b.latest || '').localeCompare(a.latest || ''));
 }
 
+/**
+ * How many different stories a cluster actually holds. Thirty headlines
+ * "Candidatos a senador pelo Acre (AC): veja lista" … "pelo Amapá (AP)" are
+ * one template filled thirty times, not thirty newsrooms on one story. The
+ * shape of a title — its words with every proper noun and number removed —
+ * is what counts, and identical shapes count once.
+ */
+export function distinctStories(items) {
+  const shapes = new Set();
+  for (const it of items) shapes.add(shapeOf(it.title));
+  return Math.max(1, shapes.size);
+}
+const shapeOf = (title) => tokens(String(title || '')).filter((t) => !looksProper(t) && !/\d/.test(t)).map((t) => strip(t.toLowerCase())).join(' ');
+
+/** The names one headline carries, for callers that pick a cluster's representative line. */
+export function entitiesOf(item) {
+  return features(`${item.title} ${item.subtitle || ''}`, { nonInitial: new Set(), df: new Map() }).entities;
+}
+
 /** The entities at least half the members carry (all of them, for a cluster of one). */
 function coreOf(c) {
   const need = Math.max(1, Math.ceil(c.idx.length / 2));
   return new Set([...c.entities.entries()].filter(([, k]) => k >= need).map(([e]) => e));
 }
 
-const STOP = new Set(('a o as os um uma uns umas de do da dos das em no na nos nas por para com sem sob sobre entre até após ante contra desde e ou mas que se não sim é são foi era será ser está estão estar tem têm ter há ao aos à às pelo pela pelos pelas seu sua seus suas este esta estes estas esse essa isso isto aquele aquela mais menos muito pouco já ainda também só como quando onde porque diz disse dizem afirma afirmou segundo ontem hoje amanhã nesta neste nesse nessa antes depois durante deve devem pode podem vai vão ficar fica ficam tinha novo nova novos novas ano anos mês meses dia dias semana').split(' '));
+const STOP = new Set(('a o as os um uma uns umas de do da dos das em no na nos nas por para com sem sob sobre entre até após ante contra desde e ou mas que se não sim é são foi era será ser está estão estar tem têm ter há ao aos à às pelo pela pelos pelas seu sua seus suas este esta estes estas esse essa isso isto aquele aquela mais menos muito pouco já ainda também só como quando onde porque diz disse dizem afirma afirmou segundo ontem hoje amanhã nesta neste nesse nessa antes depois durante deve devem pode podem vai vão ficar fica ficam tinha novo nova novos novas ano anos mês meses dia dias semana'
+  // the Google News feeds bring English lines into the same clustering
+  + ' the an and or of to in on for with as at by from is are was were be been has have had it its this that these those will would can could may might should not no but if than then so up down over under after before into out about more most less least new says said say amid vs after while still just').split(' '));
 /** Words that are capitalised for grammar or house style, not because they name anything. */
-const NOT_ENTITY = new Set(['Análise', 'Opinião', 'Editorial', 'Entrevista', 'Exclusivo', 'Ao', 'Vivo', 'Valor', 'Brasil', 'Governo', 'Ministro', 'Ministra', 'Presidente', 'Senador', 'Deputado', 'Justiça', 'País', 'Estado']);
+const NOT_ENTITY = new Set(['Análise', 'Opinião', 'Editorial', 'Entrevista', 'Exclusivo', 'Ao', 'Vivo', 'Valor', 'Brasil', 'Governo', 'Ministro', 'Ministra', 'Presidente', 'Senador', 'Deputado', 'Justiça', 'País', 'Estado',
+  'The', 'And', 'For', 'With', 'After', 'Before', 'Over', 'Under', 'From', 'Into', 'What', 'Why', 'How', 'When', 'Where', 'Who', 'This', 'That', 'Its', 'Are', 'Says', 'Said', 'New', 'Top', 'Big', 'Here', 'Live', 'Watch', 'Analysis', 'Opinion', 'Explainer', 'Stock', 'Stocks', 'Market', 'Markets']);
 
 /**
  * Which capitalised words are names: a token counts when it appears
@@ -243,6 +285,8 @@ export function parseRss(xml) {
       title, link, subtitle,
       lead: description ? firstParagraph(description) : null,
       publishedAt: publishedAt && !Number.isNaN(publishedAt.getTime()) ? publishedAt : null,
+      source: text(tag(block, 'source')) || text(tag(block, 'News:Source')),   // Google News and Bing News name the publisher here
+      sourceUrl: attr(block, 'source', 'url'),
     });
   }
   return out;
@@ -253,6 +297,10 @@ function tag(block, name) {
   const m = block.match(re);
   return m ? m[1] : null;
 }
+function attr(block, name, attribute) {
+  const m = block.match(new RegExp(`<${name}\\s[^>]*?\\b${attribute}="([^"]*)"`, 'i'));
+  return m ? decode(m[1]) : null;
+}
 function text(s) {
   if (s == null) return null;
   const cdata = s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
@@ -260,7 +308,7 @@ function text(s) {
 }
 /** The description opens with an image tag; the first sentence-bearing text after it is the lead. */
 function firstParagraph(description) {
-  const t = text(description);
+  const t = text(description)?.replace(/\s*Matéria exclusiva para assinantes\.?.*$/i, '').trim() || null;   // the paywall notice is not the lead
   if (!t) return null;
   return t.length > 320 ? `${t.slice(0, 317).replace(/\s+\S*$/, '')}…` : t;
 }

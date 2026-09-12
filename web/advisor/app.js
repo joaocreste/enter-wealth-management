@@ -12,7 +12,6 @@ import {
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sparkline, scatterChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
-  when, whenBlock, isoShort,
 } from '../shared/ui.js';
 
 const root = document.getElementById('root');
@@ -111,22 +110,19 @@ async function viewOverview() {
     head(`${greeting()}, ${(ME?.user?.name || '').split(' ')[0]}`,
       `${o.clients_count} clientes sob sua responsabilidade. O que aconteceu nos mercados, e quais carteiras isso toca.`,
       [refreshButton()],
-      [h('b', { text: 'Panorama do dia' }), sep(), dateWithWeekday(o.date, L), sep(), h('span', { text: runSummary(o.run) }),
-        when(['panorama de', o.date], ['execução iniciada', o.run?.started_at], ['concluída', o.run?.finished_at])]),
+      [h('b', { text: 'Panorama do dia' }), sep(), dateWithWeekday(o.date, L), sep(), h('span', { text: runSummary(o.run) })]),
 
     h('div.grid.g4', { style: { marginBottom: '48px' } },
-      stat('Sob assessoria', money(CLIENTS.reduce((a, c) => a + (c.portfolio_value || 0), 0), { locale: L }), { sub: `${o.clients_count} carteiras`,
-        dbg: whenBlock(['posições de', dateSpan(CLIENTS.map((c) => c.snapshot_date))], ['precificadas em', dateSpan(CLIENTS.map((c) => c.priced_at))]) }),
-      stat('Eventos que importam hoje', String(o.what_matters.length), { ...newsHealth(o.news, modelWrote), dbg: whenBlock(['eventos de', dateSpan(o.what_matters.map((r) => r.date))]) }),
-      stat('Gatilhos acionados', String(breached), { tone: breached ? 'caution' : '', sub: `de ${o.triggers.length} limiares monitorados`, dbg: whenBlock(['leituras de', dateSpan(o.triggers.map((t) => t.observed_at))]) }),
-      stat('Desvios de alocação', String(o.drift_alerts.length), { tone: o.drift_alerts.length ? 'caution' : '', sub: 'além do gatilho de rebalanceamento', dbg: whenBlock(['posições de', dateSpan(CLIENTS.map((c) => c.snapshot_date))]) })),
+      stat('Sob assessoria', money(CLIENTS.reduce((a, c) => a + (c.portfolio_value || 0), 0), { locale: L }), { sub: `${o.clients_count} carteiras` }),
+      stat('Eventos que importam hoje', String(o.what_matters.length), { ...newsHealth(o.news, modelWrote) }),
+      stat('Gatilhos acionados', String(breached), { tone: breached ? 'caution' : '', sub: `de ${o.triggers.length} limiares monitorados` }),
+      stat('Desvios de alocação', String(o.drift_alerts.length), { tone: o.drift_alerts.length ? 'caution' : '', sub: 'além do gatilho de rebalanceamento' })),
 
     // ── the briefing ────────────────────────────────────────────────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Resumo do dia' }),
         h('span.meta', {}, modelWrote ? `escrito por ${o.inference.model}` : 'sem modelo de linguagem — texto determinístico', ' · ',
-          h('span', { class: wv?.approval_status === 'approved' ? 'gain' : 'caution', text: wv?.approval_status === 'approved' ? 'aprovado' : 'rascunho' }),
-          when(['gerado', view.generated_at], ['panorama de', wv?.date]))),
+          h('span', { class: wv?.approval_status === 'approved' ? 'gain' : 'caution', text: wv?.approval_status === 'approved' ? 'aprovado' : 'rascunho' }))),
       h('div.card', {},
         wv?.generated_summary ? h('p.pull', { text: wv.generated_summary }) : null,
         view.summary_pt ? h('p.serif', { style: { margin: '14px 0 24px', color: 'var(--ink-700)' }, text: view.summary_pt }) : null,
@@ -142,8 +138,7 @@ async function viewOverview() {
     // ── what matters, Brazil first, then the rest of the world ──────────
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'O que importa hoje' }),
-        h('span.meta', {}, `${o.what_matters.length} eventos · ${byRegion.br.length} Brasil · ${byRegion.intl.length} internacional · impacto mapeado sobre ${o.clients_count} carteiras${modelWrote ? ' · inferido pelo modelo' : ''}`,
-          when(['eventos de', dateSpan(o.what_matters.map((r) => r.date))]))),
+        h('span.meta', {}, `${o.what_matters.length} eventos · ${byRegion.br.length} Brasil · ${byRegion.intl.length} internacional · impacto mapeado sobre ${o.clients_count} carteiras${modelWrote ? ' · inferido pelo modelo' : ''}`)),
       o.what_matters.length ? frag(
         mattersRegion('Brasil', 'manchetes das últimas 48 horas no Valor Econômico e no Google News, indicadores e eventos do mercado local', byRegion.br, o),
         mattersRegion('Internacional', 'manchetes das últimas 48 horas no Google News, imprensa internacional com fonte citada, indicadores e eventos dos mercados globais', byRegion.intl, o),
@@ -172,8 +167,7 @@ async function viewOverview() {
             t.status === 'NO_DATA' ? h('div.bullet', {}, h('div.track')) : bulletBar({ proximity: t.proximity, status: t.status }),
             h('span.vals', {},
               h('span', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? 'sem leitura' : fmtLevel(t.observed, t.unit) }),
-              h('span', { text: `limiar ${fmtLevel(t.threshold, t.unit)}` }),
-              when(['leitura de', t.observed_at])))))))),
+              h('span', { text: `limiar ${fmtLevel(t.threshold, t.unit)}` })))))))),
 
     // ── allocation drift, per client ────────────────────────────────────
     h('section.section', {},
@@ -195,8 +189,7 @@ async function viewOverview() {
                 driftBar({ drift: d.drift, tolerance: d.threshold_pp ?? 0.05, scale: maxDrift }),
                 h('span.vals', {},
                   h('span', { class: toneClass(d.drift), text: pp(d.drift, { locale: L }) }),
-                  h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }),
-                  when(['posição de', CLIENTS.find((c) => c.id === g.client_id)?.snapshot_date], ['precificada em', CLIENTS.find((c) => c.id === g.client_id)?.priced_at]))))))))
+                  h('span', { text: `atual ${weight(d.observed, { locale: L, decimals: 1 })} · alvo ${weight(d.threshold, { locale: L, decimals: 0 })}` }))))))))
           : h('div.empty', { text: 'Nenhuma carteira fora do gatilho de rebalanceamento.' }))),
 
     // ── correlations ────────────────────────────────────────────────────
@@ -210,7 +203,7 @@ function refreshButton() {
     onclick: async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      try { followRun((await api('/api/advisor/refresh', {})).run); } catch (err) { b.disabled = false; alert(`Não foi possível iniciar a atualização: ${err.message}`); }
+      try { followRun((await api('/api/advisor/refresh')).run); } catch (err) { b.disabled = false; alert(`Não foi possível iniciar a atualização: ${err.message}`); }
     },
   }, icon('refresh', { size: 15 }), h('span', { text: 'atualizar dados de mercado' }));
 }
@@ -276,12 +269,6 @@ function newsHealth(news, modelWrote) {
 
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 
-/** The span of a list of dates, for the red marks: one date, or "first a last". */
-function dateSpan(list) {
-  const v = (list || []).filter(Boolean).map(isoShort).sort();
-  return v.length ? (v[0] === v[v.length - 1] ? v[0] : `${v[0]} a ${v[v.length - 1]}`) : null;
-}
-
 /**
  * Every row names where it came from — provider, date, and the article when
  * there is one. A headline also lists the other lines the newsroom ran on
@@ -334,7 +321,7 @@ function sourceCell(r) {
     h('summary', { text: `+${r.related.length} ${r.related.length === 1 ? 'manchete relacionada' : 'manchetes relacionadas'}` }),
     h('ul', {}, r.related.map((x) => h('li', {}, h('a.src-link', { href: x.url, target: '_blank', rel: 'noopener' }, h('span', { text: x.title }), icon('external', { size: 11 })),
       h('span.muted', { text: ` ${[x.provider, x.published ? hhmm(x.published) : null].filter(Boolean).join(' · ')}` }))))) : null;
-  return frag(h('span.sub', { text: `${stamp} · ${label}` }), whenBlock(['evento de', r.date], ['publicado', r.published_at]), link, related);
+  return frag(h('span.sub', { text: `${stamp} · ${label}` }), link, related);
 }
 const fmtLevel = (v, unit) => (v == null ? '—' : unit === 'mtd' ? percent(v, { locale: L, decimals: 1 }) : `${num(v, Math.abs(v) >= 1000 ? 0 : 2)}${unit && !['index', 'price', 'mtd'].includes(unit) ? ` ${unit}` : ''}`);
 
@@ -424,8 +411,7 @@ function indicatorsSection(o) {
       h('span.v', { text: fmt(s ? s.end.close : i.price) }),
       c,
       s ? sparkline(s.points, { format: fmt, dateLabel: dmy }) : null,
-      src ? h('span.src', { text: `${src.provider} · ${src.identifier} · até ${dmy(s ? s.end.date : i.asOf)}${s?.end.provisional ? ' · sessão em curso' : ''}` }) : null,
-      whenBlock(i.level ? (i.level.kind === 'monthly_index' ? ['referência', i.level.period] : ['vigente desde', i.level.since]) : ['cotação de', i.asOf], ['série até', s?.end.date ?? (i.level ? i.asOf : null)], ['obtido', src?.retrieval_timestamp]));
+      src ? h('span.src', { text: `${src.provider} · ${src.identifier} · até ${dmy(s ? s.end.date : i.asOf)}${s?.end.provisional ? ' · sessão em curso' : ''}` }) : null);
   }
 
   function paint() {
@@ -482,7 +468,7 @@ function indicatorsSection(o) {
       if (my !== seq) return;
       data = d;
       const first = d.indicators.reduce((a, s) => (a && a < s.start.date ? a : s.start.date), null);
-      mount(meta, d.indicators.length ? `${dateLong(first, L)} a ${dateLong(d.as_of, L)}` : 'sem séries no período', when(['séries até', d.as_of]));
+      mount(meta, d.indicators.length ? `${dateLong(first, L)} a ${dateLong(d.as_of, L)}` : 'sem séries no período');
       paintFoot(d);
     } catch (err) {
       if (my !== seq) return;
@@ -538,7 +524,7 @@ function assetRiskReturnSection() {
     mount(box, h('div.loading', {}, loader(), h('span', { text: 'Calculando retorno e volatilidade de cada ativo…' })));
     try {
       const d = await api('/api/advisor/assets/risk-return');
-      mount(meta, `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)} · em reais`, when(['janela', `${d.window.from} a ${d.window.to}`], ['calculado', d.computed_at], d.from_cache ? ['servido', 'do cache'] : null));
+      mount(meta, `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)} · em reais`);
       const classes = d.classes.map((c) => ({ key: c.key, label: RISK_CLASS_PT[c.key] || c.label }));
       const className = (k) => classes.find((c) => c.key === k)?.label || k;
       const items = [
@@ -607,7 +593,7 @@ function correlationSection() {
     try {
       const d = await api(`/api/advisor/correlations?window=${k}`);
       const obs = d.pair_observations;
-      mount(meta, `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)}`, when(['janela', `${d.window.from} a ${d.window.to}`], ['calculado', d.computed_at], d.from_cache ? ['servido', 'do cache'] : null));
+      mount(meta, `${dateLong(d.window.from, L)} a ${dateLong(d.window.to, L)}`);
       mount(box,
         correlationMatrix(d, { locale: L, short: (i) => SHORT[i.key] || i.label }),
         h('p.chart-caption', {}, `Correlação de Pearson entre retornos diários (logarítmicos), cada par medido nas datas que ambas as séries observaram`,
@@ -657,7 +643,7 @@ function formatIndicator(i) {
  * and then with its timeframe written out — never a bare percentage.
  */
 function moveCell(m) {
-  if (m.label) return frag(h('span.move', { class: /−/.test(m.label) ? 'loss' : /\+/.test(m.label) ? 'gain' : '', text: m.label.replace(/\bMTD$/, 'no mês até aqui').replace(/\b5D$/, 'em 5 sessões').replace(/\b30D$/, 'em 30 dias') }), whenBlock(['movimento até', m.asOf]));
+  if (m.label) return frag(h('span.move', { class: /−/.test(m.label) ? 'loss' : /\+/.test(m.label) ? 'gain' : '', text: m.label.replace(/\bMTD$/, 'no mês até aqui').replace(/\b5D$/, 'em 5 sessões').replace(/\b30D$/, 'em 30 dias') }));
   if (m.unavailable) return h('span.muted', { text: 'DATA UNAVAILABLE' });
   if (m.level) return levelCell(m);
   const day = m.changePct;
@@ -669,8 +655,7 @@ function moveCell(m) {
       : h('span.move.muted', { text: 'sem variação diária' }),
     longer ? h('span.move.longer', { class: toneClass(longer.pct), title: longer.from ? `desde o fechamento de ${longer.from}` : '' },
       percent(longer.pct, { locale: L, decimals: 1 }), h('small', { text: ` ${longer.label_pt}` })) : null,
-    h('span.sub', { text: level }),
-    whenBlock(['cotação de', m.asOf]));
+    h('span.sub', { text: level }));
 }
 
 /**
@@ -686,13 +671,11 @@ function levelCell(m) {
       l.prev_value == null
         ? h('span.move.muted', { text: `sem mudança desde ${dmy(l.since)}` })
         : h('span.move', {}, pp(l.delta / 100, { locale: L }), h('small', { text: ` em ${dmy(l.since)}` })),
-      h('span.sub', { text: `${lvl}${l.prev_value != null ? ` · antes ${fmtLevel(l.prev_value, m.unit)}` : ''}` }),
-      whenBlock(['vigente desde', l.since], ['série até', m.asOf]));
+      h('span.sub', { text: `${lvl}${l.prev_value != null ? ` · antes ${fmtLevel(l.prev_value, m.unit)}` : ''}` }));
   }
   return h('div', {},
     h('span.move', {}, lvl, h('small', { text: ` em ${monthLabel(l.period, L)}` })),
-    l.prev_value != null ? h('span.sub', { text: `${monthLabel(l.prev_period, L)}: ${fmtLevel(l.prev_value, m.unit)}` }) : null,
-    whenBlock(['referência', l.period]));
+    l.prev_value != null ? h('span.sub', { text: `${monthLabel(l.prev_period, L)}: ${fmtLevel(l.prev_value, m.unit)}` }) : null);
 }
 /** The same, in one line, for the indicator strip. */
 function levelLine(i) {
@@ -709,7 +692,7 @@ async function viewSignals() {
   const noCoverage = rows.filter((r) => r.analyst.unavailable);
 
   const body = (list) => list.map((r) => h('tr', { class: r.conflict ? 'conflict-row' : '' },
-    h('td', {}, h('span.name', { text: r.ticker || r.name }), h('span.sub', { text: `${cls(r.asset_class)}${r.held_by_book ? ' · em carteira' : ''}` }), whenBlock(['capturado', r.captured_at])),
+    h('td', {}, h('span.name', { text: r.ticker || r.name }), h('span.sub', { text: `${cls(r.asset_class)}${r.held_by_book ? ' · em carteira' : ''}` })),
     h('td', {}, r.technical.signal
       ? h('div.sig-pair', {}, h('b', { text: r.technical.signal }),
         h('span.muted', { text: `MM ${r.technical.weekly ? `${r.technical.weekly} (1S)` : '—'} · RSI ${r.technical.rsi ? num(r.technical.rsi, 1) : '—'}` }))
@@ -726,7 +709,7 @@ async function viewSignals() {
 
   return frag(
     head('Sinais de mercado', `Leitura técnica e consenso de analistas, capturados de forma independente para ${rows.length} instrumentos.`, null,
-      [h('b', { text: 'Mercado' }), sep(), `TradingView · capturado em ${d.captured_at ? d.captured_at.slice(0, 16).replace('T', ' ') : '—'} UTC`, when(['capturado', d.captured_at])]),
+      [h('b', { text: 'Mercado' }), sep(), `TradingView · capturado em ${d.captured_at ? d.captured_at.slice(0, 16).replace('T', ' ') : '—'} UTC`]),
     h('div.grid.g4', { style: { marginBottom: '24px' } },
       stat('Instrumentos cobertos', String(rows.length)),
       stat('Com sinal técnico', String(rows.filter((r) => r.technical.signal).length)),
@@ -774,15 +757,15 @@ async function viewClients() {
   const total = d.clients.reduce((a, c) => a + c.portfolio_value, 0);
   return frag(
     head('Clientes', `${d.clients.length} carteiras · ${money(total, { locale: L })} sob assessoria`, null,
-      [h('b', { text: 'Carteira de clientes' }), sep(), `referência ${monthLabel(d.month, L)}`, when(['mês de referência', d.month])]),
+      [h('b', { text: 'Carteira de clientes' }), sep(), `referência ${monthLabel(d.month, L)}`]),
     table(
       ['Cliente', 'Perfil', { label: 'Patrimônio', num: true }, { label: 'Último mês', num: true }, { label: 'Referência', num: true }, 'Última reunião', 'Próxima revisão', 'Carta', 'Alertas'],
       d.clients.map((c) => h('tr.clickable', { onclick: () => { location.hash = `#/client/${c.id}`; } },
         h('td', {}, h('span.name', { text: c.name }), h('span.sub', { text: c.segment || '' })),
         h('td', { text: c.risk_profile }),
-        h('td.num', {}, money(c.portfolio_value, { locale: L }), whenBlock(['posição de', c.snapshot_date], ['precificada em', c.priced_at])),
-        h('td.num', { class: toneClass(c.last_month?.portfolio_return) }, c.last_month ? percent(c.last_month.portfolio_return, { locale: L }) : '—', whenBlock(['mês', c.last_month?.month])),
-        h('td.num.bench', {}, c.last_month?.benchmark_return != null ? percent(c.last_month.benchmark_return, { locale: L }) : '—', whenBlock(['mês', c.last_month?.month])),
+        h('td.num', {}, money(c.portfolio_value, { locale: L })),
+        h('td.num', { class: toneClass(c.last_month?.portfolio_return) }, c.last_month ? percent(c.last_month.portfolio_return, { locale: L }) : '—'),
+        h('td.num.bench', {}, c.last_month?.benchmark_return != null ? percent(c.last_month.benchmark_return, { locale: L }) : '—'),
         h('td', { text: c.last_meeting ? shortDate(c.last_meeting) : '—' }),
         h('td', { text: c.next_review ? shortDate(c.next_review) : '—' }),
         h('td', {}, reportChip(c.report_status)),
@@ -830,8 +813,7 @@ async function viewClient({ id, tab = 'overview' }) {
     head(c.name, `${money(d.total_value, { locale: L })} sob assessoria · política v${d.policy?.version} de ${dateLong(d.policy?.effective_date, L)}${c.next_review_at ? ` · próxima revisão ${shortDate(c.next_review_at)}` : ''}`, [
       h('a.btn', { href: `#/client/${id}/prep` }, icon('prep', { size: 15 }), h('span', { text: 'preparar reunião' })),
       h('a.btn.primary', { href: `#/client/${id}/editor` }, icon('edit', { size: 15 }), h('span', { text: 'editar carteira' })),
-    ], [h('b', { text: 'Cliente' }), sep(), `perfil ${c.risk_profile}`, c.segment ? sep() : null, c.segment || null,
-      when(['posição de', d.snapshot?.effective_date], ['precificada em', d.snapshot?.created_at])]),
+    ], [h('b', { text: 'Cliente' }), sep(), `perfil ${c.risk_profile}`, c.segment ? sep() : null, c.segment || null]),
     tabsEl,
     body);
 }
@@ -865,9 +847,9 @@ async function tabOverview(id, d) {
   const series = cumulativeSeries(d.returns);
   return frag(
     h('div.grid.g4', { style: { marginBottom: '24px' } },
-      stat('Patrimônio', money(d.total_value, { locale: L }), { dbg: whenBlock(['posição de', d.snapshot?.effective_date], ['precificada em', d.snapshot?.created_at]) }),
-      stat(`Rentabilidade em ${last ? monthLabel(last.month, L) : '—'}`, last ? percent(last.portfolio, { locale: L }) : '—', { tone: toneClass(last?.portfolio), dbg: whenBlock(['mês', last?.month]) }),
-      stat('Carteira de referência', last?.benchmark != null ? percent(last.benchmark, { locale: L }) : '—', { tone: 'bench', dbg: whenBlock(['mês', last?.month]) }),
+      stat('Patrimônio', money(d.total_value, { locale: L })),
+      stat(`Rentabilidade em ${last ? monthLabel(last.month, L) : '—'}`, last ? percent(last.portfolio, { locale: L }) : '—', { tone: toneClass(last?.portfolio) }),
+      stat('Carteira de referência', last?.benchmark != null ? percent(last.benchmark, { locale: L }) : '—', { tone: 'bench' }),
       stat('Perfil de risco', d.client.risk_profile, { small: true, sub: `próxima revisão ${d.client.next_review_at ? shortDate(d.client.next_review_at) : '—'}` })),
     h('div.grid.g2', {},
       h('div.card', {}, lineChart(series, {
@@ -898,14 +880,13 @@ async function tabPerformance(id, d) {
 
   const benchValue = bench?.value ?? bench?.comparison?.benchmark_return;
   const excess = perf.monthly_return != null && benchValue != null ? perf.monthly_return - benchValue : null;
-  const perfWhen = () => whenBlock(['período', `${perf.period?.start || `${p.month}-01`} a ${perf.period?.end || '?'}`], p.from_report ? ['carta gerada', p.report_created_at] : ['calculado', 'ao vivo nesta visita']);
 
   return frag(
     h('div.grid.g4', { style: { marginBottom: '20px' } },
-      stat(`Rentabilidade em ${monthLabel(p.month, L)}`, percent(perf.monthly_return, { locale: L }), { tone: toneClass(perf.monthly_return), dbg: perfWhen() }),
-      stat('Resultado', money(perf.absolute_pnl, { locale: L, signed: true }), { tone: toneClass(perf.absolute_pnl), dbg: perfWhen() }),
-      stat('Carteira de referência', benchValue == null ? 'indisponível' : percent(benchValue, { locale: L }), { tone: 'bench', dbg: perfWhen() }),
-      stat('Diferença', excess == null ? '—' : pp(excess, { locale: L }), { tone: toneClass(excess), dbg: perfWhen() })),
+      stat(`Rentabilidade em ${monthLabel(p.month, L)}`, percent(perf.monthly_return, { locale: L }), { tone: toneClass(perf.monthly_return) }),
+      stat('Resultado', money(perf.absolute_pnl, { locale: L, signed: true }), { tone: toneClass(perf.absolute_pnl) }),
+      stat('Carteira de referência', benchValue == null ? 'indisponível' : percent(benchValue, { locale: L }), { tone: 'bench' }),
+      stat('Diferença', excess == null ? '—' : pp(excess, { locale: L }), { tone: toneClass(excess) })),
 
     h('div.grid.g4', { style: { marginBottom: '24px' } },
       stat('Valor inicial', money(perf.beginning_market_value, { locale: L }), { small: true }),
@@ -969,8 +950,7 @@ async function tabPortfolio(id, d) {
       h('div.card', {}, allocationBar(d.allocation.map((a) => ({ label: cls(a.asset_class), weight: a.weight })), { title: 'Composição atual' })),
       h('div.card', {}, bandChart(d.allocation.map((a) => ({ ...a, asset_class: cls(a.asset_class) })), { title: 'Enquadramento nas faixas da política' }))),
     h('section.section', { style: { marginTop: '24px' } },
-      h('div.section-h', {}, h('h2', { text: 'Alocação por classe' }), h('span.meta', {}, `snapshot ${d.snapshot?.id} · ${dateLong(d.snapshot?.effective_date, L)}`,
-        when(['posição de', d.snapshot?.effective_date], ['precificada em', d.snapshot?.created_at]))),
+      h('div.section-h', {}, h('h2', { text: 'Alocação por classe' }), h('span.meta', {}, `snapshot ${d.snapshot?.id} · ${dateLong(d.snapshot?.effective_date, L)}`)),
       table(['Classe', { label: 'Valor', num: true }, { label: 'Peso', num: true }, { label: 'Alvo', num: true }, { label: 'Desvio', num: true }, 'Faixa permitida', 'Enquadramento'],
         d.allocation.map((a) => h('tr', {},
           h('td.name', { text: cls(a.asset_class) }),
@@ -987,8 +967,7 @@ async function tabHoldings(id) {
   const d = await api(`/api/clients/${id}/holdings`);
   return frag(
     h('section.section', {},
-      h('div.section-h', {}, h('h2', { text: 'Posições' }), h('span.meta', {}, `${d.holdings.length} linhas · total ${money(d.total_value, { locale: L })}`,
-        when(['posição de', d.snapshot?.effective_date], ['preços de', d.snapshot?.created_at]))),
+      h('div.section-h', {}, h('h2', { text: 'Posições' }), h('span.meta', {}, `${d.holdings.length} linhas · total ${money(d.total_value, { locale: L })}`)),
       table(['Ativo', 'Classe', { label: 'Quantidade', num: true }, { label: 'Preço', num: true }, { label: 'Valor', num: true }, { label: 'Peso', num: true }, { label: 'Resultado', num: true }, 'Precificação', 'Liquidez'],
         d.holdings.map((p) => h('tr', {},
           h('td', {}, h('span.name', { text: p.ticker || p.name }),
@@ -997,8 +976,7 @@ async function tabHoldings(id) {
             p.notes ? h('span.sub', { text: p.notes }) : null),
           h('td', { text: cls(p.asset_class) }),
           h('td.num', { text: p.quantity == null ? '—' : num(p.quantity, p.quantity < 100 ? 4 : 0) }),
-          h('td.num', {}, p.price == null ? '—' : num(p.price, 2),
-            whenBlock(p.pricing_mode === 'market' || p.pricing_mode === 'nav' ? ['preço de', d.snapshot?.created_at] : ['preço', 'fixo em 1'])),
+          h('td.num', {}, p.price == null ? '—' : num(p.price, 2)),
           h('td.num', { text: money(p.market_value, { locale: L }) }),
           h('td.num', { text: weight(p.weight, { locale: L }) }),
           h('td.num', { class: toneClass(p.unrealised), text: p.unrealised == null ? '—' : money(p.unrealised, { locale: L, signed: true }) }),
@@ -1042,7 +1020,7 @@ async function tabRecommendations(id) {
             h('div.sig-pair', { style: { marginTop: '6px' } }, h('b', { text: 'Enquadramento' }),
               h('span', { class: r.suitability_result === 'PASS' ? '' : 'caution', text: st.client_suitability || r.suitability_result }))),
           h('td.num', { text: r.conviction == null ? '—' : num(r.conviction, 2) }),
-          h('td', {}, h('span', { class: `chip ${r.advisor_status}`, text: statusLabel(r.advisor_status) }), whenBlock(['gerada', r.created_at], ['decidida', r.decided_at])),
+          h('td', {}, h('span', { class: `chip ${r.advisor_status}`, text: statusLabel(r.advisor_status) })),
           h('td', {}, h('div.split', {},
             h('button.btn.sm.approve', { text: 'aprovar', disabled: r.advisor_status === 'approved', onclick: (e) => decide(r.id, 'approved', e.target) }),
             h('button.btn.sm.reject', { text: 'rejeitar', disabled: r.advisor_status === 'rejected', onclick: (e) => decide(r.id, 'rejected', e.target) })))),
@@ -1168,7 +1146,7 @@ async function tabReports(id) {
           h('td', {}, reportChip(r.status)),
           h('td.num', { text: r.page_count ?? '—' }),
           h('td', { text: r.approved_at ? shortDate(r.approved_at) : '—' }),
-          h('td', {}, r.published_at ? shortDate(r.published_at) : '—', whenBlock(['gerada', r.created_at], ['publicada', r.published_at])),
+          h('td', {}, r.published_at ? shortDate(r.published_at) : '—'),
           h('td', {}, h('div.split', {},
             h('a.btn.sm', { href: `#/client/${id}/report/${r.id}`, text: 'pré-visualizar' }),
             h('a.btn.sm', { href: apiUrl(r.links?.pdf || `/api/reports/${r.id}/pdf`), target: '_blank', text: 'pdf' }))))))),
@@ -1230,7 +1208,7 @@ async function viewMeetingPrep({ id }) {
       `${p.next_meeting ? `Próxima reunião ${dateLong(p.next_meeting.date, L)}` : 'Sem reunião marcada'} · referência ${monthLabel(p.month, L)}`,
       [h('a.btn', { href: `#/client/${id}/overview` }, icon('back', { size: 15 }), h('span', { text: 'voltar ao cliente' })),
         h('a.btn.primary', { href: `#/client/${id}/editor` }, icon('edit', { size: 15 }), h('span', { text: 'editar carteira' }))],
-      [h('b', { text: p.client.name }), sep(), 'Reunião', when(['referência', p.month], ['posição de', held.snapshot?.effective_date], ['precificada em', held.snapshot?.created_at])]),
+      [h('b', { text: p.client.name }), sep(), 'Reunião']),
 
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Pontos de discussão levantados automaticamente' }),
@@ -1244,10 +1222,10 @@ async function viewMeetingPrep({ id }) {
         : h('div.empty', { text: 'Nada fora do enquadramento. A conversa pode ser sobre objetivos, não sobre correções.' })),
 
     h('div.grid.g2', {},
-      h('div.card', {}, h('div.card-h', {}, h('h3', { text: 'Posição atual' }), h('span.meta', {}, money(p.total_value, { locale: L }), when(['posição de', held.snapshot?.effective_date], ['precificada em', held.snapshot?.created_at]))),
-        allocationBar(p.allocation.map((a) => ({ label: cls(a.asset_class), weight: a.weight })), {})),
+      h('div.card', {}, h('div.card-h', {}, h('h3', { text: 'Posição atual' }), h('span.meta', {}, money(p.total_value, { locale: L }))),
+        allocationBar(p.allocation.map((a) => ({ label: cls(a.asset_class), weight: a.weight })))),
       h('div.card', {}, h('div.card-h', {}, h('h3', { text: 'Enquadramento' })),
-        bandChart(p.allocation.map((a) => ({ ...a, asset_class: cls(a.asset_class) })), {}))),
+        bandChart(p.allocation.map((a) => ({ ...a, asset_class: cls(a.asset_class) }))))),
 
     h('section.section', { style: { marginTop: '24px' } },
       h('div.section-h', {}, h('h2', { text: 'Histórico de retorno' })),
@@ -1388,7 +1366,7 @@ async function viewReport({ id, reportId }) {
   mount(mode, Object.keys(views).map((k) => h('button.btn.sm', { dataset: { k }, text: labels[k], onclick: () => show(k) })));
 
   const approve = async (action) => {
-    await api(`/api/clients/${id}/reports/${reportId}/${action}`, {});
+    await api(`/api/clients/${id}/reports/${reportId}/${action}`);
     location.reload();
   };
 
@@ -1402,7 +1380,7 @@ async function viewReport({ id, reportId }) {
         r.status === 'approved' ? h('button.btn.primary', { onclick: () => approve('publish') }, icon('arrow', { size: 15 }), h('span', { text: 'publicar para o cliente' })) : null,
         h('a.btn', { href: apiUrl(links.pdf || `/api/reports/${reportId}/pdf`), target: '_blank' }, icon('download', { size: 15 }), h('span', { text: 'abrir pdf' })),
       ].filter(Boolean),
-      [h('b', { text: c.client?.name || '' }), sep(), 'Carta mensal', when(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`], ['gerada', r.created_at], ['publicada', r.published_at])]),
+      [h('b', { text: c.client?.name || '' }), sep(), 'Carta mensal']),
     mode, stage);
   show('letter');
   return el;
@@ -1421,8 +1399,8 @@ function renderCanonicalSummary(c) {
         h('div.card', { style: { marginBottom: '16px' } },
           h('div.card-h', {}, h('h3', { text: 'Números da carta' })),
           h('div.grid.g2', {},
-            stat('Rentabilidade', percent(c.portfolio_performance?.monthly_return, { locale: L }), { small: true, tone: toneClass(c.portfolio_performance?.monthly_return), dbg: whenBlock(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`]) }),
-            stat('Resultado', money(c.portfolio_performance?.absolute_pnl, { locale: L, signed: true }), { small: true, tone: toneClass(c.portfolio_performance?.absolute_pnl), dbg: whenBlock(['período', `${c.reporting_period?.start} a ${c.reporting_period?.end}`]) }),
+            stat('Rentabilidade', percent(c.portfolio_performance?.monthly_return, { locale: L }), { small: true, tone: toneClass(c.portfolio_performance?.monthly_return) }),
+            stat('Resultado', money(c.portfolio_performance?.absolute_pnl, { locale: L, signed: true }), { small: true, tone: toneClass(c.portfolio_performance?.absolute_pnl) }),
             stat('Referência', c.benchmark?.value == null ? '—' : percent(c.benchmark.value, { locale: L }), { small: true, tone: 'bench' }),
             stat('Método', c.portfolio_performance?.method, { small: true }))),
         h('div.card', {},

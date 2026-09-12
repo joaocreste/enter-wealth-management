@@ -622,6 +622,37 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
     return ok(await meetingPrep(env, scope, url.searchParams.get('month')));
   }
 
+  // ── what the client may read of the advisor's World Overview ─────────────
+  // The day's briefing and the indicators, from the advisor's last completed
+  // run. Nothing about other clients (the What Matters exposures, the drift
+  // alerts, the book) and nothing that starts a run: the client reads what the
+  // advisor's agents produced.
+  if (sub === '/overview') {
+    const last = advisor ? await A.latestRun(db, advisor.id, { status: 'completed' }) : null;
+    if (!last) return ok({ pending: true, date: new Date().toISOString().slice(0, 10) });
+    const r = json(last.result_json, {});
+    const wv = r.world_view || null;
+    const hl = r.news?.headlines || null;
+    return ok({
+      date: r.date,
+      world_view: wv ? { generated_summary: wv.generated_summary ?? null, approval_status: wv.approval_status ?? null, briefing: wv.briefing ?? null } : null,
+      indicators: r.indicators || [],
+      sources: r.sources || [],
+      inference: r.inference ? { mode: r.inference.mode, model: r.inference.model ?? null } : null,
+      news: r.news ? {
+        mode: r.news.mode, reason: r.news.reason ?? null, searches: r.news.searches ?? 0, kept: r.news.kept ?? 0,
+        headlines: hl ? { provider: hl.provider, providers: hl.providers ?? [], window_hours: hl.window_hours, mode: hl.mode, reason: hl.reason ?? null, items: hl.items, kept: hl.kept, classified_by: hl.classified_by, top_story: hl.top_story ?? null } : null,
+      } : null,
+      run: { finished_at: last.finished_at, trigger: last.trigger },
+    });
+  }
+
+  // The monitored indicators over any window, the same series the advisor reads.
+  if (sub === '/indicators/series') {
+    const r = await S.indicatorSeries(env, { window: url.searchParams.get('window') || '30d', from: url.searchParams.get('from'), to: url.searchParams.get('to') });
+    return r.error ? bad(400, r.error) : ok(r);
+  }
+
   // ── the report agent: a two-page PDF on demand, advisor only ──────────────
   if (sub === '/pdf-reports') {
     if (!isAdvisor) return bad(403, 'advisor only');

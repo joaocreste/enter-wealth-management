@@ -10,9 +10,10 @@ import {
   h, mount, frag, api, auth, stat, table, router, setActive,
   pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
-  barChart, allocationBar, lineChart, sourcesBlock,
+  barChart, allocationBar, bandChart, lineChart, sourcesBlock,
   apiUrl, loginUrl, advisorUrl,
 } from '../shared/ui.js';
+import { briefingSection, indicatorsSection } from '../shared/overview.js';
 
 const root = document.getElementById('root');
 const rail = document.getElementById('rail');
@@ -75,7 +76,9 @@ function cumulative(returns) {
 // ═══ my portfolio ══════════════════════════════════════════════════════════
 async function viewPortfolio() {
   const d = SUMMARY;
-  const holdings = await api(`/api/clients/${CLIENT_ID}/holdings`);
+  // The day's briefing and the indicators are the advisor's, read here as they
+  // were produced: the client cannot start a run or generate a document.
+  const [holdings, ov] = await Promise.all([api(`/api/clients/${CLIENT_ID}/holdings`), api(`/api/clients/${CLIENT_ID}/overview`)]);
   const last = d.returns[d.returns.length - 1];
 
   return frag(
@@ -98,7 +101,15 @@ async function viewPortfolio() {
         caption: 'A linha escura é a sua carteira; a linha tracejada é a carteira de referência da sua política',
       }))),
 
-    h('section.section', { style: { marginTop: '24px' } },
+    // ── the day's briefing, as the advisor's agents wrote it ──────────────
+    h('div', { style: { marginTop: '32px' } },
+      ov.pending
+        ? h('section.section', {},
+          h('div.section-h', {}, h('h2', { text: 'Resumo do dia' })),
+          h('div.empty', { text: 'O panorama do dia ainda não foi montado pelo seu assessor. Ele aparece aqui assim que os agentes rodarem.' }))
+        : briefingSection(ov, { workflowStatus: false })),
+
+    h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Suas posições' }), h('span.meta', { text: `${holdings.holdings.length} ativos` })),
       table(['Ativo', 'Classe', { label: 'Valor', num: true }, { label: 'Peso', num: true }],
         holdings.holdings.map((p) => h('tr', {},
@@ -113,16 +124,21 @@ async function viewPortfolio() {
         h('div.grid.g2', {},
           h('div', {}, h('div.rail-h', { text: 'Objetivos' }), h('p.note', { text: d.policy?.objectives })),
           h('div', {}, h('div.rail-h', { text: 'Horizonte e liquidez' }), h('p.note', { text: `${d.policy?.investment_horizon}. ${d.policy?.liquidity_requirements}` }))),
-        h('div', { style: { marginTop: '16px' } },
+        // the same bars the advisor reads: the band is the agreed range, the
+        // dotted mark the target, the solid mark where the class stands today;
+        // a mark in copper is outside the band
+        h('div', { style: { marginTop: '20px' } },
           h('div.rail-h', { text: 'Faixas acordadas por classe de ativo' }),
-          table(['Classe', { label: 'Peso atual', num: true }, { label: 'Alvo', num: true }, 'Faixa acordada', ''],
-            d.allocation.map((a) => h('tr', {},
-              h('td.name', { text: cls(a.asset_class) }),
-              h('td.num', { text: weight(a.weight, { locale: L }) }),
-              h('td.num.muted', { text: a.target == null ? '—' : weight(a.target, { locale: L, decimals: 0 }) }),
-              h('td.muted', { text: a.range ? `${weight(a.range.min, { locale: L, decimals: 0 })} a ${weight(a.range.max, { locale: L, decimals: 0 })}` : '—' }),
-              h('td', {}, a.inside_band ? h('span.chip', { text: 'dentro da faixa' }) : h('span.chip.warn', { text: 'fora da faixa' }))))))),
+          bandChart(d.allocation.map((a) => ({ ...a, asset_class: cls(a.asset_class) })), {
+            caption: 'A faixa cinza é o intervalo combinado na sua política; o traço pontilhado é o alvo; a marca é onde a classe está hoje. Uma marca em cobre, com "!", está fora da faixa.',
+          }),
+          d.allocation.some((a) => !a.inside_band)
+            ? h('p.note', { style: { marginTop: '8px' } }, h('b', { text: 'Fora da faixa: ' }), d.allocation.filter((a) => !a.inside_band).map((a) => `${cls(a.asset_class)} (${weight(a.weight, { locale: L, decimals: 1 })}${a.range ? `, faixa de ${weight(a.range.min, { locale: L, decimals: 0 })} a ${weight(a.range.max, { locale: L, decimals: 0 })}` : ''})`).join(' · '))
+            : h('p.note', { style: { marginTop: '8px' }, text: 'Todas as classes estão dentro das faixas combinadas.' }))),
       h('p.note', { style: { marginTop: '12px' }, text: 'Alterações na carteira e na política acontecem apenas em reunião com o seu assessor. Nada muda automaticamente por causa de um movimento de mercado.' })),
+
+    // ── the monitored indicators, over the window the client picks ─────────
+    ov.pending ? null : indicatorsSection(ov, { seriesPath: `/api/clients/${CLIENT_ID}/indicators/series` }),
   );
 }
 

@@ -170,7 +170,7 @@ mount(root,
             type: 'button', title: `Entrar como ${d.name}`,
             onclick: () => { email.value = d.email; password.value = d.password; go(); },
           }, avatar(d.name), h('span', {}, h('b', { text: d.name }), h('small', { text: `${d.role} · ${d.email}` })), icon('arrow', { size: 15 })))),
-          h('p.note', { text: 'Em produção este login fica atrás do Cloudflare Access; o par e-mail/senha existe para que a demonstração rode sem um tenant configurado.' }))))),
+          )))),
 
   h('section.sec', { id: 'vento' },
     secH(1, 'O vento'),

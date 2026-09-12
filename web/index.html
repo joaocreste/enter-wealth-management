@@ -19,12 +19,10 @@
 <script type="module">
 import { h, mount, api, auth, logo, icon, avatar, advisorUrl, clientUrl } from './shared/ui.js';
 
-// The accounts the page offers by name. A password never appears here: the card
-// fills in the e-mail and asks for the password, which the manager hands out.
 const DEMO = [
-  { role: 'Assessor', name: 'Antonio Bicudo', email: 'antonio.bicudo@enteram.com.br' },
-  { role: 'Cliente', name: 'Albert da Silva', email: 'albert.dasilva@exemplo.com.br' },
-  { role: 'Cliente', name: 'Beatriz Nakamura', email: 'beatriz.nakamura@exemplo.com.br' },
+  { role: 'Assessor', name: 'Antonio Bicudo', email: 'antonio.bicudo@enteram.com.br', password: 'enter2026' },
+  { role: 'Cliente', name: 'Albert da Silva', email: 'albert.dasilva@exemplo.com.br', password: 'albert2026' },
+  { role: 'Cliente', name: 'Beatriz Nakamura', email: 'beatriz.nakamura@exemplo.com.br', password: 'beatriz2026' },
 ];
 
 const root = document.getElementById('root');
@@ -167,10 +165,10 @@ mount(root,
           submit),
         error,
         h('div.demo', {},
-          h('div.kicker', { text: 'Contas de demonstração · a senha é fornecida pela gestora' }),
+          h('div.kicker', { text: 'Acessos de demonstração' }),
           h('div.demo-list', {}, DEMO.map((d) => h('button.demo-acct', {
             type: 'button', title: `Entrar como ${d.name}`,
-            onclick: () => { error.style.display = 'none'; email.value = d.email; password.value = ''; password.focus(); },
+            onclick: () => { email.value = d.email; password.value = d.password; go(); },
           }, avatar(d.name), h('span', {}, h('b', { text: d.name }), h('small', { text: `${d.role} · ${d.email}` })), icon('arrow', { size: 15 })))),
           )))),
 

@@ -1,7 +1,7 @@
 /**
  * Minimal TrueType reader.
  *
- * Enough of the format to embed Archivo and Newsreader as CIDFontType2 fonts
+ * Enough of the format to embed Roboto as CIDFontType2 fonts
  * with Identity-H encoding: the unicode-to-glyph map, the advance widths and
  * the metrics the PDF font descriptor requires.
  *

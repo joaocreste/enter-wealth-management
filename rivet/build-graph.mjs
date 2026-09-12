@@ -839,7 +839,7 @@ return {
 function graphMain(subgraphIds) {
   const n = [];
   n.push(note(
-    'ENTER ASSET MANAGEMENT — MONTHLY CLIENT REPORT\n\n'
+    'XP ASSET MANAGEMENT — MONTHLY CLIENT REPORT\n\n'
     + 'Rivet owns the sequencing, the branching and the language-model stage.\n'
     + 'Every deterministic financial calculation happens in code, invoked through the API,\n'
     + 'because a number in a client letter should be reproducible, not generated.\n\n'
@@ -923,7 +923,7 @@ const main = graphMain(ids);
 const project = {
   metadata: {
     id: 'enter_wealth_advisor',
-    title: 'Enter Asset Management — AI advisory workflow',
+    title: 'XP Asset Management — AI advisory workflow',
     description:
       'Monthly client reporting and daily world overview for XP-style financial advisors.\n\n'
       + 'Rivet is the orchestration layer. Deterministic finance runs in code behind the API; the\n'

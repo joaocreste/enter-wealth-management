@@ -1,5 +1,5 @@
 /**
- * Enter Asset Management — advisory portal API and static host.
+ * XP Asset Management — advisory portal API and static host.
  *
  * One Worker serves the advisor portal, the client portal and the API, so the
  * advisor/client authorization boundary is enforced in exactly one place (§24).
@@ -373,7 +373,7 @@ async function advisorCorrelations(env, windowKey) {
     excluded,
     computed_at: nowIso(),
     sources: [...sources, makeSource({
-      provider: 'Enter Asset Management (derivado)', kind: 'derived', instrument: 'Matriz de correlação',
+      provider: 'XP Asset Management (derivado)', kind: 'derived', instrument: 'Matriz de correlação',
       identifier: `corr-${key}`, requested_range: `${from}..${to}`, last_observation: to,
       notes: 'Pearson sobre retornos diários logarítmicos; cada par medido nas datas que ambas as séries observaram',
     })],
@@ -538,7 +538,7 @@ async function advisorAssetRiskReturn(env, db) {
     excluded,
     computed_at: nowIso(),
     sources: [...ledger.all(), makeSource({
-      provider: 'Enter Asset Management (derivado)', kind: 'derived', instrument: 'Retorno e volatilidade em 12 meses por ativo',
+      provider: 'XP Asset Management (derivado)', kind: 'derived', instrument: 'Retorno e volatilidade em 12 meses por ativo',
       identifier: 'assets-risk-return-12m', requested_range: `${from}..${to}`, last_observation: to,
       notes: 'retorno composto e desvio-padrão anualizado (√12) dos retornos mensais, em reais; fronteira eficiente empírica como envoltória superior dos pontos',
     })],

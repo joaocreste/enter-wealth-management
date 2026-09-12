@@ -83,7 +83,7 @@ export const ASSETS = [
 // ─── the advisor ───────────────────────────────────────────────────────────
 export const ADVISOR = {
   id: 'adv_bicudo',
-  user: { id: 'usr_bicudo', email: 'antonio.bicudo@enteram.com.br', name: 'Antonio Bicudo', role: 'advisor', password: 'enter2026' },
+  user: { id: 'usr_bicudo', email: 'antonio.bicudo@xpi.com.br', name: 'Antonio Bicudo', role: 'advisor', password: 'xp2026' },
   advisor_code: 'A7699',
   team: 'Middle Market — São Paulo',
 };

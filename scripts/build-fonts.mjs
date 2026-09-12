@@ -1,7 +1,11 @@
 /**
  * Regenerates src/render/fonts/index.js from the .ttf files beside it.
- * Run after replacing a typeface (for example if the group licenses a
- * commercial grotesque and Archivo becomes the fallback — brand §8.1).
+ *
+ * The brand typeface is Roboto (XP Advisory brand system §04): Light for the
+ * body, Regular for labels, Medium for definitions and Bold for short titles.
+ * The files are Latin subsets of Google Fonts' static instances, cut with
+ * pyftsubset so the four weights add about 110 KB to the Worker rather than
+ * half a megabyte. Run after replacing a typeface.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -9,18 +13,18 @@ import path from 'node:path';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'render', 'fonts');
 const files = {
-  sans400: 'Archivo-400-normal.ttf', sans500: 'Archivo-500-normal.ttf',
-  sans600: 'Archivo-600-normal.ttf', sans700: 'Archivo-700-normal.ttf',
-  serif300: 'Newsreader-300-normal.ttf', serif400: 'Newsreader-400-normal.ttf',
+  sans300: 'Roboto-300-normal.ttf', sans400: 'Roboto-400-normal.ttf',
+  sans500: 'Roboto-500-normal.ttf', sans700: 'Roboto-700-normal.ttf',
 };
 
 let out = `/**
- * Brand typefaces, embedded as base64 so the PDF renderer works identically in
+ * Brand typeface, embedded as base64 so the PDF renderer works identically in
  * Node and inside a Cloudflare Worker, where there is no filesystem.
  *
- * Archivo and Newsreader are the two families named in brand-guidelines.html §8.1.
- * Both are SIL Open Font License 1.1, so redistribution inside a generated PDF
- * is permitted. Regenerate with: node scripts/build-fonts.mjs
+ * Roboto is the family named in the XP Advisory brand system (§04): Light 300
+ * for the body, Regular 400 for labels, Medium 500 for definitions, Bold 700
+ * for short titles. Apache License 2.0, so redistribution inside a generated
+ * PDF is permitted. Regenerate with: node scripts/build-fonts.mjs
  */
 `;
 out += 'const B64 = {\n';
@@ -38,14 +42,14 @@ out += `function decode(b64) {
 
 let cache = null;
 
-/** @returns {{sans400,sans500,sans600,sans700,serif300,serif400}} Uint8Array per weight */
+/** @returns {{sans300,sans400,sans500,sans700}} Uint8Array per weight */
 export function brandFonts() {
   if (cache) return cache;
   cache = Object.fromEntries(Object.entries(B64).map(([k, v]) => [k, decode(v)]));
   return cache;
 }
 
-export const FONT_LICENCE = 'Archivo and Newsreader — SIL Open Font License 1.1';
+export const FONT_LICENCE = 'Roboto — Apache License 2.0';
 `;
 await writeFile(path.join(dir, 'index.js'), out);
 console.log(`wrote ${path.join(dir, 'index.js')} (${out.length} bytes)`);

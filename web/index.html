@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Enter Asset Management — O vento não se escolhe. O rumo, sim.</title>
-<meta name="description" content="A Enter Asset Management é o braço de capital do grupo Enter. Área do cliente e do assessor.">
-<meta name="theme-color" content="#0B0D0E">
+<title>XP Asset Management — O vento não se escolhe. O rumo, sim.</title>
+<meta name="description" content="XP Asset Management. Área do cliente e do assessor: carteira, carta mensal e o que importa para o seu patrimônio.">
+<meta name="theme-color" content="#1F1F1F">
 <script>try{var t=localStorage.getItem("ew_theme");if(t==="dark"||t==="light")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,300&family=Hanken+Grotesk:wght@200;300;400&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared/app.css">
 <link rel="preload" as="image" href="assets/vela-guanabara.jpg">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23F5F6F5'/%3E%3Cg fill='none' stroke='%230B0D0E' stroke-width='9' transform='translate(18 18) scale(.64)'%3E%3Cpath d='M8 30 L8 8 L30 8'/%3E%3Cpath d='M92 70 L92 92 L70 92'/%3E%3Cpath d='M72 34 L72 56 L36 56'/%3E%3Cpath d='M48 44 L36 56 L48 68'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='14' fill='%23242424'/%3E%3Ctext x='50' y='66' text-anchor='middle' font-family='Helvetica,Arial,sans-serif' font-size='46' font-weight='700' fill='%23FFFFFF'%3Exp%3C/text%3E%3C/svg%3E">
 </head>
 <body>
 <div class="site" id="root"></div>
@@ -20,7 +20,7 @@
 import { h, mount, api, auth, logo, icon, avatar, advisorUrl, clientUrl } from './shared/ui.js';
 
 const DEMO = [
-  { role: 'Assessor', name: 'Antonio Bicudo', email: 'antonio.bicudo@enteram.com.br', password: 'enter2026' },
+  { role: 'Assessor', name: 'Antonio Bicudo', email: 'antonio.bicudo@xpi.com.br', password: 'xp2026' },
   { role: 'Cliente', name: 'Albert da Silva', email: 'albert.dasilva@exemplo.com.br', password: 'albert2026' },
   { role: 'Cliente', name: 'Beatriz Nakamura', email: 'beatriz.nakamura@exemplo.com.br', password: 'beatriz2026' },
 ];
@@ -34,7 +34,7 @@ const REASONS = {
 const reason = new URLSearchParams(location.search).get('reason');
 const notice = REASONS[reason] ? h('div.notice', { role: 'status', text: REASONS[reason] }) : null;
 const resume = h('div.resume', { hidden: true });
-const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', placeholder: 'voce@enteram.com.br', required: true });
+const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', placeholder: 'voce@xpi.com.br', required: true });
 const password = h('input', { type: 'password', id: 'password', autocomplete: 'current-password', placeholder: '••••••••', required: true });
 const error = h('div.err', { style: { display: 'none' }, role: 'alert' });
 const submit = h('button.btn.primary', { type: 'submit' }, h('span', { text: 'entrar' }), icon('arrow', { size: 15 }));
@@ -63,12 +63,22 @@ async function go(e) {
 // logbook is the monthly letter (04) and the anchors are the trust block (05).
 const NAV = [['#vento', 'o vento'], ['#velas', 'as velas'], ['#rumo', 'o rumo'], ['#diario', 'diário de bordo'], ['#ancoras', 'âncoras']];
 
+// The cover graphic of the Carta ao Investidor: a copper triangle whose vertical
+// side meets the photograph, and the thin copper line that continues its
+// hypotenuse to the edge of the page (brand §06 capas, icons/cover-ray.svg).
+const RAY = `<svg viewBox="0 0 1200 268.8" preserveAspectRatio="xMaxYMax slice" width="100%" height="100%" aria-hidden="true">
+  <defs><linearGradient id="xp-cover-grad" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#CF7A5B"/><stop offset="1" stop-color="#654339"/></linearGradient></defs>
+  <polygon points="855.8,207.4 1200,0 1200,207.4" fill="url(#xp-cover-grad)"/>
+  <line x1="0" y1="207.4" x2="1200" y2="207.4" stroke="#BB795E" stroke-width=".8" vector-effect="non-scaling-stroke"/>
+  <line x1="1200" y1="0" x2="855.8" y2="267" stroke="#BB795E" stroke-width=".8" vector-effect="non-scaling-stroke"/>
+</svg>`;
+
 // A tacking course drawn in ink hairlines: five boards against the wind, a
 // destination straight upwind, and the straight line the wind does not allow.
 const TACK = `<svg viewBox="0 0 640 480" role="img" aria-label="Carta de bordejo desenhada à mão: o barco ziguezagueia contra o vento de norte e chega ao destino">
   <defs>
     <filter id="hand" x="-2%" y="-2%" width="104%" height="104%"><feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="3" seed="11" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.4" xChannelSelector="R" yChannelSelector="G"/></filter>
-    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3"/><feColorMatrix values="0 0 0 0 0.35  0 0 0 0 0.3  0 0 0 0 0.22  0 0 0 .07 0"/></filter>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3"/><feColorMatrix values="0 0 0 0 0.3  0 0 0 0 0.3  0 0 0 0 0.3  0 0 0 .05 0"/></filter>
     <clipPath id="sea"><rect x="20" y="20" width="600" height="440"/></clipPath>
     <path id="coast" d="M20 236 C48 246 62 262 54 286 C46 312 74 326 78 350 C82 376 62 392 84 412 C102 428 92 446 72 460"/>
   </defs>
@@ -90,7 +100,7 @@ const TACK = `<svg viewBox="0 0 640 480" role="img" aria-label="Carta de bordejo
       <circle r="36" stroke-width=".8"/><circle r="30" stroke-width=".8"/><circle r="3" fill="currentColor"/>
       <path d="M0 -30 L-6 0 L0 -6 Z M0 30 L6 0 L0 6 Z M30 0 L0 -6 L6 0 Z M-30 0 L0 6 L-6 0 Z" fill="currentColor" opacity=".9"/>
       <path d="M0 -30 L6 0 L0 -6 Z M0 30 L-6 0 L0 6 Z M30 0 L0 6 L6 0 Z M-30 0 L0 -6 L-6 0 Z"/>
-      <path class="north" d="M0 -30 L-6 0 L0 -6 Z" fill="var(--brass-400)" stroke="none"/>
+      <path class="north" d="M0 -30 L-6 0 L0 -6 Z" fill="#BB795E" stroke="none"/>
       <path d="M21 -21 L0 -4 L4 0 Z M21 21 L4 0 L0 4 Z M-21 21 L0 4 L-4 0 Z M-21 -21 L-4 0 L0 -4 Z" stroke-width=".8"/>
     </g>
     <g class="wind" stroke-width="1.1" opacity=".7">
@@ -127,7 +137,7 @@ const TACK = `<svg viewBox="0 0 640 480" role="img" aria-label="Carta de bordejo
     <text x="250" y="454" class="small">0</text><text x="290" y="454" class="small">5</text><text x="330" y="454" class="small">10</text><text x="374" y="454" class="small">milhas</text>
     <text x="522" y="404" text-anchor="middle" class="title">Carta de bordejo</text>
     <text x="522" y="422" text-anchor="middle" class="small">rumo declarado · vento variável</text>
-    <text x="522" y="436" text-anchor="middle" class="small">Enter Asset Management</text>
+    <text x="522" y="436" text-anchor="middle" class="brand">XP Asset Management</text>
   </g>
 </svg>`;
 
@@ -140,17 +150,20 @@ const secH = (n, title, meta) => h('div.sec-h', {}, num(n), h('h2', { text: titl
 const term = (dt, dd) => h('div', {}, h('dt', { text: dt }), h('dd', { text: dd }));
 
 mount(root,
+  // The cover: the dark panel of the Carta, the photograph beside it, the door.
   h('div.hero-wrap', {},
     h('section.hero', { 'aria-label': 'Apresentação' },
-      h('img.hero-photo', { src: 'assets/vela-guanabara.jpg', alt: 'Veleiro adernado na Baía de Guanabara, com o Pão de Açúcar ao fundo', width: 2200, height: 1467, decoding: 'async', fetchpriority: 'high' }),
       h('header.site-top', {},
-        logo({ size: 52 }),
+        logo({ size: 30 }),
         h('nav.site-nav', { 'aria-label': 'Seções' }, NAV.map(([href, text]) => h('a', { href, text })))),
       h('div.hero-copy', {},
-        h('p.hero-kicker', { text: 'Enter Asset Management · São Paulo' }),
+        h('p.hero-kicker', {}, 'XP Asset Management', h('span.sep', { text: 'l' }), 'São Paulo'),
         h('h1.hero-title', {}, 'O vento não se escolhe. ', h('em', { text: 'O rumo, sim.' })),
         h('p.hero-sub', { text: 'Ajustamos as velas todo mês para que a sua carteira siga rumo ao destino, mesmo quando o vento muda.' })),
-      h('span.hero-place', { text: 'Baía de Guanabara, Rio de Janeiro' })),
+      h('div.hero-ray', { html: RAY })),
+    h('figure.hero-photo-col', {},
+      h('img.hero-photo', { src: 'assets/vela-guanabara.jpg', alt: 'Veleiro adernado na Baía de Guanabara, com o Pão de Açúcar ao fundo', width: 2200, height: 1467, decoding: 'async', fetchpriority: 'high' }),
+      h('figcaption.hero-place', { text: 'Baía de Guanabara, Rio de Janeiro' })),
 
     h('aside.login-card', { 'aria-label': 'Entrar' },
       h('div.login', {},
@@ -186,18 +199,20 @@ mount(root,
   h('section.sec.alt', { id: 'velas' },
     secH(2, 'As velas'),
     h('div.sec-body.two', {},
-      h('p.pull', { text: 'Estratégia é o ajuste das velas. Duas frentes, um só barco.' }),
+      h('p.pull', { text: 'Estratégia é o ajuste das velas. Duas alocações, um só barco.' }),
+      // The house's two horizons: the neutral allocation of three to five years,
+      // and the tactical allocation of three to six months (brand §06 definições).
       h('dl.mandate', {},
-        term('O casco · frente privada', 'Posições concentradas em empresas AI-native na América Latina e no sul da Europa. É o que dá peso e direção.'),
-        term('A vela · frente líquida', 'Exposição pública de longo prazo à mesma tese. Dá impulso ao casco e o estabiliza quando o vento vira.'),
-        term('Quem ajusta', 'Uma gestora nascida de uma empresa que opera em escala nacional. Lê o vento no convés, não no relatório.')))),
+        term('O casco · alocação neutra', 'A carteira de referência do seu perfil, definida pelo Comitê de Alocação para um horizonte de três a cinco anos. É o que dá peso e direção.'),
+        term('A vela · alocação tática', 'Os ajustes de três a seis meses sobre a carteira neutra, classe a classe, conforme o vento do momento. Dão impulso ao casco e o estabilizam quando o vento vira.'),
+        term('Quem ajusta', 'O Comitê lê o vento e escreve a carta. O seu assessor traduz a leitura para a sua carteira, e nada muda sem passar por ele.')))),
 
   h('section.sec', { id: 'rumo' },
     secH(3, 'O rumo'),
     h('div.sec-body.rumo', {},
       h('div.col', {},
         h('p.pull', { text: 'Desviar não é se perder.' }),
-        // §5.1 — own the downside first: the loss is the first sentence, the metaphor the second.
+        // own the downside first: the loss is the first sentence, the metaphor the second.
         h('p.body', { text: 'Quando a carteira cai, você lê isso na primeira linha, sem eufemismo. Na segunda, lê por que o destino continua o mesmo.' }),
         h('p.body', { text: 'Contra o vento, nenhum veleiro anda em linha reta. Ele bordeja: vai e volta, e a cada bordo chega mais perto. Um mês negativo é um bordo. Dizemos quanto custou e para onde ele nos levou.' })),
       h('figure.tack', { html: TACK }))),
@@ -217,18 +232,18 @@ mount(root,
 
   h('section.sec', { id: 'ancoras' },
     secH(5, 'Âncoras', 'O que não se move quando o vento muda'),
-    // §14.3 — the trust block: four facts, stated flat.
+    // the trust block: four facts, stated flat.
     h('div.trust', {},
       h('div.trust-panel', {}, h('h3', { text: 'Custódia independente' }), h('p', { text: 'O extrato que você lê é o do custodiante, não o nosso.' })),
       h('div.trust-panel', {}, h('h3', { text: 'Auditoria anual, auditor nomeado' }), h('p', { text: 'Demonstrações auditadas todo ano, com o auditor identificado.' })),
       h('div.trust-panel', {}, h('h3', { text: 'Política escrita de avaliação' }), h('p', { text: 'Posições sem cotação pública seguem uma política documentada.' })),
       h('div.trust-panel', {}, h('h3', { text: 'Registros e canal de denúncias' }), h('p', { text: 'Disponíveis na área do cliente.' })))),
 
+  // The foot: the Comitê's disclaimer page, then the Carta's copper footer bar.
   h('footer.site-foot', {},
-    h('div.foot-legal', {}, h('b', { text: 'Enter Asset Management Ltda.' }), ' · São Paulo, SP · Portal de investimentos · v1.0'),
-    // §15.3 — the disclosure is body-adjacent in size and colour, never grey.
-    h('p.disclosure', { text: 'Este portal é de uso exclusivo de clientes e assessores da gestora e não constitui oferta pública de valores mobiliários. Rentabilidade obtida no passado não representa garantia de resultados futuros. Toda cifra apresentada na área do cliente traz período, base e fonte.' }),
-    h('p.credit', { text: 'Fotografias: Baía de Guanabara — Marinelson Almeida, CC BY 2.0 · Semana Internacional de Vela de Ilhabela — Marinha do Brasil, CC BY-SA 2.0.' })));
+    h('p.disclosure', { text: 'Este portal é de uso exclusivo de clientes e assessores da XP Asset Management e não constitui oferta pública de valores mobiliários. Rentabilidade obtida no passado não representa garantia de resultados futuros. Toda cifra apresentada na área do cliente traz período, base e fonte.' }),
+    h('p.credit', { text: 'Fotografias: Baía de Guanabara — Marinelson Almeida, CC BY 2.0 · Semana Internacional de Vela de Ilhabela — Marinha do Brasil, CC BY-SA 2.0.' }),
+    h('div.foot-legal', {}, h('span', {}, h('b', { text: 'XP Asset Management' }), ' · São Paulo, SP · Portal de investimentos'), h('span.pg', { text: 'v1.0' }))));
 
 // A session already open in this browser is offered, never assumed: the page
 // shows who is signed in and lets you continue or switch accounts.

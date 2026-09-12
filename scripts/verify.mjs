@@ -456,7 +456,7 @@ if (process.argv.includes('--live')) {
     ok(r['AMEX:IVV'].analyst.reason.includes('No analyst consensus available'));
   });
   await tAsync('the three outputs render from one payload and agree', async () => {
-    const login = await (await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'antonio.bicudo@enteram.com.br', password: 'enter2026' }) })).json();
+    const login = await (await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'antonio.bicudo@xpi.com.br', password: 'xp2026' }) })).json();
     const H = { authorization: `Bearer ${login.token}` };
     const list = await (await fetch(`${BASE}/api/clients/cli_albert/reports`, { headers: H })).json();
     ok(list.reports.length, 'no report generated yet — run npm run demo first');

@@ -1,6 +1,6 @@
 # Implementation report
 
-**Enter Asset Management — AI advisory portal**
+**XP Asset Management — AI advisory portal**
 Prepared for the XP working session · reporting month August 2026
 
 ---
@@ -85,7 +85,7 @@ side by side, because they are different statements and collapsing them is how
 unsuitable advice gets shipped.
 
 **Build the two-page constraint into the renderer.** The PDF engine is written from
-scratch, embeds the two brand typefaces, measures every block before drawing it, and
+scratch, embeds the brand typeface, measures every block before drawing it, and
 drops optional content in a fixed priority order if two pages would not hold. It
 records which level it needed. A hard constraint that is checked at the end is a
 constraint that gets violated in production.

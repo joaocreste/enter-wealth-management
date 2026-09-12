@@ -16,7 +16,7 @@ export class ProviderError extends Error {
   }
 }
 
-export const USER_AGENT = 'enter-wealth-advisor/1.0 (+https://enteram.com.br; advisory reporting)';
+export const USER_AGENT = 'xp-wealth-advisor/1.0 (advisory reporting)';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

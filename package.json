@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Enter Asset Management \u2014 AI-assisted advisory portal. Rivet-orchestrated monthly client reporting on Cloudflare.",
+  "description": "XP Asset Management \u2014 AI-assisted advisory portal. Rivet-orchestrated monthly client reporting on Cloudflare.",
   "scripts": {
     "build:graph": "node rivet/build-graph.mjs",
     "build:web": "node scripts/build-web.mjs",

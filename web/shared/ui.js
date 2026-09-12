@@ -1,12 +1,14 @@
 /**
  * Portal runtime: a DOM builder, the API client, the brand marks, the shell
- * (rail, masthead, theme) and the chart primitives.
+ * (rail, masthead, theme) and the chart primitives. Brand: the XP Advisory
+ * brand system, through web/shared/app.css and vendor/brand.js.
  * No framework and no bundler — the product is dense tables and restrained
  * charts, and a hand-rolled renderer keeps the deployment to one Worker with
  * static assets.
  */
 import { money, percent, pp, weight, num, dateLong, shortDate, monthLabel, arrow, toneOf, MINUS } from './vendor/format.js';
 import { API_BASE, SITE_BASE, advisorUrl, clientUrl, loginUrl, apiUrl } from './config.js';
+import { LOGO_SYMBOL_PATH, LOGO_SYMBOL_VIEWBOX, LOGO_SYMBOL_ASPECT, inkOn } from './vendor/brand.js';
 
 export { money, percent, pp, weight, num, dateLong, shortDate, monthLabel, arrow, toneOf, MINUS };
 export { API_BASE, SITE_BASE, advisorUrl, clientUrl, loginUrl, apiUrl };
@@ -204,34 +206,37 @@ export const theme = {
   toggle() { theme.set(theme.effective === 'dark' ? 'light' : 'dark'); },
 };
 
-// ── brand marks (§6.1, drawn from the same path data as the PDF) ──────────
+// ── brand marks (§02, the same path data the PDF draws) ───────────────────
 const SVG = 'http://www.w3.org/2000/svg';
 const svgEl = (tag, attrs = {}) => {
   const e = document.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v);
   return e;
 };
-const SYMBOL_PATHS = ['M8 30 L8 8 L30 8', 'M92 70 L92 92 L70 92', 'M72 34 L72 56 L36 56', 'M48 44 L36 56 L48 68'];
 
-/** The open bracket alone. Strokes follow `currentColor`, so it works on ink or paper. */
+/** The XP symbol alone. Fills with `currentColor`, so it works on the bar or on paper. */
 export function symbol({ size = 26, className = 'symbol' } = {}) {
-  const svg = svgEl('svg', { viewBox: '0 0 100 100', width: size, height: size, role: 'img', 'aria-label': 'Enter Asset Management', class: className });
-  for (const d of SYMBOL_PATHS) svg.append(svgEl('path', { d }));
+  const svg = svgEl('svg', {
+    viewBox: LOGO_SYMBOL_VIEWBOX, width: (size * LOGO_SYMBOL_ASPECT).toFixed(1), height: size,
+    role: 'img', 'aria-label': 'XP Asset Management', class: className, fill: 'currentColor', 'fill-rule': 'evenodd',
+  });
+  svg.append(svgEl('path', { d: LOGO_SYMBOL_PATH }));
   return svg;
 }
 
-export function logo({ size = 26, descriptor = true } = {}) {
-  return h('span.lockup', {}, symbol({ size }), h('span', { style: { display: 'flex', flexDirection: 'column' } },
-    h('span.word', { text: 'enter', style: { fontSize: `${size * 0.8}px` } }),
-    descriptor && h('span.desc', { text: 'Asset Management', style: { fontSize: `${size * 0.24}px` } })));
+/**
+ * The lockup: the symbol and the words set in the display grotesque, Regular,
+ * lowercase, on the symbol's base — the way the brand composes "xp advisory".
+ */
+export function logo({ size = 26, word = true } = {}) {
+  return h('span.lockup', { style: { gap: `${(size * 0.22).toFixed(1)}px` } },
+    symbol({ size }),
+    word && h('span.word', { text: 'asset management', style: { fontSize: `${(size * 0.78).toFixed(1)}px`, paddingBottom: `${(size * 0.06).toFixed(1)}px` } }));
 }
 
-/** The return arrow drawing itself — the house loading indicator. */
+/** The symbol breathing — the house loading indicator. */
 export function loader() {
-  const svg = svgEl('svg', { viewBox: '0 0 100 100', class: 'loader', 'aria-hidden': 'true' });
-  svg.append(svgEl('path', { d: SYMBOL_PATHS[0] }), svgEl('path', { d: SYMBOL_PATHS[1] }),
-    svgEl('path', { d: 'M72 34 L72 56 L36 56 M48 44 L36 56 L48 68', class: 'arrow' }));
-  return svg;
+  return symbol({ size: 30, className: 'loader' });
 }
 
 // ── icons (§11.1: 1.5px stroke on a 24px grid, square caps, monochrome) ──
@@ -364,10 +369,10 @@ export function table(headers, rows, { className = '' } = {}) {
       h('tbody', {}, rows)));
 }
 
-// ── charts (§10) ──────────────────────────────────────────────────────────
+// ── charts (§09) ──────────────────────────────────────────────────────────
 // Colour comes from CSS classes rather than inline fills so a theme change
-// repaints every chart without a re-render. Categorical hues (§7.8) are
-// theme-invariant and stay inline.
+// repaints every chart without a re-render. Categorical hues (§08, the pie's
+// order) are theme-invariant and stay inline.
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const text = (attrs, content) => { const t = svgEl('text', attrs); t.textContent = content; return t; };
 
@@ -410,7 +415,7 @@ export function barChart(items, { title = null, caption = null, width = 560, row
 /** Stacked allocation bar in the fixed categorical order. Never a doughnut. */
 export function allocationBar(items, { title = null, caption = null, width = 560, height = 36, locale = 'pt-BR' } = {}) {
   const total = items.reduce((a, i) => a + i.weight, 0) || 1;
-  const cats = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cssVar(`--cat-${i}`) || '#12314F');
+  const cats = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cssVar(`--cat-${i}`) || '#2A3B43');
   const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height, role: 'img', 'aria-label': title || 'allocation' });
   let x = 0;
   items.forEach((it, i) => {
@@ -419,7 +424,7 @@ export function allocationBar(items, { title = null, caption = null, width = 560
     r.append(svgEl('title', {}));
     r.firstChild.textContent = `${it.label} · ${weight(it.weight, { locale, decimals: 1 })}`;
     svg.append(r);
-    if (w > 44) svg.append(text({ x: (x + w / 2).toFixed(1), y: height / 2 + 4, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 500, fill: '#fff' }, weight(it.weight, { locale, decimals: 1 })));
+    if (w > 44) svg.append(text({ x: (x + w / 2).toFixed(1), y: height / 2 + 4, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 400, fill: inkOn(it.color || cats[i % cats.length]) }, weight(it.weight, { locale, decimals: 1 })));
     x += w;
   });
   const legend = h('div.alloc-legend', {}, items.map((it, i) => h('span.alloc-key', {},
@@ -451,7 +456,7 @@ export function bandChart(rows, { title = null, caption = null, width = 560, row
   return h('figure', {}, title && h('figcaption.chart-title', { text: title }), svg, caption && h('figcaption.chart-caption', { text: caption }));
 }
 
-/** Cumulative line: the firm's line is ink, the benchmark is blue dashed. Hover reads a month. */
+/** Cumulative line: the portfolio in slate, the benchmark in copper, dashed. Hover reads a month. */
 export function lineChart(series, { title = null, caption = null, width = 560, height = 190, locale = 'pt-BR' } = {}) {
   const port = series.portfolio || [];
   if (port.length < 2) return h('div.empty', { text: 'Histórico insuficiente.' });
@@ -655,10 +660,10 @@ export function driftBar({ drift, tolerance, scale = null }) {
 }
 
 // ── correlation matrix ────────────────────────────────────────────────────
-// A diverging ramp on the palette: benchmark blue for pairs that move together,
-// drawdown red for pairs that move apart, paper at zero. Never green — green
-// means a gain, and a correlation is a comparison (§7.5, §10.4). The value is
-// printed in every cell; colour is redundant reinforcement (§7.10).
+// A diverging ramp on the palette: slate for pairs that move together, the
+// negative red for pairs that move apart, paper at zero. Never green — green
+// means a gain, and a correlation is a comparison (§03). The value is printed
+// in every cell; colour is redundant reinforcement.
 const hexRgb = (hex) => { const v = hex.replace('#', ''); return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16)); };
 function corrColor(r) {
   const dark = theme.effective === 'dark';
@@ -907,7 +912,7 @@ export function scatterChart(items, {
   return fig;
 }
 
-// ── source provenance (§29) ───────────────────────────────────────────────
+// ── source provenance ───────────────────────────────────────────────
 export function sourceLine(s) {
   const bits = [s.provider];
   if (s.identifier) bits.push(s.identifier);

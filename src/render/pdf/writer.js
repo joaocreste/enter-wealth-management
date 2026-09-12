@@ -90,8 +90,10 @@ export class PdfDocument {
     const e = this.font(font);
     const { glyphs, width } = e.font.encode(String(str));
     const [r, g, b] = hexToRgb(color);
-    this.#op(`BT /${e.resourceName} ${size} Tf ${r} ${g} ${b} rg ${charSpacing ? `${charSpacing} Tc ` : ''}${wordSpacing ? `${wordSpacing} Tw ` : ''}1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm <${hexGlyphs(glyphs)}> Tj ET`);
-    return (width / 1000) * size;
+    // Tc and Tw are graphics-state parameters that survive ET, so they are set
+    // on every run: a tracked title must not widen the paragraph after it.
+    this.#op(`BT /${e.resourceName} ${size} Tf ${r} ${g} ${b} rg ${Number(charSpacing || 0).toFixed(3)} Tc ${Number(wordSpacing || 0).toFixed(3)} Tw 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm <${hexGlyphs(glyphs)}> Tj ET`);
+    return (width / 1000) * size + (charSpacing || 0) * glyphs.length;
   }
 
   textRight(str, xRight, y, opts = {}) {
@@ -152,12 +154,14 @@ export class PdfDocument {
     this.#op(`${dash ? `[${dash.join(' ')}] 0 d ` : '[] 0 d '}${r} ${g} ${b} RG ${width} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`);
   }
 
-  path(d, { stroke = '#0B0D0E', fill = null, width = 1, cap = 2, join = 0 } = {}) {
+  /** `d` is a string of PDF path operators (see svgpath.js). `fillRule` 'nonzero' | 'evenodd'. */
+  path(d, { stroke = '#222222', fill = null, width = 1, cap = 2, join = 0, fillRule = 'nonzero' } = {}) {
     let s = '';
     if (fill) { const [r, g, b] = hexToRgb(fill); s += `${r} ${g} ${b} rg `; }
     if (stroke) { const [r, g, b] = hexToRgb(stroke); s += `${r} ${g} ${b} RG ${width} w ${cap} J ${join} j `; }
     s += `${d} `;
-    s += fill && stroke ? 'B' : fill ? 'f' : 'S';
+    const eo = fillRule === 'evenodd' ? '*' : '';
+    s += fill && stroke ? `B${eo}` : fill ? `f${eo}` : 'S';
     this.#op(s);
   }
 
@@ -217,7 +221,7 @@ export class PdfDocument {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const dateStr = `D:${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
-    const infoId = this.#alloc(`<< /Title ${pdfString(this.meta.title)} /Author ${pdfString(this.meta.author)} /Subject ${pdfString(this.meta.subject)} /Keywords ${pdfString(this.meta.keywords)} /Producer (Enter Asset Management reporting engine) /Creator (Enter Asset Management reporting engine) /CreationDate (${dateStr}) /ModDate (${dateStr}) >>`);
+    const infoId = this.#alloc(`<< /Title ${pdfString(this.meta.title)} /Author ${pdfString(this.meta.author)} /Subject ${pdfString(this.meta.subject)} /Keywords ${pdfString(this.meta.keywords)} /Producer (XP Asset Management reporting engine) /Creator (XP Asset Management reporting engine) /CreationDate (${dateStr}) /ModDate (${dateStr}) >>`);
     const catalogId = this.#alloc(`<< /Type /Catalog /Pages ${pagesId} 0 R /Lang (pt-BR) >>`);
 
     // ── assemble ──

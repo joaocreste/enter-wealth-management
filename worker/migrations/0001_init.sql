@@ -1,4 +1,4 @@
--- Enter Asset Management — advisory portal schema (Cloudflare D1 / SQLite)
+-- XP Asset Management — advisory portal schema (Cloudflare D1 / SQLite)
 -- §25. Every table that participates in a client report is append-only in
 -- practice: snapshots, policies and reports are versioned rather than updated,
 -- so a published report can always be reproduced from its inputs (§31).

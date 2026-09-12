@@ -191,7 +191,7 @@ async function viewMatters() {
       null, [h('b', { text: 'O que importa' }), sep(), monthLabel(c.reporting_period?.month, L)]),
     h('div.card', { style: { marginBottom: '24px' } },
       h('p.pull', { text: c.letter?.markets || '' }),
-      h('p.serif', { style: { marginTop: '16px', color: 'var(--ink-700)' }, text: c.letter?.meaning || '' })),
+      h('p.reading', { style: { marginTop: '16px', color: 'var(--ink-700)' }, text: c.letter?.meaning || '' })),
 
     impacts.length ? h('div.stack', {}, impacts.map((i) => h('div.card', {},
       h('div.card-h', {},
@@ -247,7 +247,7 @@ async function viewLetter() {
       h('p', { text: letter.sign_off || '' }),
       h('div.sig', {},
         h('b', { text: c.advisor?.name || '' }),
-        h('span', { text: `Enter Asset Management${c.advisor?.code ? ` · ${c.advisor.code}` : ''}` })))),
+        h('span', { text: `XP Asset Management${c.advisor?.code ? ` · ${c.advisor.code}` : ''}` })))),
 
     h('div.card', { style: { marginTop: '20px' } }, sourcesBlock(c.sources, 'Fontes usadas nesta carta')),
     h('div.disclosure', {}, (c.disclosures || []).map((x) => h('p', { text: x }))),

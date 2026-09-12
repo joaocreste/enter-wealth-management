@@ -1,26 +1,37 @@
 /**
- * HTML email and portal rendering of the monthly letter (§22 A and C).
+ * HTML email and portal rendering of the monthly letter.
  *
  * Both variants are produced from the same letter model as the PDF, so the
  * three outputs cannot disagree. The email variant uses a table skeleton and
  * inline styles because email clients still require it; the portal variant uses
  * the same markup with the modern stylesheet.
  *
- * Brand: tokens from brand-guidelines.html §16, tables per §10.3, radius 0 on
- * anything holding data and no shadows (§9.4), disclosures in ink-2 (§15.3).
+ * Brand: the Carta ao Investidor line of the XP Advisory brand system — a
+ * #242424 header bar with a tracked title and the white symbol, article titles
+ * in Roboto Bold copper, Roboto Light body with generous leading, tables with a
+ * charcoal header band and no black rules, a dark disclaimer block and the
+ * copper footer bar (§04, §06, §08).
  */
-import { color, semantic, type, logoSvg } from '../core/brand.js';
+import { color, semantic, type, inkOn, LOGO_SYMBOL_PATH, LOGO_SYMBOL_VIEWBOX, LOGO_SYMBOL_ASPECT } from '../core/brand.js';
 import { escapeHtml, percent, pp, money, weight as fmtWeight } from '../core/format.js';
 import { svgBars, svgAllocation, svgBands, CHART_CSS } from './charts.js';
 
 const e = escapeHtml;
 const INK = color.ink[950];
-const INK2 = color.ink[700];
-const INK3 = color.ink[500];
+const INK2 = color.ink[600];
+const INK3 = color.ink[400];
 const RULE = color.rule;
 const RULE2 = color.rule2;
+const BAR = color.bar;
+const COPPER = color.copper[500];
+const COPPER2 = color.copper[400];
+const SAGE = color.sage;
+const CHARCOAL = color.charcoal;
+const SLATE = color.slate[600];
 
-const toneColor = (t) => (t === 'gain' ? semantic.light.gainText : t === 'loss' ? semantic.light.lossText : t === 'benchmark' ? semantic.light.benchmark : color.ink[900]);
+const toneColor = (t) => (t === 'gain' ? semantic.light.gainText : t === 'loss' ? semantic.light.lossText : t === 'benchmark' ? semantic.light.benchmark : INK);
+
+const symbolSvg = (height, fill) => `<svg viewBox="${LOGO_SYMBOL_VIEWBOX}" width="${(height * LOGO_SYMBOL_ASPECT).toFixed(1)}" height="${height}" role="img" aria-label="XP Asset Management" fill="${fill}" fill-rule="evenodd" style="display:block"><path d="${LOGO_SYMBOL_PATH}"/></svg>`;
 
 export function renderLetterHtml(model, { variant = 'email', pdfUrl = null, portalUrl = null } = {}) {
   const L = model.locale;
@@ -28,18 +39,18 @@ export function renderLetterHtml(model, { variant = 'email', pdfUrl = null, port
   const maxW = isEmail ? 640 : 780;
 
   const body = `
-${masthead(model, isEmail)}
+${byline(model)}
+${clientRow(model)}
 ${greeting(model)}
 ${figureStrip(model, isEmail)}
 ${section(model, '01', model.sections.performance, performanceBody(model, isEmail))}
-${section(model, '02', model.sections.markets, `<p class="serif">${e(model.letter.markets || '')}</p>`)}
+${section(model, '02', model.sections.markets, `<p class="reading">${e(model.letter.markets || '')}</p>`)}
 ${section(model, '03', model.sections.meaning, meaningBody(model))}
 ${section(model, '04', model.sections.recommendations, recommendationsBody(model, isEmail))}
 ${section(model, '05', model.sections.portfolio, portfolioBody(model, isEmail))}
 ${closing(model)}
 ${sources(model)}
 ${(pdfUrl || portalUrl) ? actions(model, pdfUrl, portalUrl) : ''}
-${disclosures(model)}
 `;
 
   return `<!DOCTYPE html>
@@ -49,7 +60,7 @@ ${disclosures(model)}
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>${e(`${L === 'pt-BR' ? 'Carta mensal' : 'Monthly letter'} — ${model.client?.name} — ${model.period.label}`)}</title>
-${isEmail ? '' : '<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,300;6..72,400&display=swap" rel="stylesheet">'}
+${isEmail ? '' : '<link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,300&family=Hanken+Grotesk:wght@300;400&display=swap" rel="stylesheet">'}
 <style>
 ${baseCss(maxW, isEmail)}
 ${CHART_CSS}
@@ -60,7 +71,10 @@ ${CHART_CSS}
 <table role="presentation" class="shell" width="100%" cellpadding="0" cellspacing="0" border="0">
 <tr><td align="center">
 <table role="presentation" class="doc" width="${maxW}" cellpadding="0" cellspacing="0" border="0">
+<tr><td class="bar">${masthead(model)}</td></tr>
 <tr><td class="pad">${body}</td></tr>
+<tr><td class="disc">${disclosures(model)}</td></tr>
+<tr><td class="foot">${footer(model)}</td></tr>
 </table>
 </td></tr>
 </table>
@@ -76,112 +90,131 @@ function preheaderText(model) {
 function baseCss(maxW, isEmail) {
   return `
 :root{color-scheme:light}
-body{margin:0;padding:0;background:${color.paper};color:${INK};font-family:${type.sans};font-size:15px;line-height:1.55;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+body{margin:0;padding:0;background:${color.paper3};color:${INK};font-family:${type.sans};font-weight:300;font-size:15px;line-height:1.6;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
 .preheader{display:none!important;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;mso-hide:all}
-.shell{background:${color.paper};padding:${isEmail ? '24px 12px' : '32px 16px'}}
-.doc{max-width:${maxW}px;width:100%;background:${color.paper2};border:1px solid ${RULE}}
-.pad{padding:${isEmail ? '28px 26px 24px' : '40px 44px 34px'}}
-h1,h2,h3{margin:0;font-weight:600;letter-spacing:-0.02em;line-height:1.14}
+.shell{background:${color.paper3};padding:${isEmail ? '24px 12px' : '32px 16px'}}
+.doc{max-width:${maxW}px;width:100%;background:${color.paper2}}
+.pad{padding:${isEmail ? '22px 26px 24px' : '30px 44px 34px'}}
+h1,h2,h3{margin:0;font-weight:400;line-height:1.2}
 p{margin:0 0 0.85em}
 p:last-child{margin-bottom:0}
-.serif{font-family:${type.serif};font-size:${isEmail ? 15 : 16.5}px;line-height:1.62;color:${INK2};max-width:72ch}
+b,strong{font-weight:500}
+.reading{font-weight:300;font-size:${isEmail ? 14.5 : 15.5}px;line-height:1.8;color:${INK};max-width:72ch}
 .mono{font-family:${type.mono}}
+.track{font-weight:300;letter-spacing:.3em;text-transform:uppercase}
 
-.masthead{border-bottom:2px solid ${INK};padding-bottom:14px;margin-bottom:18px}
-.masthead-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
-.masthead .doctype{font-size:13px;font-weight:600;color:${INK};text-align:right}
-.masthead .period{font-size:12px;color:${INK3};text-align:right;margin-top:2px}
-.client-row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;border-bottom:1px solid ${RULE};padding-bottom:10px;margin-bottom:20px}
-.client-name{font-size:20px;font-weight:600;letter-spacing:-0.02em}
-.client-meta{font-size:11.5px;color:${INK3}}
+.bar{background:${BAR};color:${color.headerText};padding:0 20px 0 ${isEmail ? 26 : 31}px;height:60px;vertical-align:middle}
+.bar table{width:100%}
+.bar .title{font-size:13px;letter-spacing:.32em;text-transform:uppercase;font-weight:300;white-space:nowrap;color:${color.headerText}}
+.bar .title b{font-weight:700}
+.bar .sep{color:${COPPER};font-size:8px;margin:0 12px 0 14px;font-weight:300}
+.bar .date{font-size:8px;letter-spacing:.32em;text-transform:uppercase;color:${SAGE};font-weight:300;white-space:nowrap}
+.byline{font-size:9px;letter-spacing:.3em;text-transform:uppercase;font-weight:300;color:${INK};margin:0 0 14px}
+.byline b{font-weight:400}
+.client-row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;border-bottom:1px solid ${RULE};padding-bottom:10px;margin-bottom:22px}
+.client-name{font-size:19px;font-weight:400;color:${INK}}
+.client-meta{font-size:11px;color:${INK3}}
 
-.sec{margin:22px 0 0}
-.sec-head{display:flex;gap:12px;align-items:baseline;border-bottom:1px solid ${RULE};padding-bottom:6px;margin-bottom:12px}
-.sec-num{font-family:${type.mono};font-size:10.5px;color:${color.ink[400]};min-width:20px}
-.sec-title{font-size:14px;font-weight:600;letter-spacing:-0.01em}
+.sec{margin:26px 0 0}
+.sec-head{display:flex;gap:12px;align-items:baseline;margin-bottom:10px}
+.sec-num{font-family:${type.mono};font-size:10px;color:${COPPER};letter-spacing:.12em;min-width:22px}
+.sec-title{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${COPPER2}}
 
-.figs{width:100%;border-collapse:collapse;border-top:1px solid ${INK};border-bottom:1px solid ${RULE};margin:4px 0 18px}
+.figs{width:100%;border-collapse:collapse;border-top:1px solid ${color.rule3};border-bottom:1px solid ${RULE};margin:4px 0 20px}
 .figs td{padding:12px 10px 12px 0;vertical-align:top}
-.figs .lbl{display:block;font-size:10.5px;color:${INK3};margin-bottom:5px;line-height:1.3}
-.figs .val{display:block;font-size:17px;font-weight:600;letter-spacing:-0.02em}
-.figs .val.big{font-size:24px;font-weight:700}
+.figs .lbl{display:block;font-size:8.5px;letter-spacing:.2em;text-transform:uppercase;color:${SAGE};margin-bottom:6px;line-height:1.3;font-weight:400}
+.figs .val{display:block;font-size:18px;font-weight:300;letter-spacing:0}
+.figs .val.big{font-size:26px;font-weight:400}
 .figs .arrow{font-size:12px;margin-right:2px}
 
 table.data{width:100%;border-collapse:collapse;font-size:12.5px;margin:10px 0 4px}
-table.data th{text-align:left;font-weight:600;font-size:10.5px;letter-spacing:.03em;color:${INK3};border-bottom:1px solid ${INK};padding:0 10px 6px 0;white-space:nowrap;vertical-align:bottom}
-table.data td{padding:9px 10px 9px 0;border-bottom:1px solid ${RULE2};vertical-align:top;color:${INK2}}
-table.data td:first-child,table.data th:first-child{padding-left:0}
+table.data th{text-align:left;font-weight:500;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:#fff;background:${CHARCOAL};padding:7px 8px;white-space:nowrap;vertical-align:bottom}
+table.data td{padding:9px 8px;border-bottom:1px solid ${RULE2};vertical-align:top;color:${INK};font-weight:300}
 table.data tr:last-child td{border-bottom:1px solid ${RULE}}
-table.data .num{text-align:right;font-weight:500;color:${color.ink[900]};white-space:nowrap}
-table.data .name{font-weight:600;color:${INK}}
-table.data .sub{display:block;font-size:10.5px;color:${INK3};font-weight:400;margin-top:2px}
+table.data .num{text-align:right;font-weight:400;color:${INK};white-space:nowrap}
+table.data .name{font-weight:500;color:${INK}}
+table.data .sub{display:block;font-size:10.5px;color:${INK3};font-weight:300;margin-top:2px}
 
-.chip{display:inline-block;padding:2px 7px;font-size:10.5px;font-weight:600;line-height:1.5;border:1px solid}
-.chip.add{color:${semantic.light.gainText};border-color:${color.yield[200]};background:${semantic.light.gainFill}}
-.chip.reduce,.chip.exit{color:${semantic.light.lossText};border-color:${color.drawdown[200]};background:${semantic.light.lossFill}}
-.chip.hold{color:${INK2};border-color:${RULE};background:${color.paper3}}
-.chip.discuss{color:${semantic.light.caution};border-color:${color.amber[200]};background:${color.amber[50]}}
-.chip.conflict{color:${semantic.light.caution};border-color:${color.amber[300]};background:${color.amber[50]}}
+.chip{display:inline-block;padding:2px 9px;font-size:10.5px;font-weight:400;line-height:1.5;border-radius:999px;background:${color.ink[50]};color:${color.ink[900]}}
+.chip.add{color:${semantic.light.gainText};background:${semantic.light.gainFill}}
+.chip.reduce,.chip.exit{color:${semantic.light.lossText};background:${semantic.light.lossFill}}
+.chip.hold{color:${color.ink[700]};background:${color.ink[50]}}
+.chip.discuss{color:${semantic.light.caution};background:${semantic.light.cautionWash}}
+.chip.conflict{color:${semantic.light.caution};background:${semantic.light.cautionWash}}
 
 .signal-pair{font-size:10.5px;line-height:1.5;color:${INK2}}
-.signal-pair b{font-weight:600;color:${INK}}
+.signal-pair b{font-weight:500;color:${INK}}
 .signal-pair .na{color:${INK3}}
-.fit{font-size:10.5px;font-weight:600;line-height:1.4}
+.fit{font-size:10.5px;font-weight:500;line-height:1.4}
 .fit.pass{color:${INK2}}
 .fit.flag{color:${semantic.light.caution}}
-.rationale{font-size:11.5px;color:${INK2};padding:0 0 10px;border-bottom:1px solid ${RULE2};margin-top:-2px}
+.rationale{font-size:11.5px;color:${INK2};padding:0 8px 10px;border-bottom:1px solid ${RULE2};margin-top:-2px;font-weight:300}
 
-.impact{border-left:2px solid ${RULE};padding-left:14px;margin:12px 0}
+.impact{border-left:2px solid ${SLATE};padding-left:14px;margin:12px 0}
 .impact-item{margin-bottom:12px}
 .impact-item:last-child{margin-bottom:0}
-.impact-title{font-size:12.5px;font-weight:600;color:${INK}}
-.impact-exp{font-size:10.5px;color:${INK3};margin-left:6px;font-weight:500}
-.impact-body{font-size:12px;color:${INK2};margin-top:3px}
+.impact-title{font-size:12.5px;font-weight:500;color:${INK}}
+.impact-exp{font-size:10.5px;color:${INK3};margin-left:6px;font-weight:400}
+.impact-body{font-size:12px;color:${INK2};margin-top:3px;font-weight:300}
 
-.note{font-size:11px;color:${INK3};line-height:1.45;margin-top:8px}
+.note{font-size:11px;color:${INK3};line-height:1.5;margin-top:8px;font-weight:300}
 .sign{margin-top:22px}
-.sign .name{font-size:13px;font-weight:600;color:${INK}}
-.sign .org{font-size:11px;color:${INK3};margin-top:2px}
+.sign .name{font-size:13px;font-weight:500;color:${INK}}
+.sign .org{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:${SAGE};margin-top:4px;font-weight:300}
 
-.sources{border-top:1px solid ${RULE};margin-top:24px;padding-top:12px;font-size:10.5px;color:${INK2};line-height:1.5}
-.sources b{font-weight:600;color:${INK};display:block;margin-bottom:4px}
+.sources{border-top:1px solid ${RULE};margin-top:24px;padding-top:12px;font-size:10.5px;color:${INK2};line-height:1.5;font-weight:300}
+.sources b{font-weight:400;color:${INK};display:block;margin-bottom:4px}
 .unavail{margin-top:7px;color:${INK2}}
 .unavail b{display:inline;color:${semantic.light.caution}}
 
 .actions{margin:22px 0 6px}
-.btn{display:inline-block;padding:9px 16px;border:1px solid ${INK};border-radius:2px;font-size:12px;font-weight:500;color:${INK};text-decoration:none;margin-right:8px}
-.btn.primary{background:${INK};color:${color.paper2}}
+.btn{display:inline-block;padding:9px 16px;border:1px solid ${color.rule3};border-radius:3px;font-size:12px;font-weight:400;color:${INK};text-decoration:none;margin-right:8px}
+.btn.primary{background:${SLATE};border-color:${SLATE};color:#fff}
 
-.disc{border-top:2px solid ${INK};margin-top:26px;padding-top:12px;font-size:11px;line-height:1.45;color:${INK2}}
-.disc p{margin:0 0 5px}
+.disc{background:${BAR};color:#fff;padding:${isEmail ? '22px 26px 24px' : '26px 44px 28px'}}
+.disc .disc-title{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:${COPPER};font-weight:400;margin:0 0 10px}
+.disc p{margin:0 0 6px;font-size:10.5px;line-height:1.8;color:#fff;font-weight:300}
+.foot{background:${COPPER};color:${INK};padding:0 ${isEmail ? 26 : 31}px;height:27px;vertical-align:middle}
+.foot table{width:100%}
+.foot .brand{font-size:8px;letter-spacing:.32em;text-transform:uppercase;font-weight:300;color:${INK};white-space:nowrap}
+.foot .pg{font-size:8.8px;color:#fff;font-weight:400;text-align:right}
 
 @media (max-width:620px){
-  .pad{padding:20px 16px}
+  .pad{padding:18px 16px}
   .figs td{display:block;width:100%!important;border-bottom:1px solid ${RULE2};padding:9px 0}
   .figs .val.big{font-size:20px}
   table.data th:nth-child(3),table.data td:nth-child(3){display:none}
-  .masthead-row{flex-direction:column}
-  .masthead .doctype,.masthead .period{text-align:left}
+  .client-row{flex-direction:column}
+  .bar .date{display:none}
 }
 `;
 }
 
-function masthead(model, isEmail) {
+function masthead(model) {
   const L = model.locale;
-  return `<div class="masthead"><div class="masthead-row">
-${logoSvg({ variant: 'ink', height: 26 })}
-<div><div class="doctype">${e(L === 'pt-BR' ? 'Carta mensal ao cliente' : 'Monthly client letter')}</div>
-<div class="period">${e(model.period.label)}</div></div>
-</div></div>
-<div class="client-row">
+  const [first, ...rest] = (L === 'pt-BR' ? 'Carta mensal' : 'Monthly letter').split(' ');
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td align="left" valign="middle"><span class="title">${e(first)} <b>${e(rest.join(' '))}</b></span><span class="sep">l</span><span class="date">${e(model.period.label)}</span></td>
+<td align="right" valign="middle" width="40">${symbolSvg(26, '#FFFFFF')}</td>
+</tr></table>`;
+}
+
+function byline(model) {
+  const L = model.locale;
+  return `<p class="byline">${e(L === 'pt-BR' ? 'Por' : 'By')} <b>${e(model.advisor?.name || '')}</b>, XP Asset Management</p>`;
+}
+
+function clientRow(model) {
+  const L = model.locale;
+  return `<div class="client-row">
 <div class="client-name">${e(model.client?.name || '')}</div>
 <div class="client-meta">${e(`${L === 'pt-BR' ? 'Perfil' : 'Profile'}: ${model.client?.risk_profile} · ${L === 'pt-BR' ? 'Assessor' : 'Advisor'}: ${model.advisor?.name}${model.advisor?.code ? ` (${model.advisor.code})` : ''}`)}</div>
 </div>`;
 }
 
 function greeting(model) {
-  return `<p class="serif" style="font-size:16px;margin-bottom:0.7em">${e(model.letter.greeting || '')}</p>
-<p class="serif">${e(model.letter.opening || '')}</p>`;
+  return `<p class="reading" style="font-size:17px;margin-bottom:0.7em">${e(model.letter.greeting || '')}</p>
+<p class="reading">${e(model.letter.opening || '')}</p>`;
 }
 
 function figureStrip(model, isEmail) {
@@ -206,7 +239,7 @@ function performanceBody(model, isEmail) {
     caption: buildChartCaption(model),
     locale: L,
   });
-  return `<p class="serif">${e(model.letter.performance || '')}</p>
+  return `<p class="reading">${e(model.letter.performance || '')}</p>
 ${chart}
 ${model.method_note ? `<p class="note">${e(model.method_note)}</p>` : ''}
 ${model.coverage_note ? `<p class="note">${e(model.coverage_note)}</p>` : ''}`;
@@ -225,7 +258,7 @@ function meaningBody(model) {
 <div><span class="impact-title">${e(i.title)}</span>${i.exposure_label ? `<span class="impact-exp">${e(model.locale === 'pt-BR' ? 'exposição' : 'exposure')} ${e(i.exposure_label)}</span>` : ''}</div>
 <div class="impact-body">${e(i.impact || '')}</div>
 </div>`).join('');
-  return `<p class="serif">${e(model.letter.meaning || '')}</p>
+  return `<p class="reading">${e(model.letter.meaning || '')}</p>
 ${items ? `<div class="impact">${items}</div>` : ''}`;
 }
 
@@ -233,7 +266,7 @@ function recommendationsBody(model, isEmail) {
   const L = model.locale;
   const recs = model.recommendations || [];
   if (!recs.length) {
-    return `<p class="serif">${e(model.letter.recommendations_intro || '')}</p>`;
+    return `<p class="reading">${e(model.letter.recommendations_intro || '')}</p>`;
   }
   const heads = L === 'pt-BR'
     ? ['Ativo', 'Sugestão', 'Sinais de mercado', 'Enquadramento na sua política']
@@ -250,7 +283,7 @@ function recommendationsBody(model, isEmail) {
 </tr>
 ${r.rationale ? `<tr><td colspan="4" class="rationale">${e(r.rationale)}</td></tr>` : ''}`).join('');
 
-  return `<p class="serif">${e(model.letter.recommendations_intro || '')}</p>
+  return `<p class="reading">${e(model.letter.recommendations_intro || '')}</p>
 <table class="data"><thead><tr>${heads.map((h) => `<th>${e(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
 <p class="note">${e(L === 'pt-BR'
     ? 'Estas são sugestões para discussão na próxima reunião. Nenhuma operação é executada automaticamente.'
@@ -272,19 +305,19 @@ function portfolioBody(model, isEmail) {
   const rows = (model.allocation || []).map((a) => `<tr>
 <td class="name">${e(a.asset_class)}</td>
 <td class="num">${e(a.value_label)}</td>
-<td class="num" style="color:${a.inside_band ? color.ink[900] : semantic.light.caution}">${e(a.weight_label)}</td>
-<td class="num" style="font-weight:400;color:${INK3}">${e(a.target_label)}</td>
-<td class="num" style="font-weight:400;color:${a.inside_band ? INK3 : semantic.light.caution}">${e(a.range_label)}${a.inside_band ? '' : ' !'}</td>
+<td class="num" style="color:${a.inside_band ? INK : semantic.light.caution}">${e(a.weight_label)}</td>
+<td class="num" style="font-weight:300;color:${INK3}">${e(a.target_label)}</td>
+<td class="num" style="font-weight:300;color:${a.inside_band ? INK3 : semantic.light.caution}">${e(a.range_label)}${a.inside_band ? '' : ' !'}</td>
 </tr>`).join('');
   return `${bar}
 <table class="data"><thead><tr>${heads.map((h) => `<th${h === heads[0] ? '' : ' style="text-align:right"'}>${e(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function closing(model) {
-  return `<div class="sec"><p class="serif">${e(model.letter.closing || '')}</p>
-<div class="sign"><p class="serif" style="margin-bottom:0.5em">${e(model.letter.sign_off || '')}</p>
+  return `<div class="sec"><p class="reading">${e(model.letter.closing || '')}</p>
+<div class="sign"><p class="reading" style="margin-bottom:0.5em">${e(model.letter.sign_off || '')}</p>
 <div class="name">${e(model.advisor?.name || '')}</div>
-<div class="org">Enter Asset Management${model.advisor?.code ? ` · ${e(model.advisor.code)}` : ''}</div></div></div>`;
+<div class="org">XP Asset Management${model.advisor?.code ? ` · ${e(model.advisor.code)}` : ''}</div></div></div>`;
 }
 
 function sources(model) {
@@ -303,8 +336,17 @@ ${portalUrl ? `<a class="btn" href="${e(portalUrl)}">${e(L === 'pt-BR' ? 'abrir 
 </div>`;
 }
 
+/** The Carta's disclaimer page: white Light text on the bar colour, the title tracked in copper. */
 function disclosures(model) {
-  return `<div class="disc">${(model.disclosures || []).map((d) => `<p>${e(d)}</p>`).join('')}</div>`;
+  return `<p class="disc-title">Disclaimer</p>${(model.disclosures || []).map((d) => `<p>${e(d)}</p>`).join('')}`;
+}
+
+/** The Carta's copper footer bar: the house tracked at the left, the page number at the right. */
+function footer(model) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td align="left" valign="middle"><span class="brand">XP Asset Management</span></td>
+<td align="right" valign="middle"><span class="pg">${e(model.period.label)}</span></td>
+</tr></table>`;
 }
 
 /** The portal view — the same content, the modern stylesheet, no email shell. */

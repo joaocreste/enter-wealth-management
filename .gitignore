@@ -6,10 +6,11 @@ node_modules/
 .DS_Store
 
 # Third-party material from the working session. Kept locally, deliberately not
-# published: brand-guidelines.html is Enter's internal brand document, and
-# Input/ holds XP's case files including XP Research's macro report. Nothing in
-# src/ or worker/ reads them at runtime — the brand tokens live in
-# src/core/brand.js and the case data is reproduced in seed/.
+# published: brand-guidelines.html is XP's brand system, extracted from XP
+# Advisory's own reports, and Input/ holds XP's case files including XP
+# Research's macro report. Nothing in src/ or worker/ reads them at runtime —
+# the brand tokens live in src/core/brand.js and the case data is reproduced
+# in seed/.
 brand-guidelines.html
 README.md.docx
 Input/

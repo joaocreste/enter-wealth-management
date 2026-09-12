@@ -1,25 +1,27 @@
 /**
- * Charts. brand-guidelines.html §10.
+ * Charts. The editorial grammar of the Comitê (XP Advisory brand system §09).
  *
  * One preparation step produces geometry; each renderer draws it with its own
  * primitives, so the SVG in the email, the SVG in the portal and the vector
  * drawing in the PDF are the same chart rather than three lookalikes.
  *
  * Rules enforced here, not left to the caller:
- *  §10.1 bars start at zero · the title states the finding · direct labels, no legend
- *        · no gridline unless a value must be read off it · every chart carries
- *        period, basis, currency and source
- *  §10.2 positive g500, negative r500, zero baseline in ink; the portfolio line is
- *        ink and the benchmark is benchmark-blue dashed, never green
- *  §10.4 no gradients, no 3D, no doughnuts, no dual axes, no colour-only encoding
+ *  §09 bars start at zero · the title states the finding · direct labels, no legend
+ *      unless two series share the plot · no frame, no vertical gridlines · every
+ *      chart carries period, basis, currency and source
+ *  §09 bars are slate, negative bars #A62900; the portfolio line is slate and the
+ *      comparison line is copper, dotted — never green
+ *  §09 no gradients, no 3D, no doughnuts, no colour-only encoding
  */
-import { color, semantic, type } from '../core/brand.js';
+import { color, semantic, type, inkOn } from '../core/brand.js';
 import { percent, pp, weight as fmtWeight, MINUS, escapeHtml } from '../core/format.js';
 
 const GAIN = semantic.light.gainGraphic;
 const LOSS = semantic.light.lossGraphic;
 const INK = color.ink[950];
+const SLATE = color.slate[600];
 const RULE = color.rule;
+const BENCH_DASH = 'stroke-dasharray="1.5 3" stroke-linecap="round"';
 
 // ── data preparation ───────────────────────────────────────────────────────
 
@@ -54,7 +56,7 @@ export function preparePortfolioVsBenchmark(report) {
   return { kind: 'vs_benchmark', items, bound };
 }
 
-/** Allocation as a stacked bar in the fixed categorical order (§10.2). */
+/** Allocation as a stacked bar in the fixed categorical order (§08, the pie's order). */
 export function prepareAllocation(report, { classLabel = (k) => k } = {}) {
   const rows = (report.approved_portfolio?.allocation || []).filter((r) => (r.weight ?? 0) > 0.0005);
   return {
@@ -105,10 +107,10 @@ export function svgBars(data, {
     const w = Math.abs(it.value) * scale;
     const x = it.value >= 0 ? zeroX : zeroX - w;
     const fill = it.tone === 'loss' ? LOSS : it.tone === 'gain' ? GAIN
-      : it.role === 'benchmark' ? semantic.light.benchmark : INK;
+      : it.role === 'benchmark' ? semantic.light.benchmark : SLATE;
     const dash = it.role === 'benchmark' ? ' stroke="' + semantic.light.benchmark + '" stroke-width="1" stroke-dasharray="3 2" fill-opacity="0.34"' : '';
     const text = showSign ? pp(it.value, { locale }) : percent(it.value, { locale });
-    // §10.1 value labels sit outside the bar. When the longest bar leaves no room
+    // §09 value labels sit outside the bar. When the longest bar leaves no room
     // before the label column, the figure moves inside the bar in paper rather
     // than overprinting the series name.
     const approxTextWidth = text.length * 6.2;
@@ -119,21 +121,21 @@ export function svgBars(data, {
       : it.tone === 'loss' ? semantic.light.lossText
         : it.tone === 'gain' ? semantic.light.gainText : color.ink[800];
     return `<rect x="${x.toFixed(1)}" y="${y}" width="${Math.max(w, 0.8).toFixed(1)}" height="${rowHeight - 10}" fill="${fill}"${dash}/>
-<text x="${labelWidth - 8}" y="${y + rowHeight / 2 - 3}" text-anchor="end" font-size="11" fill="${color.ink[700]}" font-family="${type.sans}">${esc(it.label)}</text>
-<text x="${labelX.toFixed(1)}" y="${y + rowHeight / 2 - 3}" text-anchor="${anchor}" font-size="11" font-weight="500" fill="${textFill}" font-family="${type.sans}">${esc(text)}</text>`;
+<text x="${labelWidth - 8}" y="${y + rowHeight / 2 - 3}" text-anchor="end" font-size="11" font-weight="300" fill="${color.ink[800]}" font-family="${type.sans}">${esc(it.label)}</text>
+<text x="${labelX.toFixed(1)}" y="${y + rowHeight / 2 - 3}" text-anchor="${anchor}" font-size="11" font-weight="400" fill="${textFill}" font-family="${type.sans}">${esc(text)}</text>`;
   }).join('\n');
 
   return `<figure class="chart" style="margin:0">
 ${title ? `<figcaption class="chart-title">${esc(title)}</figcaption>` : ''}
 <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="${esc(title || 'chart')}" style="display:block;overflow:visible">
-<line x1="${zeroX}" y1="0" x2="${zeroX}" y2="${height - 4}" stroke="${INK}" stroke-width="1"/>
+<line x1="${zeroX}" y1="0" x2="${zeroX}" y2="${height - 4}" stroke="${color.axis}" stroke-width="1"/>
 ${bars}
 </svg>
 ${caption ? `<figcaption class="chart-caption">${esc(caption)}</figcaption>` : ''}
 </figure>`;
 }
 
-/** Stacked allocation bar with a direct label list. Never a doughnut (§10.2). */
+/** Stacked allocation bar with a direct label list. Never a doughnut (§09). */
 export function svgAllocation(data, { width = 520, height = 34, title = null, caption = null, locale = 'pt-BR' } = {}) {
   const items = data.items || [];
   const total = items.reduce((a, i) => a + i.weight, 0) || 1;
@@ -144,7 +146,7 @@ export function svgAllocation(data, { width = 520, height = 34, title = null, ca
     // Same precision as the allocation table beside it: a bar reading 33% next
     // to a row reading 32,6% is a contradiction the reader has to resolve.
     const label = w > 46
-      ? `<text x="${(x + w / 2).toFixed(1)}" y="${height / 2 + 4}" text-anchor="middle" font-size="10.5" font-weight="500" fill="#FFFFFF" font-family="${type.sans}">${esc(fmtWeight(it.weight, { locale, decimals: 1 }))}</text>`
+      ? `<text x="${(x + w / 2).toFixed(1)}" y="${height / 2 + 4}" text-anchor="middle" font-size="10.5" font-weight="400" fill="${inkOn(it.color)}" font-family="${type.sans}">${esc(fmtWeight(it.weight, { locale, decimals: 1 }))}</text>`
       : '';
     x += w;
     return rect + label;
@@ -180,12 +182,12 @@ export function svgBands(data, { width = 520, rowHeight = 30, labelWidth = 132, 
     const cur = sx(it.weight);
     const tgt = it.range.target != null ? sx(it.range.target) : null;
     const inside = it.weight >= (it.range.min ?? 0) && it.weight <= (it.range.max ?? 1);
-    const dot = inside ? color.ink[950] : semantic.light.caution;
-    return `<rect x="${min.toFixed(1)}" y="${(mid - 6).toFixed(1)}" width="${Math.max(1, max - min).toFixed(1)}" height="12" fill="${color.ink[100]}"/>
+    const dot = inside ? SLATE : semantic.light.caution;
+    return `<rect x="${min.toFixed(1)}" y="${(mid - 6).toFixed(1)}" width="${Math.max(1, max - min).toFixed(1)}" height="12" fill="${color.ink[50]}"/>
 ${tgt != null ? `<line x1="${tgt.toFixed(1)}" y1="${(mid - 8).toFixed(1)}" x2="${tgt.toFixed(1)}" y2="${(mid + 8).toFixed(1)}" stroke="${semantic.light.benchmark}" stroke-width="1" stroke-dasharray="2 2"/>` : ''}
 <rect x="${(cur - 1.5).toFixed(1)}" y="${(mid - 9).toFixed(1)}" width="3" height="18" fill="${dot}"/>
-<text x="${labelWidth - 8}" y="${(mid + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${color.ink[700]}" font-family="${type.sans}">${esc(it.label)}</text>
-<text x="${(width - 4)}" y="${(mid + 4).toFixed(1)}" text-anchor="end" font-size="11" font-weight="500" fill="${inside ? color.ink[900] : semantic.light.caution}" font-family="${type.sans}">${esc(fmtWeight(it.weight, { locale, decimals: 1 }))}${inside ? '' : ' !'}</text>`;
+<text x="${labelWidth - 8}" y="${(mid + 4).toFixed(1)}" text-anchor="end" font-size="11" font-weight="300" fill="${color.ink[800]}" font-family="${type.sans}">${esc(it.label)}</text>
+<text x="${(width - 4)}" y="${(mid + 4).toFixed(1)}" text-anchor="end" font-size="11" font-weight="400" fill="${inside ? color.ink[950] : semantic.light.caution}" font-family="${type.sans}">${esc(fmtWeight(it.weight, { locale, decimals: 1 }))}${inside ? '' : ' !'}</text>`;
   }).join('\n');
 
   return `<figure class="chart" style="margin:0">
@@ -195,7 +197,7 @@ ${caption ? `<figcaption class="chart-caption">${esc(caption)}</figcaption>` : '
 </figure>`;
 }
 
-/** Cumulative line: portfolio in ink, benchmark in benchmark-blue dashed (§10.2). */
+/** Cumulative line: portfolio in slate, benchmark in copper, dotted (§09). */
 export function svgCumulative(series, { width = 520, height = 150, title = null, caption = null, locale = 'pt-BR' } = {}) {
   const port = series.portfolio || [];
   if (port.length < 2) return '';
@@ -215,9 +217,9 @@ export function svgCumulative(series, { width = 520, height = 150, title = null,
 ${title ? `<figcaption class="chart-title">${esc(title)}</figcaption>` : ''}
 <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="${esc(title || 'cumulative return')}" style="display:block;overflow:visible">
 <line x1="${pad.l}" y1="${sy(0).toFixed(1)}" x2="${(width - pad.r).toFixed(1)}" y2="${sy(0).toFixed(1)}" stroke="${RULE}" stroke-width="1"/>
-${bench.length ? `<path d="${path(bench)}" fill="none" stroke="${semantic.light.benchmark}" stroke-width="1.25" stroke-dasharray="4 3"/>` : ''}
-<path d="${path(port)}" fill="none" stroke="${INK}" stroke-width="1.75"/>
-<text x="${(width - pad.r + 6)}" y="${(sy(last.value) + 3).toFixed(1)}" font-size="10.5" font-weight="600" fill="${INK}" font-family="${type.sans}">${esc(percent(last.value, { locale }))}</text>
+${bench.length ? `<path d="${path(bench)}" fill="none" stroke="${semantic.light.benchmark}" stroke-width="1.5" ${BENCH_DASH}/>` : ''}
+<path d="${path(port)}" fill="none" stroke="${SLATE}" stroke-width="1.75"/>
+<text x="${(width - pad.r + 6)}" y="${(sy(last.value) + 3).toFixed(1)}" font-size="10.5" font-weight="500" fill="${INK}" font-family="${type.sans}">${esc(percent(last.value, { locale }))}</text>
 ${lastB ? `<text x="${(width - pad.r + 6)}" y="${(sy(lastB.value) + 3).toFixed(1)}" font-size="10.5" fill="${semantic.light.benchmark}" font-family="${type.sans}">${esc(percent(lastB.value, { locale }))}</text>` : ''}
 <text x="${pad.l}" y="${height - 4}" font-size="9.5" fill="${color.ink[400]}" font-family="${type.mono}">${esc(port[0].label || '')}</text>
 <text x="${(width - pad.r).toFixed(1)}" y="${height - 4}" text-anchor="end" font-size="9.5" fill="${color.ink[400]}" font-family="${type.mono}">${esc(last.label || '')}</text>
@@ -227,10 +229,10 @@ ${caption ? `<figcaption class="chart-caption">${esc(caption)}</figcaption>` : '
 }
 
 export const CHART_CSS = `
-.chart-title{font-family:${type.sans};font-size:12.5px;font-weight:600;color:${color.ink[900]};margin:0 0 8px;letter-spacing:-0.01em}
-.chart-caption{font-family:${type.sans};font-size:10.5px;color:${color.ink[500]};margin-top:7px;line-height:1.4}
+.chart-title{font-family:${type.sans};font-size:12.5px;font-weight:400;color:${color.ink[950]};margin:0 0 8px;letter-spacing:0}
+.chart-caption{font-family:${type.sans};font-size:10.5px;font-weight:300;color:${color.ink[500]};margin-top:7px;line-height:1.4}
 .alloc-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px}
-.alloc-key{font-family:${type.sans};font-size:10.5px;color:${color.ink[600]};display:inline-flex;align-items:center;gap:5px}
+.alloc-key{font-family:${type.sans};font-size:10.5px;font-weight:300;color:${color.ink[600]};display:inline-flex;align-items:center;gap:5px}
 .alloc-key i{width:9px;height:9px;display:inline-block}
-.alloc-key b{color:${color.ink[900]};font-weight:500}
+.alloc-key b{color:${color.ink[950]};font-weight:500}
 `;

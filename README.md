@@ -1,4 +1,4 @@
-# Enter Asset Management — AI advisory portal
+# XP Asset Management — AI advisory portal
 
 An MVP of an AI-assisted advisory product for XP-style financial advisors and their
 middle-market clients. It answers three questions for every client, every month:
@@ -31,7 +31,7 @@ deployed Worker rather than your local one.
 
 | | |
 |---|---|
-| Advisor | `antonio.bicudo@enteram.com.br` / `enter2026` |
+| Advisor | `antonio.bicudo@xpi.com.br` / `xp2026` |
 | Client | `albert.dasilva@exemplo.com.br` / `albert2026` |
 
 `docs/screens/` holds a captured run if you would rather look before installing:
@@ -117,7 +117,7 @@ LLM stage: prompts held in the graph, FACTS object built in code
 | `web/` | The advisor portal, the client portal and the login, served by the same Worker |
 | `seed/` | The demo dataset |
 | `docs/` | The implementation report, plus `docs/screens/` — every screen, the generated PDF and the HTML email, captured from a live run |
-| `Input/`, `Output/`, `brand-guidelines.html`, `enter_challenge.rivet-project` | The working-session material — case files, the brand document and the original four-prompt graph. Present in the working tree, **excluded from this public repository** because they are Enter's and XP's material, not this project's. Nothing at runtime reads them: the brand tokens live in `src/core/brand.js` and the case data is reproduced in `seed/` |
+| `Input/`, `Output/`, `brand-guidelines.html`, `enter_challenge.rivet-project` | The working-session material — case files, the brand document and the original four-prompt graph. Present in the working tree, **excluded from this public repository** because they are XP's material, not this project's. Nothing at runtime reads them: the brand tokens live in `src/core/brand.js` and the case data is reproduced in `seed/` |
 
 ### The Rivet graph
 
@@ -182,8 +182,9 @@ portal all render from the same canonical report object, so they cannot disagree
 The demo script asserts it.
 
 **Two pages means two pages.** The PDF engine is written from scratch — it embeds
-Archivo and Newsreader as CIDFontType2 so Portuguese accents and the true minus sign
-U+2212 render correctly, and it measures every block before drawing. If the content
+Roboto (Light, Regular, Medium and Bold, Latin subsets) as CIDFontType2 so Portuguese
+accents and the true minus sign U+2212 render correctly, draws the XP symbol from the
+brand's own path data, and it measures every block before drawing. If the content
 would spill onto a third page it drops optional blocks in a fixed order and records
 which level it needed. The contribution chart is the last thing to go.
 
@@ -201,7 +202,7 @@ The portal and the API live on different origins by design: static files on
 | Portal | **https://joaocreste.github.io/enter-wealth-management/** |
 | API | https://enter-wealth-advisor.joaocreste-8da.workers.dev |
 
-Advisor `antonio.bicudo@enteram.com.br` / `enter2026` · client
+Advisor `antonio.bicudo@xpi.com.br` / `xp2026` · client
 `albert.dasilva@exemplo.com.br` / `albert2026`. The demo dataset is seeded and
 August 2026 is published, priced from live providers.
 
@@ -263,14 +264,16 @@ the Sinais de mercado page.
 
 ### The portal's design
 
-`web/shared/app.css` is the brand book applied to a screen: an ink rail, a paper
-page with a 2px masthead rule, Archivo for everything that is a number or a control,
-Newsreader for everything a person wrote, and chroma reserved for data — green and
-red appear only on a figure, never on chrome. Sections are numbered like a ledger,
-charts colour themselves from CSS tokens so the light/dark toggle in the rail
-repaints them without a re-render, and the one animated moment per surface is the
-return arrow drawing itself on the login page (and as the loading indicator).
-`prefers-reduced-motion` shows the final state immediately.
+`web/shared/app.css` is the XP Advisory brand system applied to a screen. Two
+lines share one palette: the dark line of the Carta ao Investidor (a `#242424` bar
+with tracked capitals and the white symbol, a copper footer) is the rail and the
+covers; the light line of the Comitê de Alocação (white pages, thin display titles
+in olive, hairlines, tables with a charcoal header band and no black rules, one
+rounded corner on a photograph) is every page of content. Roboto Light is the body,
+Hanken Grotesk stands in for the display grotesque, copper is the only accent, and
+green and red appear only on a figure, always with its sign. Charts colour
+themselves from CSS tokens so the light/dark toggle in the rail repaints them
+without a re-render; `prefers-reduced-motion` shows the final state immediately.
 
 ```bash
 npx wrangler login            # as the account that should own the resources

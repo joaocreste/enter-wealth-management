@@ -55,7 +55,7 @@ if (!graphName) {
   process.exit(1);
 }
 
-console.log(`\n  Enter Asset Management — Rivet workflow`);
+console.log(`\n  XP Asset Management — Rivet workflow`);
 console.log(`  ${'─'.repeat(64)}`);
 console.log(`  project   ${path.relative(process.cwd(), PROJECT)}`);
 console.log(`  graph     ${graphName}`);

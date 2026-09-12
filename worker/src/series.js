@@ -321,7 +321,7 @@ export async function indicatorSeries(env, { window: key = '30d', from = null, t
     store,
     computed_at: new Date().toISOString(),
     sources: [...sources, makeSource({
-      provider: 'Enter Asset Management (derivado)', kind: 'derived', instrument: 'Variação dos indicadores monitorados',
+      provider: 'XP Asset Management (derivado)', kind: 'derived', instrument: 'Variação dos indicadores monitorados',
       identifier: `indicators-${bounds.key}`, requested_range: `${bounds.from}..${bounds.to}`, last_observation: bounds.to,
       notes: 'calculada sobre as séries diárias do Yahoo Finance mantidas em R2',
     })],

@@ -26,11 +26,11 @@ async function api(path, body, method) {
 const step = (n, s) => console.log(`\n  ${String(n).padStart(2, '0')}  ${s}`);
 const line = (k, v) => console.log(`      ${String(k).padEnd(34)} ${v}`);
 
-console.log('\n  Enter Asset Management — end-to-end journey');
+console.log('\n  XP Asset Management — end-to-end journey');
 console.log(`  ${'─'.repeat(70)}`);
 
 step(1, 'Advisor signs in');
-const login = await api('/api/auth/login', { email: 'antonio.bicudo@enteram.com.br', password: 'enter2026' });
+const login = await api('/api/auth/login', { email: 'antonio.bicudo@xpi.com.br', password: 'xp2026' });
 token = login.token;
 line('advisor', `${login.user.name} <${login.user.email}>`);
 
@@ -124,6 +124,6 @@ try {
 }
 
 console.log(`\n  ${'─'.repeat(70)}`);
-console.log(`  Advisor portal   ${BASE}/advisor/   antonio.bicudo@enteram.com.br / enter2026`);
+console.log(`  Advisor portal   ${BASE}/advisor/   antonio.bicudo@xpi.com.br / xp2026`);
 console.log(`  Client portal    ${BASE}/client/    albert.dasilva@exemplo.com.br / albert2026`);
 console.log(`  PDF              ${BASE}/api/reports/${persisted.report_id}/pdf\n`);

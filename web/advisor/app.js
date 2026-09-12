@@ -125,7 +125,7 @@ async function viewOverview() {
           h('span', { class: wv?.approval_status === 'approved' ? 'gain' : 'caution', text: wv?.approval_status === 'approved' ? 'aprovado' : 'rascunho' }))),
       h('div.card', {},
         wv?.generated_summary ? h('p.pull', { text: wv.generated_summary }) : null,
-        view.summary_pt ? h('p.serif', { style: { margin: '14px 0 24px', color: 'var(--ink-700)' }, text: view.summary_pt }) : null,
+        view.summary_pt ? h('p.reading', { style: { margin: '14px 0 24px', color: 'var(--ink-700)' }, text: view.summary_pt }) : null,
         h('div.brief-blocks', {}, blocks.map(([k, v, key]) => h('div.brief-block', { class: key ? 'key' : '' },
           h('h4', { text: k }),
           h('p', { text: v })))),
@@ -854,7 +854,7 @@ async function tabOverview(id, d) {
     h('div.grid.g2', {},
       h('div.card', {}, lineChart(series, {
         title: 'Retorno acumulado desde o início do histórico',
-        caption: `Base: retornos mensais compostos · moeda ${d.client.base_currency} · a linha da carteira é a mais escura; a referência é tracejada em azul`,
+        caption: `Base: retornos mensais compostos · moeda ${d.client.base_currency} · a linha da carteira é a escura; a referência é pontilhada em cobre`,
       })),
       h('div.card', {}, allocationBar(d.allocation.map((a) => ({ label: cls(a.asset_class), weight: a.weight })), {
         title: 'Alocação atual por classe de ativo',
@@ -1394,7 +1394,7 @@ function renderCanonicalSummary(c) {
         h('div.card-h', {}, h('h3', { text: 'Texto da carta' }), h('span.meta', { text: c.locale })),
         Object.entries(letter).filter(([k]) => k !== 'language').map(([k, v]) => h('div', { style: { marginBottom: '12px' } },
           h('div.rail-h', { text: k.replace(/_/g, ' ') }),
-          h('p.serif', { style: { fontSize: '15px', color: 'var(--ink-700)' }, text: v })))),
+          h('p.reading', { style: { fontSize: '15px', color: 'var(--ink-700)' }, text: v })))),
       h('div', {},
         h('div.card', { style: { marginBottom: '16px' } },
           h('div.card-h', {}, h('h3', { text: 'Números da carta' })),

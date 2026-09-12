@@ -31,6 +31,7 @@ import { analyseForReport, factsForNarrative, buildReportModel, sanitiseNarrativ
 import { renderReportPdf } from '../../src/render/pdf/report.js';
 import { brandFonts } from '../../src/render/fonts/index.js';
 import { previousMonth, monthLabel } from '../../src/core/format.js';
+import { renderPrompt } from '../../src/llm/prompts.js';
 
 export const ARTEFACT_KIND = 'pdf-report';
 export const REPORT_AGENTS = [
@@ -266,12 +267,22 @@ async function agentRedacao(env, runId, s2) {
     let narrative = null; let mode = 'deterministic_template'; let model = null;
     if (LLM.llmAvailable(env)) {
       await report(3, 56, 'Relatório · Redação — o modelo escreve a visão de mercado e os comentários a partir dos fatos apurados');
-      try {
-        const out = await LLM.runPrompt(env, 'pdf_report', facts, { maxTokens: 1800 });
-        narrative = sanitiseNarrative(out.data, facts);
-        mode = 'model'; model = out.model;
-      } catch (err) {
-        await report(3, 60, `Relatório · Redação — o modelo falhou (${String(err.message).slice(0, 80)}); usando o texto determinístico`);
+      // Claude Opus 5 thinks before it answers and the thinking shares max_tokens
+      // with the reply, so the budget is generous; a reply that is not the JSON
+      // asked for is sent back once with the shape restated, then the template.
+      const prompt = renderPrompt('pdf_report', facts);
+      let user = prompt.user;
+      for (let attempt = 1; attempt <= 2 && !narrative; attempt += 1) {
+        try {
+          const out = await LLM.complete(env, { system: prompt.system, user, maxTokens: 6000 });
+          const data = LLM.parseJsonBlock(out.text);
+          if (!data) throw new Error(`no parsable JSON (${String(out.text || '').replace(/\s+/g, ' ').slice(0, 120)}…)`);
+          narrative = sanitiseNarrative(data, facts);
+          mode = 'model'; model = out.model;
+        } catch (err) {
+          await report(3, 58 + attempt * 2, `Relatório · Redação — o modelo ${attempt === 1 ? 'não devolveu o JSON pedido' : 'falhou de novo'} (${String(err.message).slice(0, 160)})${attempt === 1 ? '; pedindo outra vez' : '; usando o texto determinístico'}`);
+          user = `${prompt.user}\n\nYour previous reply was not the JSON object requested. Reply with ONLY the JSON object described under "Output": no prose before or after it, no markdown fence.`;
+        }
       }
     }
     if (!narrative) narrative = LLM.deterministicReportNarrative(facts);

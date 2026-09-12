@@ -135,7 +135,7 @@ The report is a factsheet an advisor hands to a client: the figures, the tables 
 
 ## Output
 
-Return STRICT JSON with this exact shape and nothing else:
+Return STRICT JSON with this exact shape and nothing else — the reply starts with { and ends with }, with no prose before or after and no markdown fence:
 
 {
   "headline": "one sentence, under 80 characters, stating what matters for THIS portfolio now",

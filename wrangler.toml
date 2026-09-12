@@ -9,6 +9,9 @@ compatibility_flags = ["nodejs_compat"]
 [assets]
 directory = "web"
 binding = "ASSETS"
+# Every request enters the Worker first, so the access gate (worker/src/gate.js)
+# sees a page or an asset before the platform would serve it on its own.
+run_worker_first = true
 
 [observability]
 enabled = true

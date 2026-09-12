@@ -266,33 +266,42 @@ the Sinais de mercado page.
 
 From a client's page the advisor has a **criar relatório pdf** button. It opens a
 tab of its own and starts a fourth agent, which runs as a Cloudflare Workflow like
-the daily ones (`worker/src/report-agent.js`) and reports each step to the tab:
+the daily ones (`worker/src/report-agent.js`) and reports each step to the tab.
+The report is written for the client, not the advisor: it greets them by name,
+says what is happening in the world and which events matter, shows their
+performance, says what could improve the result and what could make it worse,
+and closes with the portfolio as it stands and the advisor's sign-off.
 
 1. **Dados** — the approved portfolio, the policy, the return history, the day's
-   World Overview and the month's profitability, from the record the portal
-   already trusts; the written rationale of an approved recommendation comes from
-   the month's letter.
+   World Overview with its What Matters events, the month's profitability, and
+   twelve months of return and volatility for every asset held, from the same
+   computation the signals page draws (`worker/src/risk-return.js`).
 2. **Análise** — returns for the month, the year, twelve months and since the
-   start; the monthly matrix; the allocation against the policy with a position on
-   the underweight/overweight scale and a change since the previous snapshot; the
-   discussion points (bands, concentration, breached thresholds, approved
-   recommendations, divergent signals). Pure functions in `src/render/report-model.js`.
-3. **Redação** — the model writes the market view and the comments from a FACTS
-   object and is never asked for a number; without a key a template phrases the
-   same facts.
-4. **Diagramação** — `src/render/pdf/report.js` draws the Carteira XP Global
-   Strategies fact sheet in the Carta's frame: the index tables, the framed return
-   chart, the monthly-return matrix, the composição table, the pie, the Comitê's
-   allocation view and its decision callouts.
+   start; the cumulative curve; the events that touch the portfolio first; the
+   scatter of the client's own assets with the Ibovespa, the S&P 500 in reais and
+   the CDI as references; the points split into what could improve the result
+   (a class below its band, a drift back to target, an approved addition) and
+   what could make it worse (concentration, a class above its band, a breached
+   threshold, divergent signals, an approved reduction). Pure functions in
+   `src/render/report-model.js`.
+3. **Redação** — the model writes the greeting, the world, one line per event,
+   the performance comment, a reading of the scatter, one line per point and the
+   closing from a FACTS object; it is never asked for a number. Without a key a
+   template phrases the same facts.
+4. **Diagramação** — `src/render/pdf/report.js` draws it in the Carteira XP
+   Global Strategies grammar inside the Carta's frame: the event cards, the
+   figure strip, the framed cumulative chart beside the framed scatter, the two
+   columns of points under slate bands, the pie and the positions table.
 
 **Two pages is a rule.** Every block is measured before it is drawn. When the
 content does not fit, a reduction ladder trims the least important material first
-(positions per class, discussion points, matrix years, indicators, sentences, the
-allocation view, the pie, the chart) and the composition is tried again; whatever
-still does not fit on page two is left out and named on the run. A third page is
-never started, and `npm run verify` throws forty positions, nine years of history
-and twelve discussion points at the renderer to prove it. Runs live in
-`pdf_reports` (migration `0003`), the PDFs in R2, and the API is advisor-only.
+(positions, events, points, sentences, the positions table, the pie, the
+cumulative chart, the scatter's labels) and the composition is tried again;
+whatever still does not fit on page two is left out and named on the run. A
+third page is never started, and `npm run verify` throws forty positions, nine
+years of history, twelve events and twelve points at the renderer to prove it.
+Runs live in `pdf_reports` (migration `0003`), the PDFs in R2, and the API is
+advisor-only.
 
 ### The portal's design
 

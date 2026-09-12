@@ -503,18 +503,19 @@ const heavyState = () => {
     policy: { version: 3, effective_date: '2026-03-16', target_allocation: Object.fromEntries(classes.map((c) => [c, 0.125])), permitted_ranges: Object.fromEntries(classes.map((c) => [c, { min: 0.05, max: 0.2 }])), rebalance_trigger: 0.05 },
     snapshot: { id: 's', effective_date: '2026-07-15' }, total, positions, previous_weights: Object.fromEntries(classes.map((c) => [c, 0.1])),
     returns_history: months,
-    overview: { date: '2026-09-12', headline: long.slice(0, 200), summary: long, briefing: { equities: long, rates_credit: long, fx_commodities: long, macro_political: long, main_risk_or_opportunity: long }, indicators: ['sp500', 'nasdaq', 'ibovespa', 'vix', 'us10y', 'selic', 'ipca', 'hy_etf', 'usdbrl', 'dxy', 'eurusd', 'gold', 'brent', 'copper', 'btc', 'eth'].map((k) => ({ key: k, label: k, unit: 'index', price: 1234.5, changePct: 0.012, d30Pct: -0.034 })), triggers: Array.from({ length: 6 }, (_, i) => ({ label: `Limiar ${i}`, status: 'BREACHED', asset_classes: ['Equities BR'], action_pt: long.slice(0, 300) })), sources: ['Yahoo Finance'] },
+    overview: { date: '2026-09-12', headline: long.slice(0, 200), summary: long, briefing: { equities: long, rates_credit: long, fx_commodities: long, macro_political: long, main_risk_or_opportunity: long }, indicators: [], triggers: Array.from({ length: 6 }, (_, i) => ({ label: `Limiar ${i}`, status: 'BREACHED', asset_classes: ['Equities BR'], action_pt: long.slice(0, 300) })), what_matters: Array.from({ length: 12 }, (_, i) => ({ title: `Evento número ${i} com um título bastante comprido para o cartão`, why: long.slice(0, 500), region: i % 2 ? 'br' : 'intl', importance: 'high', source: 'Valor Econômico', touches: true })), sources: ['Yahoo Finance'] },
+    risk_return: { window: { from: '2025-08-29', to: '2026-08-31', months: [] }, assets: positions.map((p, i) => ({ id: p.asset_id, ticker: p.ticker, name: p.name, asset_class: p.asset_class, risk_class: ['equity', 'debt', 'fx_commodities', 'crypto_other'][i % 4], total_return: ((i * 37) % 60 - 20) / 100, volatility: ((i * 13) % 45 + 3) / 100, partial: false, simulated: false, weight: p.weight })), references: [{ key: 'ibovespa', label: 'Ibovespa', total_return: 0.31, volatility: 0.16 }, { key: 'cdi', label: 'CDI', total_return: 0.14, volatility: 0.002 }], excluded: [{ label: 'Caixa', reason: 'saldo em conta' }], sources: ['Yahoo Finance'] },
     perf: { performance: { monthly_return: -0.012, absolute_pnl: -4852 }, attribution: { top_negative: [{ ticker: 'HAPV3', contribution: -0.0179 }], top_positive: [{ ticker: 'IVVB11', contribution: 0.0047 }], fx_contribution: 0.0016 }, benchmark: { value: 0.0176 }, metrics: null, sources: ['Yahoo Finance'] },
     discussion_opportunities: Array.from({ length: 12 }, (_, i) => ({ kind: i % 2 ? 'drift' : 'concentration', severity: 'high', message: long.slice(0, 400), asset_class: 'Equities BR' })),
     recommendations: Array.from({ length: 6 }, (_, i) => ({ asset_id: `a${i}`, ticker: `TIC${i}`, name: `Ativo ${i}`, final_action: 'DISCUSS', suitability_result: 'PASS', rationale: long.slice(0, 300), current_weight: 0.05 })),
     next_meeting: '2026-09-18',
   };
 };
-await ta('a report with forty positions, nine years of history and twelve discussion points stays on two pages', async () => {
+await ta('a report with forty positions, nine years of history, twelve events and twelve discussion points stays on two pages', async () => {
   const s = heavyState();
   s.analysis = analyseForReport(s);
   s.narrative = deterministicReportNarrative(factsForNarrative(s));
-  s.narrative.market_view = s.overview.summary;
+  s.narrative.world = s.overview.summary;
   const model = buildReportModel(s);
   const doc = await renderReportPdf(model, { fonts: brandFonts(), maxPages: 2 });
   ok(doc.pageCount <= 2, `rendered ${doc.pageCount} pages`);
@@ -525,6 +526,7 @@ await ta('an ordinary report needs no reduction and names nothing omitted', asyn
   s.positions = s.positions.slice(0, 12); s.total = s.positions.reduce((a, p) => a + p.market_value, 0);
   s.returns_history = s.returns_history.slice(-37); s.discussion_opportunities = s.discussion_opportunities.slice(0, 3); s.recommendations = s.recommendations.slice(0, 2);
   s.overview.summary = 'Quatro limiares rompidos; o petróleo pesa sobre a inflação. Nada exige ação imediata.'; s.overview.triggers = s.overview.triggers.slice(0, 1);
+  s.overview.what_matters = s.overview.what_matters.slice(0, 4).map((e) => ({ ...e, why: e.why.slice(0, 160) })); s.risk_return.assets = s.risk_return.assets.slice(0, 12);
   s.analysis = analyseForReport(s);
   s.narrative = deterministicReportNarrative(factsForNarrative(s));
   const doc = await renderReportPdf(buildReportModel(s), { fonts: brandFonts(), maxPages: 2 });

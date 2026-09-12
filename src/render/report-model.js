@@ -1,12 +1,16 @@
 /**
- * The two-page portfolio report: the analysis, the facts the narrative is
+ * The two-page client report: the analysis, the facts the narrative is
  * written from, and the display model the renderer draws — pure functions
  * over the state the report agent gathers, so they run in Node for tests.
  *
- * Nothing here calls a provider. Every figure the report prints is computed
- * from the approved snapshot, the return history, the month's profitability
- * and the day's World Overview, and the model carries only formatted strings
- * plus the numbers a chart or a colour needs.
+ * The report is written for the client, not the advisor: it greets them by
+ * name, says what is happening in the world and which events matter, shows
+ * their performance with the cumulative curve beside the risk-and-return of
+ * each asset they hold, says what could improve the result and what could
+ * make it worse, and closes with the portfolio as it stands. Every figure is
+ * computed here from the approved snapshot, the return history, the month's
+ * profitability, the day's World Overview and the twelve-month measurement of
+ * each asset; the model carries formatted strings plus the numbers a chart needs.
  */
 import { money, percent, pp, weight as fmtWeight, num, dateLong, monthLabel } from '../core/format.js';
 import { historicalMetrics } from '../core/performance.js';
@@ -25,40 +29,25 @@ const CLASS_COLOR = {
   Cash: '#45484A', 'Fixed Income': '#C57D5C', 'Equities BR': '#2A3B43', 'Equities Global': '#7F7F7F',
   Alternatives: '#A1A894', 'Real Estate': '#828D6F', Commodities: '#654339', 'Digital Assets': '#BFBFBF', Other: '#D9D9D9',
 };
-const MONTHS_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+/** The four broad classes of the risk/return chart, in the brand's series colours. */
+export const RISK_CLASS_PT = { equity: 'Renda variável', debt: 'Renda fixa e caixa', fx_commodities: 'Câmbio e commodities', crypto_other: 'Multimercado, cripto e outros' };
+const RISK_CLASS_COLOR = { equity: '#2A3B43', debt: '#C57D5C', fx_commodities: '#828D6F', crypto_other: '#7F7F7F' };
 const MONTHS_LONG = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-const RATE_KEYS = new Set(['selic', 'ipca']);
 const ACTION_PT = { ADD: 'Aumentar', REDUCE: 'Reduzir', EXIT: 'Encerrar', DISCUSS: 'Discutir' };
+/** Each kind of point: its title, its rank, and whether it is something that could improve the result or something that could make it worse. */
 const KIND = {
-  above_band: ['Classe acima da faixa', 0], concentration: ['Concentração por emissor', 0], corporate_action: ['Evento societário', 0],
-  trigger: ['Limiar de mercado rompido', 1], recommendation: ['Recomendação aprovada', 1], below_band: ['Classe abaixo da faixa', 1],
-  drift: ['Desvio do alvo', 2], signal_conflict: ['Sinais divergentes', 2],
+  concentration: ['Concentração em um emissor', 0, 'worsen'], above_band: ['Classe acima da faixa', 0, 'worsen'], corporate_action: ['Evento societário', 0, 'worsen'],
+  trigger: ['Movimento de mercado', 1, 'worsen'], signal_conflict: ['Sinais divergentes', 2, 'worsen'],
+  below_band: ['Classe abaixo da faixa', 1, 'improve'], drift: ['Volta ao alvo', 2, 'improve'],
+  recommendation_up: ['Sugestão do assessor', 1, 'improve'], recommendation_down: ['Sugestão do assessor', 1, 'worsen'],
 };
 const SEV = { high: 0, medium: 1, low: 2 };
+const REGION_PT = { br: 'Brasil', intl: 'Mundo' };
 
 const compound = (rs) => rs.reduce((a, r) => a * (1 + r), 1) - 1;
 const dmy = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
 const lastDay = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
-
-/** A level as the World Overview prints it. */
-function levelText(price, unit) {
-  if (price == null || !Number.isFinite(price)) return null;
-  if (['%', '% a.a.', '% a.m.'].includes(unit)) return `${num(price, { locale: L, decimals: 2 })}%${unit === '% a.a.' ? ' a.a.' : unit === '% a.m.' ? ' a.m.' : ''}`;
-  if (unit === 'USD' || unit === 'USD/oz') return `US$ ${num(price, { locale: L, decimals: price >= 1000 ? 0 : 2 })}`;
-  if (unit === 'USD/bbl' || unit === 'USD/lb') return `US$ ${num(price, { locale: L, decimals: 2 })}`;
-  if (unit === 'BRL') return `R$ ${num(price, { locale: L, decimals: 4 })}`;
-  return num(price, { locale: L, decimals: price >= 1000 ? 0 : 2 });
-}
-
-function indicatorRow(i) {
-  const isRate = RATE_KEYS.has(i.key);
-  return {
-    key: i.key, label: i.label, level: levelText(i.price, i.unit),
-    day: isRate ? null : (Number.isFinite(i.changePct) ? i.changePct : null),
-    d30: isRate ? null : (Number.isFinite(i.d30Pct) ? i.d30Pct : null),
-    is_rate: isRate,
-  };
-}
+const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || '';
 
 // ── 2 · análise ────────────────────────────────────────────────────────────
 export function analyseForReport(s) {
@@ -67,7 +56,6 @@ export function analyseForReport(s) {
   const year = s.month.slice(0, 4);
   const inYear = upto.filter((r) => r.month.startsWith(year));
   const last12 = upto.slice(-12);
-  const last36 = upto.slice(-36);
   const port = (rows) => (rows.length ? compound(rows.map((r) => r.portfolio)) : null);
   const bench = (rows) => { const v = rows.map((r) => r.benchmark).filter(Number.isFinite); return rows.length && v.length === rows.length ? compound(v) : null; };
 
@@ -76,18 +64,7 @@ export function analyseForReport(s) {
   const monthly = Number.isFinite(perf?.monthly_return) ? perf.monthly_return : (monthRow?.portfolio ?? null);
   const benchMonth = Number.isFinite(s.perf?.benchmark?.value) ? s.perf.benchmark.value : (monthRow?.benchmark ?? null);
   const metricsIn = s.perf?.metrics?.available ? s.perf.metrics : historicalMetrics(upto.map((r) => ({ month: r.month, value: r.portfolio })));
-  const metrics = metricsIn?.available ? {
-    volatility: metricsIn.annualised_volatility, sharpe: metricsIn.sharpe_ratio ?? null, max_drawdown: metricsIn.max_drawdown,
-    from: metricsIn.period?.from, to: metricsIn.period?.to, observations: metricsIn.observations, annualised: metricsIn.annualised_return,
-  } : null;
-
-  // the monthly matrix: one row per year, newest first, as the fund sheets print it
-  const years = [...new Set(upto.map((r) => r.month.slice(0, 4)))].sort().reverse();
-  const matrix = years.map((y) => {
-    const rows = upto.filter((r) => r.month.startsWith(y));
-    const cells = Array.from({ length: 12 }, (_, i) => rows.find((r) => Number(r.month.slice(5, 7)) === i + 1)?.portfolio ?? null);
-    return { year: y, cells, total: port(rows), partial: rows.length < 12 };
-  });
+  const metrics = metricsIn?.available ? { volatility: metricsIn.annualised_volatility, max_drawdown: metricsIn.max_drawdown, observations: metricsIn.observations } : null;
 
   // the cumulative curve, portfolio and reference
   let p = 1; let b = 1;
@@ -97,7 +74,7 @@ export function analyseForReport(s) {
     if (Number.isFinite(r.benchmark)) { b *= 1 + r.benchmark; series.benchmark.push({ month: r.month, value: b - 1 }); }
   }
 
-  // allocation against the policy: a position on the underweight/overweight scale and a change since the previous snapshot
+  // allocation against the policy, for the pie and for the plain-language line
   const byClass = new Map();
   for (const pos of s.positions || []) {
     const k = pos.asset_class || 'Other';
@@ -119,57 +96,67 @@ export function analyseForReport(s) {
     else if (range && w > range.max + 1e-9) position = 2;
     else if (target != null && w < target - tol) position = -1;
     else if (target != null && w > target + tol) position = 1;
-    const prev = s.previous_weights ? (s.previous_weights[k] ?? 0) : null;
-    const change = prev == null ? null : (w - prev > 0.01 ? 1 : w - prev < -0.01 ? -1 : 0);
-    return {
-      asset_class: k, label: classPt(k), weight: w, value: e?.value ?? 0, target, min: range?.min ?? null, max: range?.max ?? null,
-      position, change, outside_band: position === -2 || position === 2, color: CLASS_COLOR[k] || CLASS_COLOR.Other,
-    };
+    return { asset_class: k, label: classPt(k), weight: w, value: e?.value ?? 0, target, min: range?.min ?? null, max: range?.max ?? null, position, outside_band: position === -2 || position === 2, color: CLASS_COLOR[k] || CLASS_COLOR.Other };
   }).filter((a) => a.weight > 0.0005 || (a.target ?? 0) > 0);
-  const composition = allocation.filter((a) => a.weight > 0.0005).sort((x, y) => y.weight - x.weight).map((a) => ({
-    ...a,
-    items: (byClass.get(a.asset_class)?.items || []).slice().sort((x, y) => (y.market_value || 0) - (x.market_value || 0))
-      .map((i) => ({ name: i.name, ticker: i.ticker, weight: i.weight, value: i.market_value })),
-  }));
+  const holdings = [...(s.positions || [])].sort((x, y) => (y.market_value || 0) - (x.market_value || 0))
+    .map((i) => ({ name: i.ticker ? `${i.ticker} · ${i.name}` : i.name, class_label: classPt(i.asset_class), weight: i.weight, value: i.market_value }));
 
-  // discussion points: the meeting preparation, the day's breached thresholds and the approved recommendations
+  // the day's events, as the client reads them: the ones that touch the portfolio first, then the market-wide ones
+  const events = (s.overview?.what_matters || []).filter((e) => e.title)
+    .sort((a, c) => (Number(c.touches) - Number(a.touches)) || ((SEV[a.importance] ?? 1) - (SEV[c.importance] ?? 1)))
+    .slice(0, 5)
+    .map((e) => ({ title: e.title, why: e.why || e.impact || '', region: e.region, region_label: REGION_PT[e.region] || null, source: e.source || null, importance: e.importance }));
+
+  // the scatter: twelve months of return and volatility for each asset held, with the references
+  const rr = s.risk_return || null;
+  const scatter = {
+    window: rr?.window || null,
+    assets: (rr?.assets || []).map((a) => ({
+      id: a.id, label: a.ticker || shortName(a.name), name: a.name, asset_class: a.asset_class, risk_class: a.risk_class || 'crypto_other',
+      color: RISK_CLASS_COLOR[a.risk_class] || RISK_CLASS_COLOR.crypto_other, x: a.volatility, y: a.total_return, weight: a.weight ?? 0, partial: !!a.partial, simulated: !!a.simulated,
+    })).filter((a) => Number.isFinite(a.x) && Number.isFinite(a.y)),
+    references: (rr?.references || []).map((r) => ({ key: r.key, label: r.label, x: r.volatility, y: r.total_return })).filter((r) => Number.isFinite(r.x) && Number.isFinite(r.y)),
+    excluded: rr?.excluded || [],
+  };
+  const byRatio = scatter.assets.filter((a) => a.x > 0).slice().sort((a, c) => (c.y / c.x) - (a.y / a.x));
+  scatter.best = byRatio[0] || null;
+  scatter.worst = scatter.assets.slice().sort((a, c) => a.y - c.y)[0] || null;
+
+  // what could improve the result and what could make it worse
   const points = [];
-  for (const o of s.discussion_opportunities || []) points.push({ kind: o.kind, severity: o.severity || 'medium', title: KIND[o.kind]?.[0] || 'Ponto de atenção', text: o.message, asset_class: o.asset_class || null });
-  for (const t of s.overview?.triggers || []) points.push({ kind: 'trigger', severity: 'high', title: KIND.trigger[0], text: `${t.label}. ${t.action_pt || t.action || ''}`.trim() });
+  for (const o of s.discussion_opportunities || []) {
+    const def = KIND[o.kind];
+    if (!def) continue;
+    points.push({ kind: o.kind, side: def[2], rank: def[1], severity: o.severity || 'medium', title: def[0], text: o.message, asset_class: o.asset_class || null });
+  }
+  for (const t of s.overview?.triggers || []) points.push({ kind: 'trigger', side: 'worsen', rank: 1, severity: 'high', title: KIND.trigger[0], text: `${t.label}. ${t.action_pt || t.action || ''}`.trim() });
   for (const r of s.recommendations || []) {
     const act = ACTION_PT[r.final_action] || r.final_action;
+    const kind = ['REDUCE', 'EXIT'].includes(r.final_action) ? 'recommendation_down' : 'recommendation_up';
     points.push({
-      kind: 'recommendation', severity: r.suitability_result === 'PASS' ? 'medium' : 'high', title: `${act}: ${r.ticker || r.name}`,
+      kind, side: KIND[kind][2], rank: 1, severity: r.suitability_result === 'PASS' ? 'medium' : 'high', title: `${act} ${r.ticker || r.name}`,
       text: r.rationale || `${act} ${r.name}${r.current_weight ? `, hoje ${fmtWeight(r.current_weight, { locale: L, decimals: 1 })} da carteira` : ''}. Sugestão para discussão, não uma ordem.`,
     });
   }
   const seen = new Set();
-  const discussion = points
+  const ranked = points
     .filter((x) => x.text && !seen.has(x.text.slice(0, 80)) && seen.add(x.text.slice(0, 80)))
-    .sort((a, b) => (SEV[a.severity] ?? 1) - (SEV[b.severity] ?? 1) || (KIND[a.kind]?.[1] ?? 3) - (KIND[b.kind]?.[1] ?? 3))
-    .slice(0, 6);   // what two pages hold at full budget; the headline and the callouts then agree
-
-  // the market table, two blocks as the Comitê prints its indices
-  const inds = new Map((s.overview?.indicators || []).map((i) => [i.key, i]));
-  const block = (title, ks) => ({ title, rows: ks.map((k) => inds.get(k)).filter(Boolean).map(indicatorRow) });
-  const market_blocks = [
-    block('Bolsas e juros', ['sp500', 'nasdaq', 'ibovespa', 'vix', 'us10y', 'selic', 'ipca', 'hy_etf']),
-    block('Câmbio, commodities e digitais', ['usdbrl', 'dxy', 'eurusd', 'gold', 'brent', 'copper', 'btc', 'eth']),
-  ];
+    .sort((a, c) => (SEV[a.severity] ?? 1) - (SEV[c.severity] ?? 1) || a.rank - c.rank);
+  const improve = ranked.filter((x) => x.side === 'improve').slice(0, 4);
+  const worsen = ranked.filter((x) => x.side === 'worsen').slice(0, 4);
 
   const at = s.perf?.attribution || null;
   const worst = at?.top_negative?.[0] || at?.worst_contributor || null;
   const best = at?.top_positive?.[0] || null;
-  const sources = [...new Set([...(s.perf?.sources || []), ...(s.overview?.sources || []), ...(s.recommendations?.length ? ['TradingView'] : [])])]
-    .map((x) => String(x).replace(/\s*\(.*\)$/, '')).filter((x, i, arr) => arr.indexOf(x) === i);
+  const sources = [...new Set([...(s.perf?.sources || []), ...(rr?.sources || []), ...(s.overview?.sources || []), ...(s.recommendations?.length ? ['TradingView'] : [])])]
+    .map((x) => String(x).replace(/\s*\(.*\)$/, '')).filter((x, i, arr) => x && arr.indexOf(x) === i).slice(0, 6);
 
   return {
     monthly, benchMonth, excess: monthly != null && benchMonth != null ? monthly - benchMonth : null, pnl: perf?.absolute_pnl ?? null,
     ytd: port(inYear), ytdB: bench(inYear),
     twelve: last12.length >= 12 ? port(last12) : null, twelveB: last12.length >= 12 ? bench(last12) : null,
-    three_year: last36.length >= 36 ? port(last36) : null,
     since: port(upto), sinceB: bench(upto), since_from: upto[0]?.month || null,
-    metrics, matrix, series, allocation, composition, discussion, market_blocks,
+    metrics, series, allocation, holdings, events, scatter, improve, worsen,
     worst: worst ? { name: worst.ticker || worst.name, contribution: worst.contribution } : null,
     best: best ? { name: best.ticker || best.name, contribution: best.contribution } : null,
     fx: Number.isFinite(at?.fx_contribution) ? at.fx_contribution : null,
@@ -177,16 +164,22 @@ export function analyseForReport(s) {
   };
 }
 
+function shortName(name) {
+  const stop = /^(fundo|fic|fim|fia|de|do|da|em|e|s\.a\.|ltda\.?|advisory|plus|—|-)$/i;
+  return String(name || '').split(' — ')[0].split(/\s+/).filter((w) => w && !stop.test(w)).slice(0, 2).join(' ') || name;
+}
+
 // ── 3 · redação: the facts the model (or the template) writes from ─────────
 const POSITION_PT = { '-2': 'abaixo da faixa', '-1': 'abaixo do alvo', 0: 'no alvo', 1: 'acima do alvo', 2: 'acima da faixa' };
-const POSITION_SYM = { '-2': '--', '-1': '-', 0: '=', 1: '+', 2: '++' };
 
 export function factsForNarrative(s) {
   const a = s.analysis;
   const pct = (v, o = {}) => (v == null ? null : percent(v, { locale: L, ...o }));
+  const w = s.risk_return?.window;
   return {
     date: s.date, month: s.month, month_label: monthLabel(s.month, L),
-    client: { name: s.client.name, risk_profile: s.client.risk_profile },
+    client: { name: s.client.name, first_name: firstName(s.client.name), risk_profile: s.client.risk_profile },
+    advisor: { name: s.advisor.name },
     performance: {
       monthly_return_label: pct(a.monthly), absolute_pnl_label: a.pnl == null ? null : money(a.pnl, { locale: L, signed: true }),
       benchmark_label: pct(a.benchMonth), excess_label: a.excess == null ? null : pp(a.excess, { locale: L }),
@@ -194,36 +187,45 @@ export function factsForNarrative(s) {
       worst: a.worst ? { name: a.worst.name, contribution_label: pp(a.worst.contribution, { locale: L }) } : null,
       best: a.best ? { name: a.best.name, contribution_label: pp(a.best.contribution, { locale: L }) } : null,
       fx_label: a.fx == null ? null : pp(a.fx, { locale: L }),
-      volatility_label: pct(a.metrics?.volatility, { signed: false }), max_drawdown_label: pct(a.metrics?.max_drawdown),
     },
-    market: s.overview ? {
+    world: s.overview ? {
       date: s.overview.date, headline: s.overview.headline, summary: s.overview.summary, briefing: s.overview.briefing,
-      indicators: a.market_blocks.flatMap((b) => b.rows).map((r) => ({ label: r.label, level: r.level, day: pct(r.day, { decimals: 1 }), thirty_days: pct(r.d30, { decimals: 1 }) })),
+      events: a.events.map((e) => ({ title: e.title, why: e.why, region: e.region_label, source: e.source })),
     } : null,
-    allocation: a.allocation.map((x) => ({
-      asset_class: x.asset_class, label: x.label, weight_label: fmtWeight(x.weight, { locale: L, decimals: 1 }),
-      target_label: x.target == null ? null : fmtWeight(x.target, { locale: L, decimals: 0 }),
-      band_label: x.min == null ? null : `${fmtWeight(x.min, { locale: L, decimals: 0 })} a ${fmtWeight(x.max, { locale: L, decimals: 0 })}`,
-      position: POSITION_SYM[x.position], position_label: POSITION_PT[x.position], outside_band: x.outside_band,
-    })),
-    discussion_points: a.discussion.map((d) => ({ kind: d.kind, severity: d.severity, title: d.title, text: d.text })),
+    assets_12m: {
+      window_label: w ? `${monthLabel(w.months?.[0] || w.from?.slice(0, 7), L)} a ${monthLabel(w.months?.[w.months.length - 1] || w.to?.slice(0, 7), L)}` : 'últimos 12 meses',
+      items: a.scatter.assets.slice().sort((x, y) => y.weight - x.weight).slice(0, 12).map((x) => ({ name: x.label, full_name: x.name, class: RISK_CLASS_PT[x.risk_class], weight_label: fmtWeight(x.weight, { locale: L, decimals: 1 }), return_label: pct(x.y), volatility_label: pct(x.x, { signed: false }) })),
+      references: a.scatter.references.map((r) => ({ name: r.label, return_label: pct(r.y), volatility_label: pct(r.x, { signed: false }) })),
+      best_for_risk: a.scatter.best ? a.scatter.best.label : null, lowest_return: a.scatter.worst ? a.scatter.worst.label : null,
+      not_measured: a.scatter.excluded.map((e) => e.label),
+    },
+    improve_points: a.improve.map((d) => ({ kind: d.kind, title: d.title, text: d.text })),
+    worsen_points: a.worsen.map((d) => ({ kind: d.kind, title: d.title, text: d.text })),
+    allocation: a.allocation.map((x) => ({ asset_class: x.asset_class, label: x.label, weight_label: fmtWeight(x.weight, { locale: L, decimals: 1 }), target_label: x.target == null ? null : fmtWeight(x.target, { locale: L, decimals: 0 }), position_label: POSITION_PT[x.position], outside_band: x.outside_band })),
+    holdings: a.holdings.slice(0, 12).map((h) => ({ name: h.name, weight_label: fmtWeight(h.weight, { locale: L, decimals: 1 }) })),
     next_meeting: s.next_meeting ? dateLong(s.next_meeting, L) : null,
   };
 }
 
 const clip = (t, n) => { const s = String(t ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s; };
+const align = (got, want, tLen, xLen) => want.map((w, i) => ({ title: clip(got?.[i]?.title || w.title, tLen), text: clip(got?.[i]?.text || w.text, xLen) }));
 
-/** What the model returned, aligned to the facts: one discussion entry per point, every field a bounded string. */
+/** What the model returned, aligned to the facts: one entry per event and per point, every field a bounded string. */
 export function sanitiseNarrative(data, facts) {
-  if (!data || typeof data !== 'object' || !data.market_view) throw new Error('model returned no market_view');
-  const want = facts.discussion_points || [];
-  const got = Array.isArray(data.discussion) ? data.discussion : [];
+  if (!data || typeof data !== 'object' || !data.world || !data.performance_comment) throw new Error('model returned no world or performance_comment');
+  const ev = facts.world?.events || [];
   return {
-    headline: clip(data.headline || '', 120) || null,
-    market_view: clip(data.market_view, 900),
-    performance_comment: clip(data.performance_comment || '', 700),
-    allocation_comment: clip(data.allocation_comment || '', 400),
-    discussion: want.map((w, i) => ({ title: clip(got[i]?.title || w.title, 60), text: clip(got[i]?.text || w.text, 340) })),
+    greeting: clip(data.greeting || `Prezado ${facts.client.first_name},`, 60),
+    opening: clip(data.opening || '', 400),
+    world: clip(data.world, 900),
+    events: align(Array.isArray(data.events) ? data.events : [], ev.map((e) => ({ title: e.title, text: e.why })), 70, 300),
+    performance_comment: clip(data.performance_comment, 600),
+    assets_comment: clip(data.assets_comment || '', 400),
+    improve: align(Array.isArray(data.improve) ? data.improve : [], facts.improve_points, 60, 300),
+    worsen: align(Array.isArray(data.worsen) ? data.worsen : [], facts.worsen_points, 60, 300),
+    allocation_comment: clip(data.allocation_comment || '', 300),
+    closing: clip(data.closing || '', 300),
+    sign_off: clip(data.sign_off || 'Um abraço,', 40),
     language: 'pt-BR',
   };
 }
@@ -234,76 +236,55 @@ export function buildReportModel(s) {
   const n = s.narrative || {};
   const tone = (v) => (v == null ? 'flat' : v > 0 ? 'gain' : v < 0 ? 'loss' : 'flat');
   const pct = (v, o = {}) => (v == null ? '—' : percent(v, { locale: L, ...o }));
-  const cell = (v) => (v == null ? '-' : percent(v, { locale: L, signed: false }));
-  const [yy, mm] = s.month.split('-').map(Number);
   const [dy, dm, dd] = s.date.split('-').map(Number);
   const monthEndIso = `${s.month}-${String(lastDay(s.month)).padStart(2, '0')}`;
+  const w = s.risk_return?.window;
+  const holdings = a.holdings;
 
   return {
     locale: L, generated_at: s.date, narrative_mode: s.narrative_mode || 'deterministic_template',
-    header: { title_light: 'Relatório', title_bold: 'de carteira', date: `${dd} ${MONTHS_LONG[dm - 1]} ${dy}` },
+    header: { title_light: 'Relatório', title_bold: 'mensal', date: `${dd} ${MONTHS_LONG[dm - 1]} ${dy}` },
     data_until: `Dados até ${dateLong(monthEndIso, L)}`,
-    client: { name: s.client.name, profile: s.client.risk_profile, segment: s.client.segment || null },
+    client: { name: s.client.name, first_name: firstName(s.client.name), profile: s.client.risk_profile },
     advisor: { name: s.advisor.name, code: s.advisor.code || null },
-    policy: { version: s.policy?.version ?? null, effective: s.policy?.effective_date ? dmy(s.policy.effective_date) : null },
-    total_label: money(s.total, { locale: L }),
-    positions_count: (s.positions || []).length,
-    headline: n.headline || null,
-    market_view: n.market_view || '',
-    performance_comment: n.performance_comment || '',
-    allocation_comment: n.allocation_comment || '',
-    market_date: s.overview?.date ? dmy(s.overview.date) : null,
-    market_blocks: a.market_blocks.map((b) => ({
-      title: b.title,
-      rows: b.rows.map((r) => ({ label: r.label, level: r.level || '—', day: r.day == null ? '—' : percent(r.day, { locale: L, decimals: 1 }), day_v: r.day, d30: r.d30 == null ? '—' : percent(r.d30, { locale: L, decimals: 1 }), d30_v: r.d30 })),
-    })),
-    figures: [
-      { label: `No mês · ${MONTHS_PT[mm - 1]}/${String(yy).slice(2)}`, value: pct(a.monthly), tone: tone(a.monthly), emphasis: true },
-      { label: 'No ano', value: pct(a.ytd), tone: tone(a.ytd) },
-      { label: '12 meses', value: pct(a.twelve), tone: tone(a.twelve) },
-      { label: 'Referência no mês', value: pct(a.benchMonth), tone: 'benchmark' },
-      { label: 'Diferença no mês', value: a.excess == null ? '—' : pp(a.excess, { locale: L }), tone: tone(a.excess) },
-    ],
-    chart: {
-      title: 'Retorno histórico',
-      portfolio: a.series.portfolio, benchmark: a.series.benchmark,
-      legend: ['Carteira', 'Carteira de referência da política'],
+    meta_line: `Perfil ${s.client.risk_profile || '—'} · Assessor ${s.advisor.name}${s.advisor.code ? ` (${s.advisor.code})` : ''} · Posição em ${dmy(s.snapshot?.effective_date || monthEndIso)}`,
+    greeting: n.greeting || `Prezado ${firstName(s.client.name)},`,
+    opening: n.opening || '',
+    world: {
+      text: n.world || '',
+      date_label: s.overview?.date ? dmy(s.overview.date) : null,
+      events: (n.events || []).map((e, i) => ({ title: e.title, text: e.text, source: a.events[i]?.source || null, region: a.events[i]?.region_label || null })),
     },
-    performance_block: {
-      title: 'Performance %',
-      rows: [
-        ['No ano', pct(a.ytd)], ['12 meses', pct(a.twelve)],
-        ['3 anos', a.three_year == null ? '-' : pct(a.three_year)],
-        [`Desde ${a.since_from ? `${MONTHS_PT[Number(a.since_from.slice(5, 7)) - 1].toLowerCase()}/${a.since_from.slice(2, 4)}` : 'o início'}`, pct(a.since)],
+    performance: {
+      figures: [
+        { label: `No mês · ${monthLabel(s.month, L)}`, value: pct(a.monthly), tone: tone(a.monthly), emphasis: true },
+        { label: 'No ano', value: pct(a.ytd), tone: tone(a.ytd) },
+        { label: '12 meses', value: pct(a.twelve), tone: tone(a.twelve) },
+        { label: 'Referência no mês', value: pct(a.benchMonth), tone: 'benchmark' },
       ],
+      comment: n.performance_comment || '',
+      chart: { title: 'Retorno acumulado da sua carteira', portfolio: a.series.portfolio, benchmark: a.series.benchmark, legend: ['Sua carteira', 'Carteira de referência da política'] },
+      scatter: {
+        title: 'Seus ativos: risco e retorno em 12 meses',
+        window_label: w ? `${dmy(w.from)} a ${dmy(w.to)}` : null,
+        assets: a.scatter.assets, references: a.scatter.references,
+        classes: [...new Set(a.scatter.assets.map((x) => x.risk_class))].map((k) => ({ key: k, label: RISK_CLASS_PT[k], color: RISK_CLASS_COLOR[k] })),
+        excluded_note: a.scatter.excluded.length ? `Sem medida de 12 meses: ${a.scatter.excluded.map((e) => e.label).join(', ')}.` : null,
+      },
+      assets_comment: n.assets_comment || '',
     },
-    risk_block: {
-      title: 'Risco',
-      rows: [
-        ['Volatilidade a.a.', a.metrics?.volatility == null ? '-' : pct(a.metrics.volatility, { signed: false })],
-        ['Sharpe', a.metrics?.sharpe == null ? '-' : num(a.metrics.sharpe, { locale: L, decimals: 2 })],
-        ['Queda máx.', a.metrics?.max_drawdown == null ? '-' : pct(a.metrics.max_drawdown)],
-        ['Meses', a.metrics?.observations == null ? '-' : String(a.metrics.observations)],
-      ],
+    outlook: {
+      improve: (n.improve || []).map((d) => ({ title: d.title, text: d.text })),
+      worsen: (n.worsen || []).map((d) => ({ title: d.title, text: d.text })),
     },
-    matrix: {
-      months: MONTHS_PT,
-      rows: a.matrix.map((r) => ({ year: r.year, cells: r.cells.map(cell), values: r.cells, total: r.total == null ? '-' : percent(r.total, { locale: L, signed: false }), total_v: r.total })),
-      simulated: a.simulated_history,
+    portfolio: {
+      comment: n.allocation_comment || '',
+      total_label: money(s.total, { locale: L }), positions_count: (s.positions || []).length,
+      pie: a.allocation.filter((x) => x.weight > 0.0005).sort((x, y) => y.weight - x.weight).map((x) => ({ label: x.label, weight: x.weight, color: x.color })),
+      holdings: holdings.map((h) => ({ name: h.name, class_label: h.class_label, weight_label: fmtWeight(h.weight, { locale: L, decimals: 1 }) })),
     },
-    composition: {
-      classes: a.composition.map((c) => ({
-        label: c.label, weight: c.weight, weight_label: fmtWeight(c.weight, { locale: L, decimals: 1 }), color: c.color,
-        items: c.items.map((i) => ({ name: i.ticker ? `${i.ticker} · ${i.name}` : i.name, weight_label: fmtWeight(i.weight, { locale: L, decimals: 1 }) })),
-      })),
-      total_label: '100,0%',
-    },
-    pie: a.composition.map((c) => ({ label: c.label, weight: c.weight, color: c.color })),
-    alloc_view: a.allocation.map((x) => ({
-      label: x.label, position: x.position, change: x.change, outside_band: x.outside_band,
-      weight_label: fmtWeight(x.weight, { locale: L, decimals: 1 }), target_label: x.target == null ? '-' : fmtWeight(x.target, { locale: L, decimals: 0 }),
-    })),
-    discussion: (n.discussion || []).map((d, i) => ({ title: d.title, text: d.text, severity: a.discussion[i]?.severity || 'medium' })),
+    closing: n.closing || '',
+    sign_off: n.sign_off || 'Um abraço,',
     next_meeting: s.next_meeting ? dateLong(s.next_meeting, L) : null,
     sources_line: `Fonte: ${a.sources.length ? a.sources.join(', ') : 'registros do custodiante'}. Elaboração: XP Asset Management.${a.simulated_history ? ' O histórico anterior à plataforma foi reconstruído a partir dos extratos e é simulado.' : ''}`,
     disclosures: standardDisclosures(L),

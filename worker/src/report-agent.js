@@ -26,6 +26,7 @@ import * as P from './pipeline.js';
 import * as LLM from './llm.js';
 import * as A from './agents.js';
 import { meetingPrep, runProfitabilityLive } from './client-analysis.js';
+import { assetRiskReturn } from './risk-return.js';
 import { signArtefact } from './links.js';
 import { analyseForReport, factsForNarrative, buildReportModel, sanitiseNarrative } from '../../src/render/report-model.js';
 import { renderReportPdf } from '../../src/render/pdf/report.js';
@@ -35,9 +36,9 @@ import { renderPrompt } from '../../src/llm/prompts.js';
 
 export const ARTEFACT_KIND = 'pdf-report';
 export const REPORT_AGENTS = [
-  { step: 1, key: 'dados', title: 'Relatório · Dados', what: 'carteira aprovada, política, histórico de retornos e o panorama do dia' },
-  { step: 2, key: 'analise', title: 'Relatório · Análise', what: 'rentabilidade, alocação contra a política e os pontos a discutir' },
-  { step: 3, key: 'redacao', title: 'Relatório · Redação', what: 'visão de mercado e comentários, sem inventar um número' },
+  { step: 1, key: 'dados', title: 'Relatório · Dados', what: 'a carteira, o histórico, os eventos do dia e o risco e retorno de cada ativo' },
+  { step: 2, key: 'analise', title: 'Relatório · Análise', what: 'performance, o que pode melhorar, o que pode piorar' },
+  { step: 3, key: 'redacao', title: 'Relatório · Redação', what: 'uma carta ao cliente, pelo nome, sem inventar um número' },
   { step: 4, key: 'diagramacao', title: 'Relatório · Diagramação', what: 'duas páginas, nunca mais do que isso' },
 ];
 const STALE_MS = 10 * 60 * 1000;
@@ -181,9 +182,38 @@ async function agentDados(env, runId) {
       },
       indicators: (ov.indicators || []).filter((i) => !i.unavailable),
       triggers: (ov.triggers || []).filter((t) => t.status === 'BREACHED' && (t.asset_classes || []).some((c) => held.has(c))),
+      // the day's What Matters rows, as the client will read them: what happened, why it matters, who reported it
+      what_matters: (ov.what_matters || []).slice(0, 8).map((r) => ({
+        title: r.event_pt || r.event, why: r.why_it_matters_pt || r.why_it_matters || null, impact: r.potential_impact_pt || r.potential_impact || null,
+        region: r.region || null, importance: r.importance || 'medium', kind: r.kind || null,
+        source: r.source_provider || (r.source_label ? String(r.source_label).split(':')[0].trim() : null),
+        touches: (r.exposure_summary?.asset_classes || []).some((c) => held.has(c)),
+      })),
       sources: [...new Set((ov.sources || []).filter((s) => !/news|headline|press|manchete/i.test(`${s.kind || ''} ${s.id || ''}`)).map((s) => s.provider).filter(Boolean))],
       inference_mode: ov.inference?.mode ?? null,
     } : null;
+
+    // twelve months of return and volatility for each asset held, from the same
+    // computation the signals page draws; a line that cannot be measured is named
+    await report(1, 16, 'Relatório · Dados — medindo retorno e volatilidade de 12 meses de cada ativo da carteira');
+    let riskReturn = null;
+    try {
+      const rr = await assetRiskReturn(env, db);
+      const heldIds = new Set(positions.map((p) => p.asset_id));
+      const weightOf = new Map(positions.map((p) => [p.asset_id, p.weight]));
+      riskReturn = {
+        window: rr.window,
+        assets: rr.assets.filter((a) => heldIds.has(a.id)).map((a) => ({
+          id: a.id, ticker: a.ticker, name: a.name, asset_class: a.asset_class, risk_class: a.risk_class,
+          total_return: a.total_return, volatility: a.volatility, partial: a.partial, simulated: a.simulated, weight: weightOf.get(a.id) ?? 0,
+        })),
+        references: rr.references.map((r) => ({ key: r.key, label: r.label, total_return: r.total_return, volatility: r.volatility })),
+        excluded: rr.excluded.filter((e) => heldIds.has(e.id)).map((e) => ({ label: e.ticker || e.label || e.name, reason: e.reason })),
+        sources: [...new Set((rr.sources || []).map((x) => x.provider).filter(Boolean))],
+      };
+    } catch (err) {
+      await report(1, 18, `Relatório · Dados — risco e retorno por ativo indisponível nesta execução (${String(err.message).slice(0, 80)})`);
+    }
 
     await report(1, 20, `Relatório · Dados — apurando a rentabilidade de ${monthLabel(month)}: preços, carteira de referência e medidas históricas`);
     const existing = await first(db, 'SELECT * FROM reports WHERE client_id = ? AND reporting_month = ? ORDER BY created_at DESC LIMIT 1', client.id, month);
@@ -232,12 +262,12 @@ async function agentDados(env, runId) {
       snapshot: { id: ctx.snapshot.id, effective_date: ctx.snapshot.effective_date },
       total, positions, previous_weights: previousWeights,
       returns_history: (ctx.returns_history || []).map((r) => ({ month: r.month, portfolio: r.portfolio_return, benchmark: r.benchmark_return, method: r.method })),
-      overview, perf,
+      overview, perf, risk_return: riskReturn,
       discussion_opportunities: prep.discussion_opportunities || [],
       recommendations,
       next_meeting: prep.next_meeting?.date || null,
     };
-    await report(1, 34, `Relatório · Dados — ${positions.length} posições, ${state.returns_history.length} meses de histórico, ${overview ? overview.indicators.length : 0} indicadores do panorama de ${overview?.date || 'hoje'}`);
+    await report(1, 34, `Relatório · Dados — ${positions.length} posições, ${state.returns_history.length} meses de histórico, ${overview ? overview.what_matters.length : 0} eventos do panorama de ${overview?.date || 'hoje'}, ${riskReturn ? riskReturn.assets.length : 0} ativos com risco e retorno medidos`);
     return state;
   } catch (err) {
     await fail(err);
@@ -249,9 +279,9 @@ async function agentDados(env, runId) {
 async function agentAnalise(env, runId, s1) {
   const { report, fail } = await loadRun(env.DB, runId);
   try {
-    await report(2, 40, 'Relatório · Análise — compondo retornos: mês, ano, doze meses e desde o início; a matriz mensal');
+    await report(2, 40, 'Relatório · Análise — compondo retornos: mês, ano, doze meses e desde o início; lendo o risco e o retorno de cada ativo');
     const analysis = analyseForReport(s1);
-    await report(2, 48, `Relatório · Análise — ${analysis.allocation.length} classes contra a política, ${analysis.allocation.filter((a) => a.outside_band).length} fora da faixa, ${analysis.discussion.length} pontos a discutir`);
+    await report(2, 48, `Relatório · Análise — ${analysis.events.length} eventos, ${analysis.scatter.assets.length} ativos no gráfico de risco e retorno, ${analysis.improve.length} ${analysis.improve.length === 1 ? 'ponto que pode melhorar' : 'pontos que podem melhorar'}, ${analysis.worsen.length} ${analysis.worsen.length === 1 ? 'que pode piorar' : 'que podem piorar'}`);
     return { ...s1, analysis };
   } catch (err) {
     await fail(err);
@@ -266,7 +296,7 @@ async function agentRedacao(env, runId, s2) {
     const facts = factsForNarrative(s2);
     let narrative = null; let mode = 'deterministic_template'; let model = null;
     if (LLM.llmAvailable(env)) {
-      await report(3, 56, 'Relatório · Redação — o modelo escreve a visão de mercado e os comentários a partir dos fatos apurados');
+      await report(3, 56, `Relatório · Redação — o modelo escreve para ${s2.client.name.split(' ')[0]}: o mundo, os eventos, a performance e o que pode melhorar ou piorar`);
       // Claude Opus 5 thinks before it answers and the thinking shares max_tokens
       // with the reply, so the budget is generous; a reply that is not the JSON
       // asked for is sent back once with the shape restated, then the template.
@@ -299,7 +329,7 @@ async function agentDiagramacao(env, runId, s3) {
   const db = env.DB;
   const { log, report, fail } = await loadRun(db, runId);
   try {
-    await report(4, 74, 'Relatório · Diagramação — montando tabelas, gráficos e a visão de alocação');
+    await report(4, 74, 'Relatório · Diagramação — montando os eventos, o gráfico acumulado, o risco × retorno dos ativos e a carteira');
     const model = buildReportModel(s3);
     await report(4, 84, 'Relatório · Diagramação — medindo cada bloco para caber em duas páginas');
     const doc = await renderReportPdf(model, { fonts: brandFonts(), maxPages: 2 });

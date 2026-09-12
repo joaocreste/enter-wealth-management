@@ -97,8 +97,9 @@ export function gatePage(url, { next = null, error = false } = {}) {
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
 body{background:#1F1F1F;color:#DDDDDD;font-family:'Roboto','Helvetica Neue',Arial,sans-serif;font-weight:300;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px 16px}
-.cover{position:relative;width:min(440px,100%);padding:36px 36px 32px;background:#242424;border-top:2px solid #BB795E;overflow:hidden}
-.ray{position:absolute;right:0;bottom:0;width:100%;height:38%;pointer-events:none}
+.cover{position:relative;width:min(440px,100%);padding:36px 36px 70px;background:#242424;border-top:2px solid #BB795E;overflow:hidden}
+.cover>*{position:relative;z-index:1}
+.ray{position:absolute;right:0;bottom:0;width:100%;height:26%;pointer-events:none;z-index:0}
 .lockup{display:flex;align-items:flex-end;gap:6px;color:#fff;margin-bottom:34px}
 .lockup svg{width:32px;height:auto;fill:currentColor;fill-rule:evenodd}
 .lockup span{font-family:'Hanken Grotesk','Roboto',sans-serif;font-weight:400;font-size:22px;line-height:1;padding-bottom:2px}
@@ -111,7 +112,7 @@ input:focus{border-color:#BB795E}
 button{width:100%;margin-top:14px;font:inherit;font-weight:400;font-size:14px;padding:12px 16px;background:#2A3B43;color:#fff;border:0;border-radius:3px;cursor:pointer}
 button:hover{background:#3b515c}
 .err{margin:14px 0 0;padding:10px 12px;border-left:2px solid #A62900;background:rgba(166,41,0,.14);color:#F0C9BC;font-size:13px}
-.foot{position:relative;margin-top:26px;font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:#7F7F7F}
+.foot{margin:26px 0 0;font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:#DDDDDD;opacity:.75}
 </style>
 </head>
 <body>

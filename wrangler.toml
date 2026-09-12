@@ -27,6 +27,14 @@ name = "enter-wealth-overview-agents"
 binding = "OVERVIEW_AGENTS"
 class_name = "OverviewAgents"
 
+# The report agent: four durable steps (dados, análise, redação, diagramação)
+# that produce the two-page client report an advisor asks for from the client
+# page. Same reasoning as above — a model call and a render outlast a request.
+[[workflows]]
+name = "enter-wealth-report-agent"
+binding = "REPORT_AGENT"
+class_name = "ReportAgent"
+
 # ── D1: the relational record (§24, §25) ────────────────────────────────────
 [[d1_databases]]
 binding = "DB"

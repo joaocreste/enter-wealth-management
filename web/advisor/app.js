@@ -8,7 +8,7 @@
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
   pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix,
-  progressCard, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday,
+  progressCard, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday, donut,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sparkline, scatterChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
@@ -76,6 +76,7 @@ function crumbsFor(hash, extra = {}) {
   if (!tab || tab === 'overview') trail.push({ label: 'Visão geral' });
   else if (tab === 'prep') trail.push({ label: 'Preparação de reunião' });
   else if (tab === 'editor') trail.push({ label: 'Editor de carteira' });
+  else if (tab === 'relatorio') trail.push({ label: 'Relatório em PDF' });
   else if (tab === 'report') trail.push({ label: 'Cartas', href: `#/client/${id}/reports` }, { label: extra.report || 'Carta' });
   else trail.push({ label: Object.fromEntries(CLIENT_TABS)[tab] || tab });
   return trail;
@@ -811,6 +812,8 @@ async function viewClient({ id, tab = 'overview' }) {
   crumbs(crumbsFor(currentHash(), { clientName: c.name }));
   return frag(
     head(c.name, `${money(d.total_value, { locale: L })} sob assessoria · política v${d.policy?.version} de ${dateLong(d.policy?.effective_date, L)}${c.next_review_at ? ` · próxima revisão ${shortDate(c.next_review_at)}` : ''}`, [
+      // opens its own tab: the report agent runs there and the PDF lands there
+      h('a.btn', { href: `#/client/${id}/relatorio`, target: '_blank', rel: 'noopener' }, icon('documents', { size: 15 }), h('span', { text: 'criar relatório pdf' })),
       h('a.btn', { href: `#/client/${id}/prep` }, icon('prep', { size: 15 }), h('span', { text: 'preparar reunião' })),
       h('a.btn.primary', { href: `#/client/${id}/editor` }, icon('edit', { size: 15 }), h('span', { text: 'editar carteira' })),
     ], [h('b', { text: 'Cliente' }), sep(), `perfil ${c.risk_profile}`, c.segment ? sep() : null, c.segment || null]),
@@ -1418,6 +1421,120 @@ function renderCanonicalSummary(c) {
   );
 }
 
+// ═══ the report agent: a two-page PDF, in its own tab ══════════════════════
+/**
+ * Opened from the client page in a new tab. Without a run id it starts one and
+ * moves to that run's address; with one it follows the four steps as the
+ * Worker reports them and shows the PDF when the last step ends.
+ */
+async function viewPdfReport({ id, runId = null }) {
+  const d = await api(`/api/clients/${id}`);
+  const c = d.client;
+  crumbs(crumbsFor(currentHash(), { clientName: c.name }));
+
+  if (!runId) {
+    const started = await api(`/api/clients/${id}/pdf-reports`, {});
+    location.replace(`#/client/${id}/relatorio/${started.run.id}`);
+    return h('div.loading', {}, loader(), h('span', { text: 'Iniciando o agente de relatórios…' }));
+  }
+
+  const runBox = h('div');
+  const pdfBox = h('div');
+  const history = h('div');
+  const again = h('button.btn', { type: 'button', onclick: async (e) => {
+    e.currentTarget.disabled = true;
+    const started = await api(`/api/clients/${id}/pdf-reports`, {});
+    location.hash = `#/client/${id}/relatorio/${started.run.id}`;
+  } }, icon('refresh', { size: 15 }), h('span', { text: 'gerar novamente' }));
+
+  const ring = donut({ size: 96 });
+  const msg = h('div.pmsg');
+  const state = h('div.pstate', { text: 'Quatro etapas rodam em sequência: dados, análise, redação e diagramação. Com o modelo escrevendo, isto leva de um a dois minutos; a aba pode ficar aberta.' });
+  const clock = h('span.mono.muted');
+  const rows = [];
+  const agentsList = h('ol.agents');
+  const foot = h('div.pfoot', {}, clock);
+  const panel = h('div.progress-card.inline', { role: 'status', 'aria-live': 'polite' },
+    h('div.phead', {}, ring.el, h('div', {}, h('h3', { text: 'Criando o relatório em PDF' }), msg, state)),
+    agentsList, foot);
+  mount(runBox, panel);
+
+  const t0 = Date.now();
+  const timer = setInterval(() => { const s = Math.round((Date.now() - t0) / 1000); clock.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }, 500);
+
+  const paintAgents = (run) => {
+    if (!rows.length) {
+      for (const a of run.agents || []) {
+        const li = h('li', { dataset: { step: a.step } }, h('span.idx', {}, h('b', { text: String(a.step) }), icon('check', { size: 14 })), h('span', {}, h('b', { text: a.title }), h('small', { text: a.what })));
+        rows.push(li); agentsList.append(li);
+      }
+    }
+    for (const li of rows) {
+      const s = Number(li.dataset.step);
+      li.className = run.status === 'completed' || s < run.step ? 'done' : s === run.step && run.status === 'running' ? 'active' : run.status === 'failed' && s === run.step ? 'failed' : '';
+    }
+  };
+
+  const showPdf = (run) => {
+    const src = apiUrl(run.links.pdf);
+    const omitted = run.omitted || [];
+    mount(pdfBox,
+      h('div.split', { style: { margin: '20px 0 12px' } },
+        h('a.btn.primary', { href: src, target: '_blank' }, icon('download', { size: 15 }), h('span', { text: 'abrir o pdf' })),
+        again,
+        h('span.note', {}, `${run.page_count} ${run.page_count === 1 ? 'página' : 'páginas'} · redação ${run.narrative_mode === 'model' ? 'pelo modelo' : 'determinística, sem modelo de linguagem'} · nível de redução ${run.reduction_level ?? 0}${omitted.length ? ` · blocos omitidos para caber em duas páginas: ${omitted.join(', ')}` : ''}`)),
+      h('iframe.doc', { src, title: 'Relatório em PDF', style: { height: '1120px' } }));
+  };
+
+  const paintHistory = async () => {
+    const list = await api(`/api/clients/${id}/pdf-reports`);
+    const done = list.reports.filter((r) => r.status === 'completed' && r.id !== runId);
+    mount(history, done.length ? h('section.section', { style: { marginTop: '32px' } },
+      h('div.section-h', {}, h('h2', { text: 'Relatórios anteriores' }), h('span.meta', { text: `${done.length} ${done.length === 1 ? 'relatório' : 'relatórios'}` })),
+      table(['Gerado em', 'Mês de referência', { label: 'Páginas', num: true }, 'Redação', ''],
+        done.map((r) => h('tr', {},
+          h('td.name', { text: r.finished_at ? `${shortDate(r.finished_at)} ${String(r.finished_at).slice(11, 16)}` : '—' }),
+          h('td', { text: r.reporting_month ? monthLabel(r.reporting_month, L) : '—' }),
+          h('td.num', { text: r.page_count ?? '—' }),
+          h('td', { text: r.narrative_mode === 'model' ? 'modelo' : 'determinística' }),
+          h('td', {}, h('div.split', {},
+            h('a.btn.sm', { href: `#/client/${id}/relatorio/${r.id}`, text: 'ver' }),
+            h('a.btn.sm', { href: apiUrl(r.links.pdf), target: '_blank', text: 'pdf' }))))))) : null);
+  };
+
+  let stopped = false;
+  const poll = async () => {
+    if (stopped) return;
+    let run;
+    try { run = (await api(`/api/clients/${id}/pdf-reports/${runId}`)).run; } catch (err) { msg.textContent = err.message; return; }
+    ring.set(run.progress ?? 0);
+    msg.textContent = run.message || '';
+    paintAgents(run);
+    if (run.status === 'completed') {
+      stopped = true; clearInterval(timer);
+      state.textContent = 'O PDF está abaixo, no mesmo endereço desta aba. Gere novamente para uma versão com os dados de agora.';
+      showPdf(run);
+      return;
+    }
+    if (run.status === 'failed') {
+      stopped = true; clearInterval(timer);
+      state.textContent = `A execução falhou: ${run.error || 'erro desconhecido'}.`;
+      mount(pdfBox, h('div.split', { style: { marginTop: '16px' } }, again));
+      return;
+    }
+    setTimeout(poll, 1500);
+  };
+  poll();
+  paintHistory();
+
+  return frag(
+    head('Relatório em PDF', `${c.name} · perfil ${c.risk_profile} · ${money(d.total_value, { locale: L })} sob assessoria. Visão de mercado, performance, alocação e pontos a discutir, em duas páginas.`,
+      [h('a.btn', { href: `#/client/${id}` }, icon('back', { size: 15 }), h('span', { text: 'voltar ao cliente' }))],
+      [h('b', { text: c.name }), sep(), 'Agente de relatórios']),
+    runBox, pdfBox, history,
+  );
+}
+
 // ═══ boot ══════════════════════════════════════════════════════════════════
 (async function boot() {
   if (!(await auth.discover())) { location.href = loginUrl(); return; }
@@ -1438,6 +1555,8 @@ function renderCanonicalSummary(c) {
     ['/client/:id/prep', viewMeetingPrep],
     ['/client/:id/editor', viewEditor],
     ['/client/:id/report/:reportId', viewReport],
+    ['/client/:id/relatorio', viewPdfReport],
+    ['/client/:id/relatorio/:runId', viewPdfReport],
     ['/client/:id/:tab', viewClient],
   ], { root });
 

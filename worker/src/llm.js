@@ -307,6 +307,62 @@ export function deterministicLetter(facts) {
   };
 }
 
+/**
+ * The report agent's narrative without a model: the day's briefing for the
+ * market view, the month's figures for the comment, the policy for the
+ * allocation line, and the discussion points as the analysis phrased them.
+ */
+export function deterministicReportNarrative(facts) {
+  const f = facts;
+  const month = monthLabel(f.month, L);
+  const two = (t) => String(t || '').split(/(?<=[.!?])\s+/).slice(0, 2).join(' ');
+  const b = f.market?.briefing || {};
+  const held = new Set((f.allocation || []).map((a) => a.asset_class));
+  // The day's summary and its main risk first; the indicator table beside the
+  // text already carries the readings, so the briefing's number strings are
+  // the fallback, not the text.
+  const summary = two(f.market?.summary);
+  const risk = two(b.main_risk_or_opportunity);
+  // the main risk is skipped when the summary already says it: most of its words are already there
+  const words = (t) => new Set(String(t || '').toLowerCase().match(/[\p{L}\d$%.,]{4,}/gu) || []);
+  const said = (t, inText) => { const w = [...words(t)]; const have = words(inText); return w.length > 0 && w.filter((x) => have.has(x)).length / w.length >= 0.6; };
+  const marketParts = [
+    f.market?.headline ? `${String(f.market.headline).replace(/[.!?]\s*$/, '')}.` : null,
+    summary,
+    risk && !said(risk, summary) ? risk : null,
+  ];
+  if (!marketParts.some(Boolean)) {
+    if (held.has('Equities BR') || held.has('Equities Global')) marketParts.push(two(b.equities));
+    if (held.has('Fixed Income') || held.has('Cash')) marketParts.push(two(b.rates_credit));
+    if (held.has('Equities Global') || held.has('Commodities') || held.has('Digital Assets')) marketParts.push(two(b.fx_commodities));
+  }
+  const market_view = marketParts.filter(Boolean).join(' ') || 'Não há panorama de mercado disponível para a data deste relatório.';
+
+  const p = f.performance || {};
+  const perf = [];
+  if (p.monthly_return_label == null) perf.push(`Não foi possível apurar a rentabilidade consolidada de ${month} com os dados disponíveis.`);
+  else {
+    if (p.worst) perf.push(`Começo pelo que pesou negativamente: ${p.worst.name} foi o maior detrator de ${month}, com ${p.worst.contribution_label} sobre o resultado da carteira.`);
+    if (p.best) perf.push(`Do lado positivo, ${p.best.name} contribuiu com ${p.best.contribution_label}.`);
+    perf.push(`No agregado, a carteira registrou ${p.monthly_return_label} no mês${p.benchmark_label ? `, contra ${p.benchmark_label} da carteira de referência da política` : ''}${p.ytd_label ? `; no ano, ${p.ytd_label}` : ''}.`);
+  }
+
+  const off = (f.allocation || []).filter((a) => a.position !== '=');
+  const outside = (f.allocation || []).filter((a) => a.outside_band);
+  const allocation_comment = outside.length
+    ? `${outside.map((a) => a.label).join(', ')} ${outside.length === 1 ? 'está fora da faixa' : 'estão fora das faixas'} da política; ${off.length} ${off.length === 1 ? 'classe está' : 'classes estão'} afastadas do alvo.`
+    : off.length
+      ? `Todas as classes estão dentro das faixas da política; ${off.length} ${off.length === 1 ? 'está' : 'estão'} afastadas do alvo.`
+      : 'Todas as classes estão dentro das faixas e próximas do alvo da política.';
+
+  const discussion = (f.discussion_points || []).map((d) => ({ title: d.title, text: d.text }));
+  const headline = p.monthly_return_label
+    ? `${p.monthly_return_label} em ${month}, ${outside.length ? `${outside.length} ${outside.length === 1 ? 'classe fora da faixa' : 'classes fora da faixa'}` : 'alocação dentro das faixas'}, ${discussion.length} ${discussion.length === 1 ? 'ponto' : 'pontos'} para a reunião`
+    : `Rentabilidade de ${month} não apurada; ${discussion.length} ${discussion.length === 1 ? 'ponto' : 'pontos'} para a reunião`;
+
+  return { headline, market_view, performance_comment: perf.join(' '), allocation_comment, discussion, language: 'pt-BR' };
+}
+
 export function deterministicWorldView(facts) {
   const ind = Object.fromEntries((facts.indicators || []).map((i) => [i.key, i]));
   const fired = (facts.triggers || []).filter((t) => t.status === 'BREACHED');

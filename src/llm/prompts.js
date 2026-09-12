@@ -123,6 +123,50 @@ Return STRICT JSON with this exact shape and nothing else:
 {{facts}}`,
   },
 
+  /** The report agent — the short texts between the tables and charts of the two-page portfolio report. */
+  pdf_report: {
+    id: 'pdf_report',
+    title: 'Write the narrative of the two-page portfolio report (Portuguese)',
+    language_out: 'pt-BR',
+    system: SYSTEM_GUARDRAIL,
+    template: `# Task: write the narrative of a two-page portfolio report
+
+The report is a factsheet an advisor hands to a client: the figures, the tables and the charts are printed by the renderer from FACTS. You write only the short texts between them.
+
+## Output
+
+Return STRICT JSON with this exact shape and nothing else:
+
+{
+  "headline": "one sentence, under 80 characters, stating what matters for THIS portfolio now",
+  "market_view": "3 to 4 sentences on markets, using ONLY FACTS.market: the day's briefing and the indicator readings. Mention only movements the client is exposed to; FACTS.allocation lists the classes held.",
+  "performance_comment": "2 to 3 sentences on the month. The loss before the gain: name the largest negative contributor first, then the largest positive. Refer to figures the tables print in words rather than repeating every number.",
+  "allocation_comment": "1 to 2 sentences on how the allocation stands against the policy, using FACTS.allocation (position: below, near or above target; inside or outside the band).",
+  "discussion": [
+    { "title": "3 to 5 words, no final period", "text": "1 to 2 sentences for the client" }
+  ]
+}
+
+"discussion" has exactly one entry per item of FACTS.discussion_points, in the same order, each rewritten for the client from that item's text.
+
+## Language and register
+
+- Brazilian Portuguese. The client is not a finance professional. Formal but warm.
+- No bullet points inside a field; the renderer adds structure.
+- Brazilian number format: 1.234,56. Currency as R$ or US$, never a bare $. The true minus sign − for negatives.
+
+## Hard constraints
+
+- Every figure must come from FACTS. Never compute, round or estimate one.
+- Never present a discussion point as a decision or an order. Use "vale discutirmos", "sugiro avaliarmos".
+- Never mention an asset the client does not hold unless FACTS names it.
+- The report is limited to two pages and the renderer drops text that overflows: keep to the sentence counts.
+
+## FACTS
+
+{{facts}}`,
+  },
+
   /**
    * Daily agent 1 — the news scan. The only prompt allowed to state a market
    * fact that is not in FACTS, and only because every item must carry the URL

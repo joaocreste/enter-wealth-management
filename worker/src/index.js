@@ -32,7 +32,10 @@ import * as bcb from '../../src/adapters/bcb.js';
 import { makeSource, SourceLedger } from '../../src/core/sources.js';
 import * as A from './agents.js';
 import * as S from './series.js';
+import * as R from './report-agent.js';
+import { hydrateRecommendation, allocationOf, meetingPrep, runProfitabilityLive } from './client-analysis.js';
 export { OverviewAgents } from './agents.js';
+export { ReportAgent } from './report-agent.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 
@@ -170,6 +173,21 @@ async function route(request, env, url, ctx) {
     return serveArtefact(env, report, kind);
   }
 
+  // ── the report agent's PDFs, by signed link or by a scoped session ────────
+  const pdfMatch = path.match(/^\/api\/pdf-reports\/([^/]+)\/pdf$/);
+  if (pdfMatch) {
+    const row = await first(db, 'SELECT * FROM pdf_reports WHERE id = ?', pdfMatch[1]);
+    if (!row) return bad(404, 'report not found');
+    const signed = await verifyArtefactToken(env, row.id, R.ARTEFACT_KIND, url.searchParams.get('t'));
+    if (!signed) {
+      if (!session) return bad(401, 'authentication required');
+      if (session.role === 'client') return bad(403, 'advisor surface');
+      const scope = await resolveClientScope(db, session, row.client_id);
+      if (!scope.ok) return bad(scope.status, scope.error);
+    }
+    return R.servePdfReport(env, row);
+  }
+
   if (!session) return bad(401, 'authentication required');
 
   if (path === '/api/auth/me') {
@@ -260,7 +278,7 @@ async function route(request, env, url, ctx) {
     const sub = clientMatch[2] || '';
     const scope = await resolveClientScope(db, session, clientId);
     if (!scope.ok) return bad(scope.status, scope.error);
-    return clientRoutes(env, request, { scope, sub, method, body, url, session });
+    return clientRoutes(env, request, { scope, sub, method, body, url, session, ctx });
   }
 
   // ── report artefacts from R2 ─────────────────────────────────────────────
@@ -676,7 +694,7 @@ async function upsertTrigger(env, session, body) {
 // Client-scoped routes
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function clientRoutes(env, request, { scope, sub, method, body, url, session }) {
+async function clientRoutes(env, request, { scope, sub, method, body, url, session, ctx }) {
   const db = env.DB;
   const { client, advisor, actingAs } = scope;
   const isAdvisor = actingAs !== 'client';
@@ -759,6 +777,23 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
   if (sub === '/meeting-prep') {
     if (!isAdvisor) return bad(403, 'advisor only');
     return ok(await meetingPrep(env, scope, url.searchParams.get('month')));
+  }
+
+  // ── the report agent: a two-page PDF on demand, advisor only ──────────────
+  if (sub === '/pdf-reports') {
+    if (!isAdvisor) return bad(403, 'advisor only');
+    if (method === 'POST') {
+      await audit(db, { entity: 'pdf_report', entity_id: client.id, action: 'requested', actor_id: session.user_id });
+      return ok({ run: await R.startReportRun(env, ctx, { scope, actorId: session.user_id }) });
+    }
+    return ok({ reports: await R.listReportRuns(env, client.id) });
+  }
+  const pdfRun = sub.match(/^\/pdf-reports\/([^/]+)$/);
+  if (pdfRun) {
+    if (!isAdvisor) return bad(403, 'advisor only');
+    const row = await first(db, 'SELECT * FROM pdf_reports WHERE id = ? AND client_id = ?', pdfRun[1], client.id);
+    if (!row) return bad(404, 'run not found');
+    return ok({ run: await R.runView(env, row) });
   }
 
   if (sub === '/recommendations') {
@@ -851,35 +886,6 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
   return bad(404, `no client route for ${sub}`);
 }
 
-function hydrateRecommendation(r) {
-  return {
-    id: r.id, asset_id: r.asset_id, proposed_action: r.proposed_action, final_action: r.final_action,
-    suitability_result: r.suitability_result, score: r.score, conviction: r.conviction,
-    signal_conflict: !!r.signal_conflict, current_weight: r.current_weight,
-    rationale: r.rationale, factors: json(r.factors_json, []), flags: json(r.flags_json, []),
-    statement: json(r.statement_json, null), advisor_status: r.advisor_status, advisor_note: r.advisor_note,
-    decided_at: r.decided_at, created_at: r.created_at, recommendation_set_id: r.recommendation_set_id,
-  };
-}
-
-function allocationOf(positions, total, policy) {
-  const map = new Map();
-  for (const p of positions) {
-    const k = p.asset_class;
-    map.set(k, (map.get(k) ?? 0) + (p.market_value || 0));
-  }
-  return [...map.entries()].map(([asset_class, value]) => {
-    const weight = total ? value / total : 0;
-    const range = policy?.permitted_ranges?.[asset_class] ?? null;
-    return {
-      asset_class, value, weight,
-      target: policy?.target_allocation?.[asset_class] ?? null,
-      range,
-      inside_band: range ? weight >= range.min && weight <= range.max : true,
-    };
-  }).sort((a, b) => b.weight - a.weight);
-}
-
 async function createSnapshot(env, scope, body, session) {
   const db = env.DB;
   const { client } = scope;
@@ -905,62 +911,6 @@ async function createSnapshot(env, scope, body, session) {
   }
   await audit(db, { entity: 'portfolio_snapshot', entity_id: snapId, action: 'created', actor_id: session.user_id, detail: { effective_date: body.effective_date, total_value: total, positions: (body.positions || []).length } });
   return { id: snapId, total_value: total, ok: true };
-}
-
-async function meetingPrep(env, scope, month) {
-  const db = env.DB;
-  const { client } = scope;
-  const m = month || previousMonth(new Date().toISOString().slice(0, 10));
-  const ctx = await P.loadClientContext(env, client.id, { month: m });
-  const total = ctx.positions.reduce((a, p) => a + (p.market_value || 0), 0);
-  const exposures = {};
-  for (const p of ctx.positions) exposures[p.asset_class] = (exposures[p.asset_class] ?? 0) + (p.market_value || 0) / (total || 1);
-
-  const opportunities = [];
-  const policy = ctx.policy;
-  for (const [k, band] of Object.entries(policy?.permitted_ranges || {})) {
-    const w = exposures[k] ?? 0;
-    if (band.min != null && w < band.min) opportunities.push({ kind: 'below_band', asset_class: k, message: `${classPt(k)} está em ${(w * 100).toFixed(1)}%, abaixo do mínimo de ${(band.min * 100).toFixed(0)}% da política.`, severity: 'medium' });
-    if (band.max != null && w > band.max) opportunities.push({ kind: 'above_band', asset_class: k, message: `${classPt(k)} está em ${(w * 100).toFixed(1)}%, acima do máximo de ${(band.max * 100).toFixed(0)}% da política.`, severity: 'high' });
-  }
-  for (const d of P.driftTriggers(exposures, policy?.target_allocation || {}, policy?.rebalance_trigger ?? 0.05)) {
-    opportunities.push({ kind: 'drift', asset_class: d.asset_classes[0], message: d.action_pt || d.action, severity: 'medium' });
-  }
-  const cap = policy?.single_name_cap ?? 0.1;
-  for (const p of ctx.positions) {
-    const w = (p.market_value || 0) / (total || 1);
-    if (w > cap && !['etf', 'cash', 'reit'].includes(p.type)) {
-      opportunities.push({ kind: 'concentration', asset_class: p.asset_class, message: `${p.asset_name} representa ${(w * 100).toFixed(1)}% da carteira, acima do teto de ${(cap * 100).toFixed(0)}% por emissor.`, severity: 'high' });
-    }
-    if (p.corporate_action) {
-      opportunities.push({ kind: 'corporate_action', asset_class: p.asset_class, message: `${p.ticker || p.asset_name}: ${p.corporate_action}`, severity: 'high' });
-    }
-  }
-
-  const recs = await all(db, 'SELECT * FROM recommendations WHERE client_id = ? AND reporting_month = (SELECT MAX(reporting_month) FROM recommendations WHERE client_id = ?)', client.id, client.id);
-  const conflicts = recs.filter((r) => r.signal_conflict).map((r) => ({ kind: 'signal_conflict', asset_id: r.asset_id, message: json(r.statement_json, {})?.market_signal || 'sinais divergentes', severity: 'medium' }));
-
-  return {
-    month: m,
-    client: { id: client.id, name: client.full_name, risk_profile: client.risk_profile },
-    total_value: total,
-    allocation: allocationOf(ctx.positions, total, policy),
-    policy,
-    holdings: ctx.positions.map((p) => ({ ticker: p.ticker, name: p.asset_name, asset_class: p.asset_class, market_value: p.market_value, weight: (p.market_value || 0) / (total || 1), pricing_mode: p.pricing_mode })),
-    discussion_opportunities: [...opportunities, ...conflicts],
-    recommendations: recs.map(hydrateRecommendation),
-    next_meeting: (await first(db, "SELECT * FROM meetings WHERE client_id = ? AND status IN ('scheduled','in_preparation') ORDER BY date LIMIT 1", client.id)) ?? null,
-    returns_history: ctx.returns_history.map((r) => ({ month: r.month, portfolio: r.portfolio_return, benchmark: r.benchmark_return })),
-  };
-}
-
-async function runProfitabilityLive(env, clientId, month) {
-  const ctx = await P.loadClientContext(env, clientId, { month });
-  const market = await P.fetchAndValidateMarketData(env, ctx);
-  const perf = await P.computeProfitability(env, ctx, market);
-  const benchmark = await P.computeBenchmark(env, ctx, market);
-  const metrics = await P.computeMetrics(env, ctx);
-  return { performance: perf, benchmark, metrics, sources: market.ledger, validation: market.validation };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

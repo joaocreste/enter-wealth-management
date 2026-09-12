@@ -262,6 +262,38 @@ instruments accrue from the Banco Central index plus their spread; cash, matured
 lines and short series are listed as excluded with the reason. The chart sits on
 the Sinais de mercado page.
 
+### The report agent
+
+From a client's page the advisor has a **criar relatório pdf** button. It opens a
+tab of its own and starts a fourth agent, which runs as a Cloudflare Workflow like
+the daily ones (`worker/src/report-agent.js`) and reports each step to the tab:
+
+1. **Dados** — the approved portfolio, the policy, the return history, the day's
+   World Overview and the month's profitability, from the record the portal
+   already trusts; the written rationale of an approved recommendation comes from
+   the month's letter.
+2. **Análise** — returns for the month, the year, twelve months and since the
+   start; the monthly matrix; the allocation against the policy with a position on
+   the underweight/overweight scale and a change since the previous snapshot; the
+   discussion points (bands, concentration, breached thresholds, approved
+   recommendations, divergent signals). Pure functions in `src/render/report-model.js`.
+3. **Redação** — the model writes the market view and the comments from a FACTS
+   object and is never asked for a number; without a key a template phrases the
+   same facts.
+4. **Diagramação** — `src/render/pdf/report.js` draws the Carteira XP Global
+   Strategies fact sheet in the Carta's frame: the index tables, the framed return
+   chart, the monthly-return matrix, the composição table, the pie, the Comitê's
+   allocation view and its decision callouts.
+
+**Two pages is a rule.** Every block is measured before it is drawn. When the
+content does not fit, a reduction ladder trims the least important material first
+(positions per class, discussion points, matrix years, indicators, sentences, the
+allocation view, the pie, the chart) and the composition is tried again; whatever
+still does not fit on page two is left out and named on the run. A third page is
+never started, and `npm run verify` throws forty positions, nine years of history
+and twelve discussion points at the renderer to prove it. Runs live in
+`pdf_reports` (migration `0003`), the PDFs in R2, and the API is advisor-only.
+
 ### The portal's design
 
 `web/shared/app.css` is the XP Advisory brand system applied to a screen. Two

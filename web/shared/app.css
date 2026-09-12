@@ -397,6 +397,10 @@ table.d.matters .talk{color:var(--ink-950)}
 @keyframes pulse{0%,100%{outline:2px solid transparent;outline-offset:2px}50%{outline:2px solid var(--structure);outline-offset:2px}}
 .pfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;font-size:12px}
 
+/* the report agent's progress, in its own tab rather than over a veil */
+.progress-card.inline{width:100%;max-width:820px;animation:none;margin-bottom:20px;border-color:var(--rule)}
+.progress-card.inline .phead h3{font-size:22px}
+
 /* ─── bars: thresholds and drift ─────────────────────────────────────── */
 .trg.bars{grid-template-columns:8px minmax(0,1fr) 220px;align-items:center}
 .bars-wide .trg.bars{grid-template-columns:8px minmax(0,1fr) 340px}

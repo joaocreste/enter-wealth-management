@@ -15,6 +15,9 @@ import { validateReport, emptyReport, standardDisclosures } from '../src/core/re
 import { money, percent, pp, previousMonth, monthBounds, MINUS } from '../src/core/format.js';
 import { TrueTypeFont } from '../src/render/pdf/ttf.js';
 import { brandFonts } from '../src/render/fonts/index.js';
+import { analyseForReport, factsForNarrative, buildReportModel } from '../src/render/report-model.js';
+import { renderReportPdf } from '../src/render/pdf/report.js';
+import { deterministicReportNarrative } from '../worker/src/llm.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
 import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, efficientFrontier } from '../src/core/risk.js';
@@ -28,6 +31,11 @@ import { buildWhatMattersTable, notableWindow } from '../src/core/events.js';
 let pass = 0; let fail = 0;
 const t = (name, fn) => {
   try { fn(); pass += 1; console.log(`  ✓ ${name}`); }
+  catch (e) { fail += 1; console.log(`  ✗ ${name}\n      ${e.message}`); }
+};
+/** The same, for a check that awaits something (a PDF render). */
+const ta = async (name, fn) => {
+  try { await fn(); pass += 1; console.log(`  ✓ ${name}`); }
   catch (e) { fail += 1; console.log(`  ✗ ${name}\n      ${e.message}`); }
 };
 const eq = (a, b, msg) => { if (a !== b) throw new Error(`${msg || ''} expected ${b}, got ${a}`); };
@@ -477,6 +485,51 @@ if (process.argv.includes('--live')) {
     eq(res.status, 403);
   });
 }
+
+console.log('\n  The report agent — two pages is a rule, not an aspiration');
+const heavyState = () => {
+  const classes = ['Cash', 'Fixed Income', 'Equities BR', 'Equities Global', 'Alternatives', 'Real Estate', 'Commodities', 'Digital Assets'];
+  const positions = [];
+  for (let i = 0; i < 40; i += 1) positions.push({ asset_id: `a${i}`, ticker: `TIC${i}`, name: `Um nome de ativo bastante comprido para testar a quebra número ${i}`, asset_class: classes[i % 8], type: 'stock', market_value: 1000 + i * 137, weight: 0, pricing_mode: 'market' });
+  const total = positions.reduce((a, p) => a + p.market_value, 0);
+  for (const p of positions) p.weight = p.market_value / total;
+  const months = [];
+  for (let y = 2018; y <= 2026; y += 1) for (let m = 1; m <= 12; m += 1) { const ym = `${y}-${String(m).padStart(2, '0')}`; if (ym <= '2026-08') months.push({ month: ym, portfolio: ((m * 7 + y) % 9 - 4) / 100, benchmark: ((m * 5 + y) % 7 - 3) / 100, method: 'reconstructed_from_statements' }); }
+  const long = 'Uma frase longa que o modelo poderia escrever se ninguém o contivesse, repetida para forçar o limite de duas páginas. '.repeat(12);
+  return {
+    date: '2026-09-12', month: '2026-08',
+    client: { id: 'cli_x', name: 'Cliente de Teste com Nome Longo da Silva Pereira', risk_profile: 'Moderado', segment: 'Middle market', base_currency: 'BRL' },
+    advisor: { name: 'Antonio Bicudo', code: 'A7699', team: 'SP' },
+    policy: { version: 3, effective_date: '2026-03-16', target_allocation: Object.fromEntries(classes.map((c) => [c, 0.125])), permitted_ranges: Object.fromEntries(classes.map((c) => [c, { min: 0.05, max: 0.2 }])), rebalance_trigger: 0.05 },
+    snapshot: { id: 's', effective_date: '2026-07-15' }, total, positions, previous_weights: Object.fromEntries(classes.map((c) => [c, 0.1])),
+    returns_history: months,
+    overview: { date: '2026-09-12', headline: long.slice(0, 200), summary: long, briefing: { equities: long, rates_credit: long, fx_commodities: long, macro_political: long, main_risk_or_opportunity: long }, indicators: ['sp500', 'nasdaq', 'ibovespa', 'vix', 'us10y', 'selic', 'ipca', 'hy_etf', 'usdbrl', 'dxy', 'eurusd', 'gold', 'brent', 'copper', 'btc', 'eth'].map((k) => ({ key: k, label: k, unit: 'index', price: 1234.5, changePct: 0.012, d30Pct: -0.034 })), triggers: Array.from({ length: 6 }, (_, i) => ({ label: `Limiar ${i}`, status: 'BREACHED', asset_classes: ['Equities BR'], action_pt: long.slice(0, 300) })), sources: ['Yahoo Finance'] },
+    perf: { performance: { monthly_return: -0.012, absolute_pnl: -4852 }, attribution: { top_negative: [{ ticker: 'HAPV3', contribution: -0.0179 }], top_positive: [{ ticker: 'IVVB11', contribution: 0.0047 }], fx_contribution: 0.0016 }, benchmark: { value: 0.0176 }, metrics: null, sources: ['Yahoo Finance'] },
+    discussion_opportunities: Array.from({ length: 12 }, (_, i) => ({ kind: i % 2 ? 'drift' : 'concentration', severity: 'high', message: long.slice(0, 400), asset_class: 'Equities BR' })),
+    recommendations: Array.from({ length: 6 }, (_, i) => ({ asset_id: `a${i}`, ticker: `TIC${i}`, name: `Ativo ${i}`, final_action: 'DISCUSS', suitability_result: 'PASS', rationale: long.slice(0, 300), current_weight: 0.05 })),
+    next_meeting: '2026-09-18',
+  };
+};
+await ta('a report with forty positions, nine years of history and twelve discussion points stays on two pages', async () => {
+  const s = heavyState();
+  s.analysis = analyseForReport(s);
+  s.narrative = deterministicReportNarrative(factsForNarrative(s));
+  s.narrative.market_view = s.overview.summary;
+  const model = buildReportModel(s);
+  const doc = await renderReportPdf(model, { fonts: brandFonts(), maxPages: 2 });
+  ok(doc.pageCount <= 2, `rendered ${doc.pageCount} pages`);
+  ok(doc.build().length > 20000, 'the PDF is not empty');
+});
+await ta('an ordinary report needs no reduction and names nothing omitted', async () => {
+  const s = heavyState();
+  s.positions = s.positions.slice(0, 12); s.total = s.positions.reduce((a, p) => a + p.market_value, 0);
+  s.returns_history = s.returns_history.slice(-37); s.discussion_opportunities = s.discussion_opportunities.slice(0, 3); s.recommendations = s.recommendations.slice(0, 2);
+  s.overview.summary = 'Quatro limiares rompidos; o petróleo pesa sobre a inflação. Nada exige ação imediata.'; s.overview.triggers = s.overview.triggers.slice(0, 1);
+  s.analysis = analyseForReport(s);
+  s.narrative = deterministicReportNarrative(factsForNarrative(s));
+  const doc = await renderReportPdf(buildReportModel(s), { fonts: brandFonts(), maxPages: 2 });
+  eq(doc.pageCount, 2); eq(doc.reductionLevel, 0); eq(doc.omitted.length, 0);
+});
 
 console.log('\n  Indicators — a rate has a level and a last change, never a day move');
 t('the Selic is a step: the day it changed and the value before it, no percentage', () => {

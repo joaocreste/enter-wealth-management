@@ -35,6 +35,7 @@ import * as A from './agents.js';
 import * as S from './series.js';
 import * as R from './report-agent.js';
 import * as B from './bulk-reports.js';
+import * as CR from './client-refresh.js';
 import { gateEnabled, gatePassed, gateSubmit, gatePage } from './gate.js';
 import { hydrateRecommendation, allocationOf, meetingPrep, runProfitabilityLive } from './client-analysis.js';
 import { assetRiskReturn } from './risk-return.js';
@@ -602,6 +603,10 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
       allocation: allocationOf(positions, total, policy),
       returns: returns.map((r) => ({ month: r.month, portfolio: r.portfolio_return, benchmark: r.benchmark_return, method: r.method })),
       reports: isAdvisor ? reports : reports.filter((r) => r.status === 'published'),
+      // When the valuation above was last brought to market, and by whom: the
+      // advisor reading these numbers half an hour before a meeting has to be
+      // able to see how old they are without opening the audit tab.
+      last_refresh: isAdvisor ? await CR.lastRefreshSummary(db, client.id) : null,
       acting_as: actingAs,
     });
   }
@@ -696,6 +701,28 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
   if (sub === '/indicators/series') {
     const r = await S.indicatorSeries(env, { window: url.searchParams.get('window') || '30d', from: url.searchParams.get('from'), to: url.searchParams.get('to') });
     return r.error ? bad(400, r.error) : ok(r);
+  }
+
+  // ── this client's data, brought to today's prices ─────────────────────────
+  // The advisor with a meeting in half an hour remarks one portfolio without
+  // waiting on the whole book: the daily agents refresh the market the letter
+  // is written against, this refreshes what the client actually holds.
+  if (sub === '/refresh') {
+    if (!isAdvisor) return bad(403, 'advisor only');
+    if (method === 'POST') {
+      await audit(db, { entity: 'client_refresh', entity_id: client.id, action: 'requested', actor_id: session.user_id });
+      const started = await CR.startClientRefresh(env, ctx, { scope, actorId: session.user_id });
+      return started.error ? bad(400, started.error) : ok({ run: started.run });
+    }
+    return ok({ run: CR.runView(await CR.latestRefresh(db, client.id)) });
+  }
+
+  const refreshMatch = sub.match(/^\/refresh\/([^/]+)$/);
+  if (refreshMatch) {
+    if (!isAdvisor) return bad(403, 'advisor only');
+    const row = await first(db, 'SELECT * FROM client_refresh_runs WHERE id = ? AND client_id = ?', refreshMatch[1], client.id);
+    if (!row) return bad(404, 'run not found');
+    return ok({ run: CR.runView(row) });
   }
 
   // ── the report agent: a two-page PDF on demand, advisor only ──────────────

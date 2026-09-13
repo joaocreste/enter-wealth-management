@@ -267,6 +267,38 @@ instruments accrue from the Banco Central index plus their spread; cash, matured
 lines and short series are listed as excluded with the reason. The chart sits on
 the Sinais de mercado page.
 
+### Bringing one client's data to today
+
+Half an hour before a meeting the advisor does not need the whole book rebuilt —
+they need *this* client's numbers to be current. The **atualizar dados** button
+sits to the left of **criar relatório pdf** on the client page and runs three
+steps (`worker/src/client-refresh.js`), reporting each to the same progress card
+the daily agents use.
+
+1. **Preços** — every position remarked at the newest observation its own
+   provider has: Yahoo Finance for the listed instruments, the custodian
+   statement for fund quotas, the Banco Central's index plus the contractual
+   spread for the accrual instruments, PTAX for what is not in the client's
+   currency. A position no approved provider can price keeps the price it had
+   and is counted as kept — never guessed, and never silently.
+2. **Carteira** — the remarked positions are written as a new approved snapshot
+   effective today; the previous one is superseded, not overwritten, so the
+   valuation every published letter rests on stays readable. Quantities, cost
+   bases and notes are carried over untouched: the refresh changes what the
+   holdings are worth, never what they are. A second refresh on the same day
+   rewrites the snapshot the first one wrote instead of stacking another.
+3. **Leitura** — the new allocation against the policy: the classes outside
+   their band, the drift against the target, the single names over the cap, and
+   how old the day's panorama is beside a valuation that is now current.
+
+Accrual instruments are remarked from where they already stood rather than from
+par, so refreshing twice does not pay a second day of spread. Runs live in
+`client_refresh_runs` (migration `0005`) with the per-position detail and the
+source ledger; `POST /api/clients/:id/refresh` starts one and
+`GET /api/clients/:id/refresh/:runId` reports it, both advisor-only. The client
+page header then reads *valores de <date>* followed by the providers that
+supplied them.
+
 ### The report agent
 
 From a client's page the advisor has a **criar relatório pdf** button. It opens a

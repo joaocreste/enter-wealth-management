@@ -593,8 +593,16 @@ async function viewClient({ id, tab = 'overview' }) {
 
   const body = await renderClientTab(tab, id, d);
   crumbs(crumbsFor(currentHash(), { clientName: c.name }));
+  const sub = [
+    `${money(d.total_value, { locale: L })} sob assessoria`,
+    `política v${d.policy?.version} de ${dateLong(d.policy?.effective_date, L)}`,
+    c.next_review_at ? `próxima revisão ${shortDate(c.next_review_at)}` : null,
+    valuationLine(d),
+  ].filter(Boolean).join(' · ');
   return frag(
-    head(c.name, `${money(d.total_value, { locale: L })} sob assessoria · política v${d.policy?.version} de ${dateLong(d.policy?.effective_date, L)}${c.next_review_at ? ` · próxima revisão ${shortDate(c.next_review_at)}` : ''}`, [
+    head(c.name, sub, [
+      // the client's own data first: the numbers every other action reads
+      clientRefreshButton(id),
       // opens its own tab: the report agent runs there and the PDF lands there
       h('a.btn', { href: `#/client/${id}/relatorio`, target: '_blank', rel: 'noopener' }, icon('documents', { size: 15 }), h('span', { text: 'criar relatório pdf' })),
       h('a.btn', { href: `#/client/${id}/prep` }, icon('prep', { size: 15 }), h('span', { text: 'preparar reunião' })),
@@ -602,6 +610,75 @@ async function viewClient({ id, tab = 'overview' }) {
     ], [h('b', { text: 'Cliente' }), sep(), `perfil ${c.risk_profile}`, c.segment ? sep() : null, c.segment || null]),
     tabsEl,
     body);
+}
+
+/**
+ * How old the numbers on this page are, and who priced them. Every figure the
+ * advisor reads here is a market figure, so the provider is named where the
+ * total is (§29); before any refresh has run it is the approved snapshot's own
+ * date, with no provider claimed.
+ */
+function valuationLine(d) {
+  const r = d.last_refresh;
+  const date = r?.effective_date || d.snapshot?.effective_date;
+  if (!date) return null;
+  const who = r?.providers?.length ? ` (${r.providers.join(', ')})` : '';
+  return `valores de ${dateLong(date, L)}${who}`;
+}
+
+// ── this client's data, brought to today's prices ──────────────────────────
+// The daily agents refresh the market the letter is written against; this
+// refreshes what the client actually holds. Half an hour before a meeting the
+// advisor needs the second one without waiting on the first.
+const REFRESH_AGENTS = [
+  { step: 1, key: 'precos', title: 'Atualização · Preços', what: 'cada posição remarcada no provedor que a precifica' },
+  { step: 2, key: 'carteira', title: 'Atualização · Carteira', what: 'um novo retrato da carteira, com os valores e os pesos de hoje' },
+  { step: 3, key: 'leitura', title: 'Atualização · Leitura', what: 'a alocação contra a política e o que saiu da faixa' },
+];
+
+function clientRefreshButton(clientId) {
+  return h('button.btn', {
+    onclick: async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      try { followClientRefresh(clientId, (await api(`/api/clients/${clientId}/refresh`, {})).run); }
+      catch (err) { b.disabled = false; alert(`Não foi possível atualizar os dados: ${err.message}`); }
+    },
+  }, icon('refresh', { size: 15 }), h('span', { text: 'atualizar dados' }));
+}
+
+/** Show the progress card for a refresh and follow it until it ends; then re-render. */
+function followClientRefresh(clientId, run) {
+  const card = progressCard({
+    title: 'Atualizando os dados do cliente',
+    agents: run.agents || REFRESH_AGENTS,
+    waitingText: 'Cada posição é remarcada no provedor que a precifica e a carteira é regravada com os valores de hoje. Leva alguns segundos.',
+    doneText: refreshDoneText,
+    doneLabel: 'ver a carteira',
+    onDone: () => ROUTER?.render(),
+  });
+  card.update(run);
+  const tick = async () => {
+    let r;
+    try { r = (await api(`/api/clients/${clientId}/refresh/${run.id}`)).run; }
+    catch (err) { card.update({ status: 'failed', error: err.message, step: run.step, progress: run.progress }); return; }
+    card.update(r);
+    if (r.status === 'running') setTimeout(tick, 1000);
+  };
+  setTimeout(tick, 600);
+}
+
+/** What the finished refresh actually did, in one line: the new total, what it moved, who priced it. */
+function refreshDoneText(r) {
+  const s = r.result;
+  if (!s) return 'Concluído. A carteira abaixo já reflete esta atualização.';
+  const move = s.change_pct == null ? '' : ` · ${percent(s.change_pct, { locale: L })} sobre ${money(s.previous_total, { locale: L })} de ${dmy(s.from)}`;
+  const kept = s.counts?.kept ? `, ${s.counts.kept} mantiveram o preço que já tinham` : '';
+  const fontes = (s.providers || []).join(', ') || 'nenhuma fonte externa respondeu';
+  const stale = s.overview?.stale
+    ? ` O panorama do dia é de ${dmy(s.overview.date)}: atualize-o na visão geral antes de gerar a carta.`
+    : '';
+  return `${money(s.total_value, { locale: L })} em ${dmy(s.to)}${move}. ${s.counts?.priced} de ${s.counts?.total} posições remarcadas${kept} · ${fontes}.${stale}`;
 }
 
 async function renderClientTab(tab, id, d) {

@@ -12,7 +12,7 @@
  * model's job is language, not arithmetic.
  */
 
-export const PROMPT_VERSION = 'letter-2026-09-d';
+export const PROMPT_VERSION = 'letter-2026-09-e';
 
 export const SYSTEM_GUARDRAIL = `You are the writing layer of a regulated investment-advisory system at XP Asset Management.
 
@@ -76,7 +76,15 @@ Return STRICT JSON with this exact shape and nothing else:
 {{facts}}`,
   },
 
-  /** §19 of the Rivet graph — the client-specific narrative that becomes the letter. */
+  /**
+   * §19 of the Rivet graph — the letter itself.
+   *
+   * The first version of this prompt asked for eight labelled fields, each with
+   * its own sentence count: opening, performance, markets, meaning, and so on.
+   * The model filled slots and never wrote a letter; the paragraphs did not
+   * follow from one another and no idea held them together. This one asks for
+   * one text with a required arc, and lets the renderer supply the structure.
+   */
   client_letter: {
     id: 'client_letter',
     title: 'Write the monthly client letter (Portuguese)',
@@ -84,39 +92,54 @@ Return STRICT JSON with this exact shape and nothing else:
     system: SYSTEM_GUARDRAIL,
     template: `# Task: write the monthly client letter
 
-Write the monthly investment letter that this client will receive. It is a letter from a named advisor to a named person, not a factsheet.
+You are {{advisor_name}}, writing to {{client_first_name}}, a client you know, about the month that has just closed. This is a letter, not a factsheet with a greeting on top. Someone who reads it from the first line to the last must find one continuous piece of writing, where each paragraph follows from the one before it.
+
+Everything that is a figure, a table or a chart is printed by the renderer on a second page, the annex. You write the letter. Refer to the annex rather than reproducing it.
 
 ## Output
 
-Return STRICT JSON with this exact shape and nothing else:
+Return STRICT JSON with this exact shape and nothing else — the reply starts with { and ends with }, with no prose before or after and no markdown fence:
 
 {
-  "greeting": "one line, e.g. 'Prezado Albert,'",
-  "opening": "2 to 3 sentences. Personal, direct, no market commentary yet.",
-  "performance": "3 to 5 sentences on how the portfolio performed. Describe the loss before the gain. Name the largest negative contributor first, then the largest positive. State the method assumption in plain language if FACTS.performance.method is not 'simple'.",
-  "markets": "3 to 4 sentences on the market events in FACTS.events, and ONLY those. Only mention an event the client has exposure to.",
-  "meaning": "3 to 4 sentences translating those events into what they mean for THIS portfolio, using the exposure figures in FACTS.impact.",
-  "recommendations_intro": "1 to 2 sentences introducing the discussion points.",
-  "closing": "2 to 3 sentences. Reference the next meeting date if FACTS.next_meeting is present. Offer availability.",
+  "title": "the idea of the month in under 60 characters, no final period. It is what you would say if the client asked 'so how was the month?' and you had one line. Never a label like 'Carta mensal' or 'Relatório de agosto'.",
+  "greeting": "e.g. 'Prezado {{client_first_name}},'",
+  "paragraphs": ["...", "...", "...", "...", "...", "..."],
   "sign_off": "e.g. 'Um abraço,'"
 }
 
-## Language and register
+## The arc — one paragraph each, in this order, 4 to 6 in total
 
-- Write in Brazilian Portuguese. The client is not a finance professional.
-- Formal but warm. The register of a private-banking letter, not a bank circular.
-- Never use bullet points inside these fields; the renderer adds structure.
-- Brazilian number format: 1.234,56. Currency always written as R$ or US$, never a bare $.
-- Use the true minus sign − for negative figures, never a hyphen.
-- Do not repeat a figure that the renderer already prints in a table. Refer to it in words.
+1. The month, straight away. Say how it went and name the one thing that explains it. Never open by announcing what the letter contains.
+2. What drove the result. The loss before the gain, always. Name the largest detractor first, then what helped.
+3. What happened in the world, and only the part that touches THIS portfolio. Say how it reaches the client. Skip an event that does not reach them, or say plainly that it does not.
+4. The house view. What XP Asset Management reads into this, and what it means for the client's positioning.
+5. What you want to discuss at the next meeting. Two or three things, in prose, in the order of the annex. Never a list.
+6. The close. The meeting date if FACTS.next_meeting is present, a pointer to the annex, and an offer to talk before then.
 
-## Hard constraints
+Paragraphs 3 and 4 may be merged when the month is quiet, and paragraph 2 may be merged into 1 when the result has a single cause. Never fewer than four paragraphs, never more than six.
 
-- Every figure must come from FACTS. If FACTS.performance.monthly_return is null, say the return could not be computed and why, using FACTS.performance.unavailable_reason.
-- Do not name a recommendation as a decision. Use "vale discutirmos", "sugiro avaliarmos", "proponho revisarmos".
-- Where FACTS.recommendations contains an item with suitability_result other than PASS, the letter must not suggest increasing it.
-- Never mention an asset the client does not hold unless it appears in FACTS.recommendations as a candidate.
-- The letter is limited to two pages. Stay within the sentence counts above.
+## Voice
+
+- Brazilian Portuguese, formal but warm: the register of a private-banking letter.
+- A judgement, a reading or an expectation is the house speaking, in the first person plural, and it must be marked as a view: "Na nossa leitura aqui na XP Asset Management", "seguimos cautelosos", "não vemos motivo para". Never "acho", "na minha leitura", "eu prefiro" for a market view.
+- What the advisor personally does or offers is the first person singular: "quero conversar", "levo estes pontos", "é só me chamar". The commitments are the advisor's; the views are the firm's.
+- Address the client by first name. Short sentences, average under 18 words.
+- Call assets what a person calls them. FACTS gives a short_name for each: write "a Hapvida" and "o fundo do S&P 500", never the full legal name.
+- No bullet points, no headings, no section titles inside a paragraph. The renderer adds all structure.
+
+## Numbers
+
+- FACTS.labels holds every figure you are allowed to write, already formatted. Copy one of those strings character for character, or write the sentence without a figure. Never format, compute, round or estimate a number yourself.
+- At most TWO figures in the whole letter: normally FACTS.labels.monthly_return and FACTS.labels.excess_abs. Everything else is described in words, because the annex prints it.
+- A digit that is not in FACTS.labels is a defect, and the letter is rejected for it. Write "quase toda a diferença", not "84% da diferença".
+
+## What may never be said
+
+- Never present a suggestion as a decision or an order. The suggestions are points for the next meeting.
+- A position FACTS marks as within_policy false is out of the client's policy: say so plainly, and say what is proposed about it.
+- Where FACTS.performance.monthly_return is null, say the return could not be computed and why, using FACTS.performance.unavailable_reason. Never fill the gap.
+- Never mention an asset that is not in FACTS.
+- Never state a market fact that is not in FACTS.
 
 ## FACTS
 
@@ -401,11 +424,21 @@ Return STRICT JSON: an array of event objects.
 export function renderPrompt(key, facts) {
   const p = PROMPTS[key];
   if (!p) throw new Error(`unknown prompt ${key}`);
+  const o = typeof facts === 'object' && facts ? facts : {};
+  // Named placeholders let a prompt address the reader and the writer by name in
+  // its own instructions, which is the difference between "the writing layer of
+  // a regulated system" and "you are Antonio, writing to Albert".
+  const named = {
+    '{{date}}': o.date || new Date().toISOString().slice(0, 10),
+    '{{advisor_name}}': o.advisor?.name || 'o assessor',
+    '{{client_first_name}}': o.client?.first_name || (o.client?.name || '').split(' ')[0] || 'o cliente',
+    '{{client_name}}': o.client?.name || '',
+  };
+  let user = p.template;
+  for (const [k, v] of Object.entries(named)) user = user.split(k).join(String(v));
   return {
     system: p.system,
-    user: p.template
-      .replace('{{date}}', typeof facts === 'object' && facts?.date ? facts.date : new Date().toISOString().slice(0, 10))
-      .replace('{{facts}}', typeof facts === 'string' ? facts : JSON.stringify(facts, null, 2)),
+    user: user.replace('{{facts}}', typeof facts === 'string' ? facts : JSON.stringify(facts, null, 2)),
     prompt_version: PROMPT_VERSION,
     prompt_id: p.id,
     language_out: p.language_out,

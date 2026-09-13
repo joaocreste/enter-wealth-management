@@ -9,7 +9,7 @@
  */
 import { monthlyProfitability, modifiedDietz, timeWeightedReturn, historicalMetrics } from '../src/core/performance.js';
 import { proposeForAsset, bandPosition, ACTIONS } from '../src/core/recommendations.js';
-import { checkSuitability, SUITABILITY } from '../src/core/suitability.js';
+import { checkSuitability, SUITABILITY, withinPolicy, policyFitLabel } from '../src/core/suitability.js';
 import { evaluateTrigger, driftTriggers, triggerProximity, TRIGGER_STATUS } from '../src/core/triggers.js';
 import { validateReport, emptyReport, standardDisclosures } from '../src/core/report-schema.js';
 import { money, percent, pp, previousMonth, monthBounds, MINUS } from '../src/core/format.js';
@@ -17,7 +17,9 @@ import { TrueTypeFont } from '../src/render/pdf/ttf.js';
 import { brandFonts } from '../src/render/fonts/index.js';
 import { analyseForReport, factsForNarrative, buildReportModel } from '../src/render/report-model.js';
 import { renderReportPdf } from '../src/render/pdf/report.js';
-import { deterministicReportNarrative } from '../worker/src/llm.js';
+import { deterministicReportNarrative, deterministicLetter } from '../worker/src/llm.js';
+import { buildLetterModel, sanitiseLetter, strayNumbers, houseView, ACTION_PT } from '../src/render/letter-model.js';
+import { renderLetterPdf } from '../src/render/pdf/letter.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
 import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, efficientFrontier } from '../src/core/risk.js';
@@ -574,6 +576,186 @@ t('a Bing News item names its publisher and links to the article, not to Bing', 
   eq(it.title, 'Ibovespa vai às mínimas'); eq(it.source, 'Valor Econômico');
   eq(articleUrl(it.link), 'https://valor.globo.com/financas/noticia/2026/09/11/x.ghtml');
   eq(articleUrl('https://example.com/a'), 'https://example.com/a');
+});
+
+console.log('\n  The letter — one piece of writing, and a binary answer on policy');
+
+const LETTER_FACTS = {
+  date: '2026-09-08',
+  client: { name: 'Albert da Silva', first_name: 'Albert', risk_profile: 'Moderado', base_currency: 'BRL' },
+  advisor: { name: 'Antonio Bicudo' },
+  reporting_period: { month: '2026-08', start: '2026-08-01', end: '2026-08-31' },
+  performance: { monthly_return: -0.012, absolute_pnl: -4852, ending_market_value: 398161 },
+  benchmark: { value: 0.0176, available: true },
+  attribution: {
+    worst_contributor: { name: 'Hapvida Participações e Investimentos S.A.', short_name: 'Hapvida', contribution: -0.0179 },
+    best_contributor: { name: 'iShares S&P 500 FIC de Fundo de Índice', short_name: 'iShares S&P 500', contribution: 0.0047 },
+    fx_contribution: 0.0016,
+  },
+  events: [{ title_pt: 'Petróleo dispara com interrupção de oferta' }],
+  impact: [{ relevance: 'high', potential_impact_pt: 'Petróleo mais caro se transfere para a inflação a que a renda fixa está exposta' }],
+  advisor_view: { headline: 'Juro alto por mais tempo no Brasil', stance_by_asset_class: { 'Equities BR': 'cautious' } },
+  letter_recommendations: [
+    { short_name: 'Riza Lotus Plus', within_policy: false, signal_conflict: false },
+    { short_name: 'Hapvida', within_policy: true, signal_conflict: true },
+  ],
+  next_meeting: '2026-09-17',
+  next_meeting_label: '17 de setembro de 2026',
+  labels: {
+    month: 'agosto de 2026', monthly_return: '−1,20%', benchmark: '+1,76%',
+    excess: '−2,96 p.p.', excess_abs: '2,96 p.p.', absolute_pnl: '−R$ 4.852',
+    ending_value: 'R$ 398.161', next_meeting: '17 de setembro de 2026',
+  },
+};
+
+/** A canonical report of the shape the pipeline stores, for the render checks. */
+const LETTER_REPORT = {
+  locale: 'pt-BR',
+  generated_at: '2026-09-08T12:19:04Z',
+  client: { name: 'Albert da Silva', risk_profile: 'Moderado', base_currency: 'BRL' },
+  advisor: { name: 'Antonio Bicudo', code: 'A7699', email: 'antonio.bicudo@xpi.com.br' },
+  reporting_period: { month: '2026-08', start: '2026-08-01', end: '2026-08-31' },
+  portfolio_performance: {
+    monthly_return: -0.012, absolute_pnl: -4852, beginning_market_value: 403013, ending_market_value: 398161,
+    net_flows: 0, method: 'modified_dietz', method_note: { pt: 'Método de Dietz modificado.' }, source_ids: ['src_stmt'],
+  },
+  performance_attribution: {
+    top_positive: [{ ticker: 'IVVB11', name: 'iShares S&P 500', contribution: 0.0047, total_return: 0.031 }],
+    top_negative: [{ ticker: 'HAPV3', name: 'Hapvida', contribution: -0.0179, total_return: -0.414 }],
+    fx_contribution: 0.0016, reconciles: true,
+  },
+  benchmark: { name: 'Carteira de referência da política', value: 0.0176, comparison: { excess_return: -0.0296 } },
+  letter: deterministicLetter(LETTER_FACTS),
+  recommendations: [
+    {
+      asset_id: 'ast_riza', ticker: 'RIZA', name: 'Riza Lotus Plus Advisory FIC FIRF REF DI CP', asset_class: 'Fixed Income',
+      final_action: 'REDUCE', suitability_result: 'REDUCE_REQUIRED', advisor_status: 'approved', current_weight: 0.14,
+      within_policy: false, flags: [{ code: 'CONCENTRATION_BREACH', severity: 'high', breach: true }],
+      rationale_pt: 'A posição representa 14,0% da carteira, acima do teto de 12% por emissor previsto na sua política.',
+    },
+    {
+      asset_id: 'ast_hapv3', ticker: 'HAPV3', name: 'Hapvida', asset_class: 'Equities BR',
+      final_action: 'DISCUSS', suitability_result: 'DO_NOT_ADD', advisor_status: 'approved', current_weight: 0.026,
+      within_policy: false, signal_conflict: true, technical_signal: 'Sell', analyst_signal: 'Buy', analyst_count: 11,
+      flags: [{ code: 'RISK_GRADE_ABOVE_PROFILE', severity: 'medium', breach: true }],
+      rationale_pt: 'A leitura técnica aponta venda e o consenso de analistas aponta compra.',
+    },
+    {
+      asset_id: 'ast_imab11', ticker: 'IMAB11', name: 'Tesouro IPCA', asset_class: 'Fixed Income',
+      final_action: 'ADD', suitability_result: 'PASS', advisor_status: 'approved', current_weight: 0.073,
+      within_policy: true, technical_signal: 'Strong Buy', flags: [],
+      rationale_pt: 'Sinal técnico de compra forte e a classe ainda tem espaço dentro da faixa aprovada.',
+    },
+  ],
+  approved_portfolio: {
+    policy_version: 3,
+    allocation: [
+      { asset_class: 'Fixed Income', weight: 0.326, value: 129734, target: 0.40, range: { min: 0.30, max: 0.55 } },
+      { asset_class: 'Equities BR', weight: 0.283, value: 112636, target: 0.20, range: { min: 0.10, max: 0.30 } },
+      { asset_class: 'Equities Global', weight: 0.182, value: 72391, target: 0.15, range: { min: 0.05, max: 0.25 } },
+      { asset_class: 'Alternatives', weight: 0.134, value: 53400, target: 0.12, range: { min: 0.05, max: 0.20 } },
+      { asset_class: 'Cash', weight: 0.075, value: 30000, target: 0.05, range: { min: 0.02, max: 0.12 } },
+    ],
+  },
+  portfolio_impact: [],
+  sources: [{ id: 'src_stmt', provider: 'XP position statement', kind: 'statement', as_of: '2026-08-31' }],
+  disclosures: standardDisclosures('pt-BR'),
+  data_quality: { warnings: [], unavailable: [] },
+};
+
+t('the deterministic letter is a letter: a title, a greeting and paragraphs that follow an arc', () => {
+  const l = deterministicLetter(LETTER_FACTS);
+  ok(l.title && l.title.length > 10, 'no title');
+  ok(!/^carta|^relat/i.test(l.title), `the title is a label, not an idea: ${l.title}`);
+  ok(l.paragraphs.length >= 4 && l.paragraphs.length <= 6, `${l.paragraphs.length} paragraphs`);
+  eq(l.greeting, 'Prezado Albert,');
+  const all = l.paragraphs.join(' ');
+  ok(all.includes('Hapvida'), 'the largest detractor is never named');
+  ok(all.indexOf('Hapvida') < all.indexOf('iShares'), 'the gain is described before the loss');
+  ok(!all.includes('Participações e Investimentos S.A.'), 'the letter uses a custody statement name');
+});
+
+t('the house speaks in the plural and the advisor in the singular', () => {
+  const all = deterministicLetter(LETTER_FACTS).paragraphs.join(' ');
+  ok(all.includes('Na nossa leitura aqui na XP Asset Management'), 'the view is not attributed to the firm');
+  ok(!/\bna minha leitura\b|\beu acho\b|\beu prefiro\b/i.test(all), 'a market view is written in the first person singular');
+  ok(/\bquero conversar\b|\bLevo estes pontos\b|\bme chamar\b/.test(all), 'nothing is offered in the advisor\'s own voice');
+});
+
+t('a figure the facts never supplied is rejected, and the letter is asked for again', () => {
+  const good = deterministicLetter(LETTER_FACTS);
+  ok(sanitiseLetter(good, LETTER_FACTS).paragraphs.length >= 4, 'the deterministic letter fails its own check');
+  // The invented figure has to sit inside the paragraphs that will be printed:
+  // sanitiseLetter clips to six before it checks, so appending a seventh proves nothing.
+  const invented = { ...good, paragraphs: ['A Hapvida caiu 41,4% e explicou 84% da diferença.', ...good.paragraphs.slice(1)] };
+  let threw = null;
+  try { sanitiseLetter(invented, LETTER_FACTS); } catch (e) { threw = e; }
+  ok(threw, 'an invented figure reached the client');
+  ok(threw.message.includes('41') && threw.message.includes('84'), threw.message);
+  eq(strayNumbers('A carteira fez −1,20%, 2,96 p.p. abaixo da referência.', LETTER_FACTS).length, 0);
+});
+
+t('a letter of three paragraphs is not a letter', () => {
+  let threw = null;
+  try { sanitiseLetter({ title: 'x', greeting: 'Prezado Albert,', paragraphs: ['a', 'b', 'c'] }, LETTER_FACTS); } catch (e) { threw = e; }
+  ok(threw && threw.message.includes('3 paragraphs'), 'a three-paragraph reply was accepted');
+});
+
+t('enquadramento has two values: a held grade-5 name is outside, a class on its ceiling is inside', () => {
+  const policy = { risk_profile: 'Moderado', single_name_cap: 0.12, permitted_ranges: { 'Equities BR': { min: 0.10, max: 0.30 } } };
+  // Albert's Hapvida: grade 5 against a ceiling of 4, and he holds it.
+  const held = checkSuitability(
+    { proposed_action: ACTIONS.HOLD, current_weight: 0.026 },
+    { asset: { asset_class: 'Equities BR', risk_grade: 5, ticker: 'HAPV3' }, policy, exposures: { 'Equities BR': 0.283 }, classBand: policy.permitted_ranges['Equities BR'] },
+  );
+  eq(held.suitability_result, SUITABILITY.DO_NOT_ADD);
+  eq(withinPolicy(held), false, 'a holding above the profile grade ceiling reported as within policy');
+  eq(policyFitLabel(held), 'Fora da política');
+
+  // A class sitting exactly on its ceiling: adding would breach, the holding does not.
+  const atMax = checkSuitability(
+    { proposed_action: ACTIONS.ADD, current_weight: 0.05 },
+    { asset: { asset_class: 'Equities BR', risk_grade: 4, ticker: 'BOVA11' }, policy, exposures: { 'Equities BR': 0.30 }, classBand: policy.permitted_ranges['Equities BR'] },
+  );
+  eq(atMax.suitability_result, SUITABILITY.DO_NOT_ADD, 'the guardrail let an add through at the ceiling');
+  eq(withinPolicy(atMax), true, '"adding would breach" was reported to the client as a breach');
+  eq(policyFitLabel(atMax), 'Dentro da política');
+
+  // Over the issuer cap: a real breach, and the guardrail forces a reduction.
+  const over = checkSuitability(
+    { proposed_action: ACTIONS.HOLD, current_weight: 0.14 },
+    { asset: { asset_class: 'Fixed Income', risk_grade: 3, ticker: 'RIZA' }, policy, exposures: { 'Fixed Income': 0.326 } },
+  );
+  eq(over.suitability_result, SUITABILITY.REDUCE_REQUIRED);
+  eq(withinPolicy(over), false);
+  eq(over.final_action, ACTIONS.REDUCE);
+});
+
+t('the client reads three verbs, and every engine action maps onto one of them', () => {
+  const seen = new Set(Object.values(ACTIONS).map((a) => ACTION_PT[a]));
+  eq([...seen].sort().join(', '), 'Aumentar, Manter, Reduzir');
+});
+
+t('a view the firm never formed never reaches the client as the firm\'s view', () => {
+  // The deterministic World Overview sets every stance to neutral and says so.
+  eq(houseView({ headline_pt: 'Brent rompeu US$ 90', summary_pt: '4 limiares rompidos.', mode: 'deterministic_template', generated_without_model: true, stance_by_asset_class: {} }), null);
+  const formed = houseView({ headline_pt: 'Juro alto por mais tempo', summary_pt: 'O Copom manteve o tom duro.', mode: 'model', briefing: { main_risk_or_opportunity_pt: 'O risco é o fiscal.' }, stance_by_asset_class: { 'Equities BR': 'cautious' } });
+  eq(formed.main_risk, 'O risco é o fiscal.');
+  // An advisor who wrote a commentary has formed a view, model or no model.
+  const byHand = houseView({ advisor_commentary: 'Sigo cauteloso com bolsa local.', mode: 'deterministic_template', generated_without_model: true, stance_by_asset_class: { 'Equities BR': 'cautious' } });
+  eq(byHand.commentary, 'Sigo cauteloso com bolsa local.');
+  eq(byHand.summary, null, 'a template summary was passed off as the house view');
+});
+
+await ta('the pdf is a letter on page one and the annex on page two', async () => {
+  const model = buildLetterModel(LETTER_REPORT, { locale: 'pt-BR' });
+  const doc = await renderLetterPdf(model, { fonts: brandFonts(), maxPages: 2 });
+  eq(doc.pageCount, 2, 'the letter is not two pages');
+  const bytes = doc.build();
+  ok(bytes.length > 4000, 'the pdf is suspiciously small');
+  ok(model.letter.paragraphs.length >= 4, 'the model lost the paragraphs');
+  eq(model.recommendations[0].suitability_label, 'Fora da política');
+  ok(model.dateline.place_date.startsWith('São Paulo,'), model.dateline.place_date);
 });
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

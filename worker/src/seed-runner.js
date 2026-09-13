@@ -16,8 +16,16 @@ import { quote } from '../../src/adapters/yahoo.js';
 import * as bcb from '../../src/adapters/bcb.js';
 import { useKv } from '../../src/adapters/cache.js';
 
+/**
+ * Cleared before a re-seed, children before parents.
+ *
+ * Every table that points at clients, advisors or users belongs here. A table
+ * added by a later migration and forgotten does not fail loudly at deploy — it
+ * fails the next time someone re-seeds, as a foreign-key error from a DELETE
+ * several lines further down, which is a long way from the cause.
+ */
 const TABLES = [
-  'sessions', 'audit_log', 'graph_runs', 'data_sources', 'reports', 'recommendations',
+  'sessions', 'audit_log', 'graph_runs', 'data_sources', 'pdf_reports', 'overview_runs', 'reports', 'recommendations',
   'tradingview_signals', 'world_overviews', 'market_triggers', 'market_events',
   'market_observations', 'monthly_returns', 'cash_flows', 'positions', 'portfolio_snapshots',
   'meetings', 'investment_policies', 'assets', 'clients', 'advisors', 'users',

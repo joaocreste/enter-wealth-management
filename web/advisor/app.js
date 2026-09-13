@@ -832,7 +832,18 @@ async function tabRecommendations(id) {
   );
 }
 
+// The advisor's queue keeps the engine's own words, because "encerrar" and
+// "discutir" are decisions they take. The client's three verbs are in the letter.
 const actionLabel = (a) => ({ ADD: 'Aumentar', HOLD: 'Manter', REDUCE: 'Reduzir', EXIT: 'Encerrar', DISCUSS: 'Discutir' }[a] || a);
+const clientActionLabel = (a) => ({ ADD: 'Aumentar', HOLD: 'Manter', REDUCE: 'Reduzir', EXIT: 'Reduzir', DISCUSS: 'Manter' }[a] || a);
+const LEGACY_BREACH = new Set(['RESTRICTED_INSTRUMENT', 'RISK_GRADE_ABOVE_PROFILE', 'CLASS_AT_OR_ABOVE_MAX', 'CLASS_BELOW_MIN', 'CONCENTRATION_BREACH']);
+const withinPolicy = (r) => {
+  if (typeof r?.within_policy === 'boolean') return r.within_policy;
+  const flags = r?.flags || [];
+  if (flags.some((f) => f.breach === true)) return false;
+  return !flags.some((f) => f.breach === undefined && LEGACY_BREACH.has(f.code));
+};
+const policyFitPt = (r) => (withinPolicy(r) ? 'Dentro da política' : 'Fora da política');
 const statusLabel = (s) => ({ proposed: 'proposta', approved: 'aprovada', rejected: 'rejeitada', edited: 'editada' }[s] || s);
 const suitabilityLabel = (s) => ({
   PASS: 'Dentro da política', DISCUSS_ONLY: 'Somente discussão', DO_NOT_ADD: 'Não aumentar',
@@ -1177,10 +1188,17 @@ function renderCanonicalSummary(c) {
   return frag(
     h('div.grid.g2', {},
       h('div.card', {},
-        h('div.card-h', {}, h('h3', { text: 'Texto da carta' }), h('span.meta', { text: c.locale })),
-        Object.entries(letter).filter(([k]) => k !== 'language').map(([k, v]) => h('div', { style: { marginBottom: '12px' } },
-          h('div.rail-h', { text: k.replace(/_/g, ' ') }),
-          h('p.reading', { style: { fontSize: '15px', color: 'var(--ink-700)' }, text: v })))),
+        h('div.card-h', {}, h('h3', { text: 'Texto da carta' }),
+          h('span.meta', { text: `${(letter.paragraphs || []).length} parágrafos · ${c.locale}` })),
+        // The advisor reads what the client will read, in the order they will
+        // read it. A field-by-field dump is how the letter stopped being one.
+        h('div.letter', { style: { fontSize: '15px' } },
+          letter.title ? h('h2.letter-title', { text: letter.title }) : null,
+          h('p.greeting', { text: letter.greeting || '' }),
+          (letter.paragraphs || []).map((x) => h('p', { text: x })),
+          letter.sign_off ? h('p', { text: letter.sign_off }) : null,
+          h('div.sig', {}, h('b', { text: c.advisor?.name || '' }),
+            h('span', { text: `XP Asset Management${c.advisor?.code ? ` · ${c.advisor.code}` : ''}` })))),
       h('div', {},
         h('div.card', { style: { marginBottom: '16px' } },
           h('div.card-h', {}, h('h3', { text: 'Números da carta' })),
@@ -1191,11 +1209,14 @@ function renderCanonicalSummary(c) {
             stat('Método', c.portfolio_performance?.method, { small: true }))),
         h('div.card', {},
           h('div.card-h', {}, h('h3', { text: 'Recomendações publicadas' }), h('span.meta', { text: `${(c.recommendations || []).length} itens aprovados` })),
-          table(['Ativo', 'Ação', 'Enquadramento'],
+          // This panel shows what the client received, so it uses the client's
+          // words: three verbs and a policy answer with two values. The engine's
+          // five-value vocabulary stays in the advisor's own decision queue.
+          table(['Ativo', 'Sugestão', 'Enquadramento'],
             (c.recommendations || []).map((r) => h('tr', {},
               h('td.name', { text: r.ticker || r.name }),
-              h('td', {}, h('span', { class: `chip ${String(r.final_action).toLowerCase()}`, text: actionLabel(r.final_action) })),
-              h('td', { class: r.suitability_result === 'PASS' ? '' : 'caution', text: suitabilityLabel(r.suitability_result) }))))))),
+              h('td', {}, h('span', { class: `chip ${String(r.final_action).toLowerCase()}`, text: clientActionLabel(r.final_action) })),
+              h('td', { class: withinPolicy(r) ? '' : 'caution', text: policyFitPt(r) }))))))),
     (c.data_quality?.unavailable || []).length ? h('div.card', { style: { marginTop: '16px' } },
       h('div.card-h', {}, h('h3', { text: 'Dados indisponíveis divulgados na carta' })),
       table(['Item', 'Motivo'], c.data_quality.unavailable.map((u) => h('tr', {}, h('td.name', { text: u.item }), h('td', { text: u.reason }))))) : null,

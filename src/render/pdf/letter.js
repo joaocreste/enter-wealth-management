@@ -46,6 +46,9 @@ const RAIL = 54;
 const X = M.left + RAIL;
 const W = A4.width - X - M.right;
 const FULL = A4.width - M.left - M.right;
+/** Page one is set in a reading measure, not the full width of the annex. */
+const LX = 62;
+const LW = 421;
 
 const SZ = {
   // §04 asks for a generous leading; 1.6 is the most the two-page rule allows
@@ -94,72 +97,74 @@ function tracked(doc, str, x, y, { font = 'light', size = 8, color: c = INK, tra
 }
 
 /**
- * Reduction ladder — what gets dropped first when two pages are not enough.
+ * Reduction ladder — what gets dropped when two pages are not enough.
  *
- * Ordered by what a client actually loses. Supporting rows go first, then table
- * length, then leading and body size. The contribution chart is last, because
- * "why did my portfolio move" is the question the letter exists to answer, and
- * one chart answers it better than the paragraph beside it.
+ * The letter itself is never cut for space: a paragraph the advisor wrote is
+ * what the client is here to read. Only the annex gives ground, and it gives it
+ * in the order a client would miss it least: supporting rows, then table length,
+ * then the chart. If the letter alone genuinely cannot fit on one page, the last
+ * two rungs tighten its type rather than removing a sentence.
  */
 function budget(level) {
   return {
-    maxImpact: level >= 1 ? 2 : 3,
-    showMetrics: level < 2,
-    sectionGap: level >= 2 ? 12 : 15,
-    showBandChart: level < 3,
-    maxAllocationRows: level >= 3 ? 6 : 8,
-    bodySize: level >= 7 ? 9.4 : level >= 4 ? 9.7 : SZ.body,
-    bodyLead: level >= 7 ? 13.8 : level >= 4 ? 14.8 : SZ.bodyLead,
-    maxImpactLines: level >= 5 ? 1 : 2,
-    // The discussion table is the operative half of the letter, so it is
-    // trimmed late and never below three rows.
-    maxRecommendations: level >= 7 ? 3 : level >= 6 ? 4 : 5,
-    showContributionChart: level < 8,
+    maxAllocationRows: level >= 1 ? 6 : 8,
+    // Fewer rows before shorter rows. The line under a row is where "fora da
+    // política" says WHY, and a client who reads that verdict without the reason
+    // has been told something alarming and nothing else.
+    maxRecommendations: level >= 3 ? 3 : level >= 2 ? 4 : 5,
+    // The exhaustive ticker list is the least-read text on the page, so it is
+    // compacted to the providers and their as-of dates before anything a client
+    // actually looks at is touched. The chart goes last: "who moved my
+    // portfolio" is the question the annex exists to answer.
+    compactSources: level >= 4,
+    // The method note's third sentence justifies the method to a reader who
+    // already accepted it in the first two, and the gaps between blocks are the
+    // cheapest points on the page.
+    methodSentences: level >= 2 ? 2 : 99,
+    blockGap: level >= 2 ? 10 : 14,
+    showRationale: level < 6,
+    showContributionChart: level < 7,
+    bodySize: level >= 7 ? 9.4 : level >= 6 ? 9.8 : SZ.body,
+    bodyLead: level >= 7 ? 14.2 : level >= 6 ? 15.2 : SZ.bodyLead,
     level,
   };
 }
 
+/**
+ * Page one is the letter and page two is the annex, always, and the break
+ * between them is deliberate rather than whatever the text happened to fill.
+ * That single decision is what separates a letter with figures attached from a
+ * report with a greeting on top.
+ */
 function compose(doc, model, level, maxPages) {
   const b = budget(level);
-  const blocks = buildBlocks(doc, model, b);
   const discH = disclaimerHeight(doc, model);
-  const floorLast = PAGE.footerH + discH + 14;          // the dark disclaimer block sits above the footer
-  const floorMore = PAGE.footerH + 26;                  // room for "continua na página 2"
-
-  let page = null;
-  let y = 0;
+  const floorLetter = PAGE.footerH + 24;
+  // The disclaimer block carries 32 pt of its own padding, so the gap above it
+  // does not need another 14 on top.
+  const floorAnnex = PAGE.footerH + discH + 8;
   let pageNo = 0;
+  let y = 0;
   let overflow = false;
 
-  const newPage = () => {
-    pageNo += 1;
-    page = doc.addPage();
-    y = drawMasthead(doc, model, pageNo);
-    return y;
-  };
+  const newPage = () => { pageNo += 1; doc.addPage(); y = drawMasthead(doc, model, pageNo); };
 
+  // ── page one: the letter ────────────────────────────────────────────────
   newPage();
-
-  for (const block of blocks) {
-    const h = block.height;
-    const floor = pageNo >= maxPages ? floorLast : floorMore;
-    if (y - h < floor) {
-      if (pageNo >= maxPages) { overflow = true; break; }
-      drawFoot(doc, model, pageNo, false, discH);
-      newPage();
-    }
-    y = block.draw(y);
-    y -= block.gap ?? 14;
+  for (const block of buildLetterBlocks(doc, model, b)) {
+    if (y - block.height < floorLetter) { overflow = true; break; }
+    y = block.draw(y) - (block.gap ?? 14);
   }
+  drawFoot(doc, model, pageNo, false, discH);
 
-  // The disclaimer must share a page with the figures; if the letter ended on
-  // page one without room for it, it closes on page two.
-  if (!overflow && y < floorLast) {
-    if (pageNo >= maxPages) overflow = true;
-    else { drawFoot(doc, model, pageNo, false, discH); newPage(); }
+  // ── page two: the annex ─────────────────────────────────────────────────
+  newPage();
+  for (const block of buildAnnexBlocks(doc, model, b)) {
+    if (y - block.height < floorAnnex) { overflow = true; break; }
+    y = block.draw(y) - (block.gap ?? 12);
   }
   drawFoot(doc, model, pageNo, true, discH);
-  return overflow;
+  return overflow || doc.pageCount > maxPages;
 }
 
 // ── chrome ─────────────────────────────────────────────────────────────────
@@ -183,26 +188,10 @@ function drawMasthead(doc, model, pageNo) {
   tracked(doc, model.period.label, cx, baseline + 0.5, { font: 'light', size: 8, color: SAGE, track: 0.32 });
   drawSymbol(doc, A4.width - 20 - 28.9 * LOGO_SYMBOL_ASPECT, H - 31.1 - 28.9, 28.9, '#FFFFFF');
 
-  if (pageNo === 1) {
-    // §06 the byline, tracked, the name in Regular
-    const by = H - PAGE.headerH - 16;
-    let bx = M.left;
-    bx += tracked(doc, L === 'pt-BR' ? 'Por ' : 'By ', bx, by, { font: 'light', size: 8, color: INK });
-    bx += tracked(doc, model.advisor?.name || '', bx, by, { font: 'sans', size: 8, color: INK });
-    tracked(doc, ', XP Asset Management', bx, by, { font: 'light', size: 8, color: INK });
-
-    const y = by - 21;
-    doc.text(model.client?.name || '', M.left, y, { font: 'sans5', size: 12.5, color: INK, charSpacing: -0.1 });
-    const meta = [
-      `${L === 'pt-BR' ? 'Perfil' : 'Profile'}: ${model.client?.risk_profile}`,
-      `${L === 'pt-BR' ? 'Assessor' : 'Advisor'}: ${model.advisor?.name}${model.advisor?.code ? ` (${model.advisor.code})` : ''}`,
-      `${L === 'pt-BR' ? 'Posição em' : 'As at'} ${dateLong(model.period.end, L)}`,
-    ].join('   ·   ');
-    doc.textRight(meta, A4.width - M.right, y + 2, { font: 'light', size: 7.6, color: INK3 });
-    doc.line(M.left, y - 9, A4.width - M.right, y - 9, { color: RULE, width: 0.6 });
-    return y - 26;
-  }
-  return H - PAGE.headerH - 30;
+  // The letter's own head — who it is to, where and when it was written — is a
+  // block on the page, not a strip of CRM metadata under the masthead. The
+  // profile, the advisor code and the position date belong to the annex.
+  return H - PAGE.headerH - (pageNo === 1 ? 44 : 30);
 }
 
 /** §02 the XP symbol, from the same path data every surface uses, filled even-odd so the letters stay open. */
@@ -242,193 +231,215 @@ function drawFoot(doc, model, pageNo, isLast, discH) {
 
 // ── block construction ─────────────────────────────────────────────────────
 
-function buildBlocks(doc, model, b) {
+/**
+ * Page one. A correspondence head, the idea of the month, the greeting, the
+ * paragraphs and a signature — in a reading measure, not the full page width.
+ */
+function buildLetterBlocks(doc, model, b) {
   const L = model.locale;
   const blocks = [];
-  let sectionNo = 0;
+  const d = model.dateline || {};
+  const letter = model.letter || {};
+  const body = { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: LW };
 
-  const railNote = (y, lines) => {
-    let cy = y - 6;
-    for (const line of lines) {
-      const wrapped = doc.wrap(line, { font: 'light', size: SZ.rail, maxWidth: RAIL - 10 });
-      for (const w of wrapped) {
-        doc.text(w, M.left, cy, { font: 'light', size: SZ.rail, color: INK3 });
-        cy -= SZ.rail * 1.3;
-      }
-      cy -= 2;
-    }
-  };
-
-  // §06 the article title: Roboto Bold, capitals, copper; the number in the rail
-  const section = (key, title, drawBody, { gap = b.sectionGap, note = null } = {}) => {
-    sectionNo += 1;
-    const num = String(sectionNo).padStart(2, '0');
-    const headH = 18;
-    const bodyH = drawBody.measure();
-    blocks.push({
-      height: headH + bodyH,
-      gap,
-      draw: (y) => {
-        doc.text(num, M.left, y - 1, { font: 'sans5', size: SZ.rail, color: COPPER, charSpacing: 0.6 });
-        doc.text(String(title).toUpperCase(), X, y, { font: 'sans7', size: SZ.h2, color: COPPER2, charSpacing: 0.25 });
-        if (note) railNote(y - 18, note);
-        return drawBody.draw(y - headH);
-      },
-    });
-  };
-
-  // ── 01 opening ──────────────────────────────────────────────────────────
+  // ── to whom, from where, when ───────────────────────────────────────────
   blocks.push({
-    height: doc.paragraphHeight(model.letter.opening || '', { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W }) + 22,
-    gap: 16,
+    height: 26, gap: 30,
     draw: (y) => {
-      doc.text(model.letter.greeting || '', X, y, { font: 'light', size: b.bodySize + 1.6, color: INK });
-      return doc.paragraph(model.letter.opening || '', X, y - 20, {
-        font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W, color: INK,
-      });
+      doc.text(d.to || model.client?.name || '', LX, y, { font: 'sans5', size: 10.6, color: INK });
+      doc.textRight(d.place_date || '', LX + LW, y, { font: 'light', size: 9.2, color: INK2 });
+      if (d.to_line) doc.text(d.to_line, LX, y - 13, { font: 'light', size: 7.8, color: SAGE });
+      return y - 26;
     },
   });
 
-  // ── 02 performance ──────────────────────────────────────────────────────
-  {
-    const paraH = doc.paragraphHeight(model.letter.performance || '', { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W });
-    const figH = 52;
-    const chartH = b.showContributionChart ? contributorsChartHeight(model) : 0;
-    const methodH = model.method_note ? doc.paragraphHeight(model.method_note, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W }) + 6 : 0;
-
-    section('performance', model.sections.performance, {
-      measure: () => paraH + 12 + figH + 12 + chartH + methodH,
+  // ── the idea of the month ───────────────────────────────────────────────
+  if (letter.title) {
+    const lines = doc.wrap(letter.title, { font: 'sans7', size: 13, maxWidth: LW });
+    blocks.push({
+      height: lines.length * 17, gap: 16,
       draw: (y) => {
-        let cy = drawFigureStrip(doc, model, X, y, W);
-        cy -= 12;
-        cy = doc.paragraph(model.letter.performance || '', X, cy, {
-          font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W, color: INK,
-        });
-        if (b.showContributionChart) {
-          cy -= 6;
-          cy = drawContributorsChart(doc, model, X, cy, W);
-        }
-        if (model.method_note) {
-          cy -= 4;
-          cy = doc.paragraph(model.method_note, X, cy, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W, color: INK2 });
-        }
+        let cy = y;
+        for (const line of lines) { doc.text(line, LX, cy, { font: 'sans7', size: 13, color: COPPER2 }); cy -= 17; }
         return cy;
       },
-    }, { note: sourceNoteFor(model, ['market_price', 'statement']) });
+    });
   }
 
-  // ── 03 markets ──────────────────────────────────────────────────────────
-  section('markets', model.sections.markets, {
-    measure: () => doc.paragraphHeight(model.letter.markets || '', { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W }),
-    draw: (y) => doc.paragraph(model.letter.markets || '', X, y, { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W, color: INK }),
+  // ── the greeting ────────────────────────────────────────────────────────
+  blocks.push({
+    height: b.bodyLead, gap: 10,
+    draw: (y) => { doc.text(letter.greeting || '', LX, y, { font: 'light', size: b.bodySize, color: INK }); return y - b.bodyLead; },
   });
 
-  // ── 04 what it means ────────────────────────────────────────────────────
+  // ── the letter ──────────────────────────────────────────────────────────
+  for (const [i, text] of (letter.paragraphs || []).entries()) {
+    blocks.push({
+      key: `p${i}`,
+      height: doc.paragraphHeight(text, body),
+      gap: 7,
+      draw: (y) => doc.paragraph(text, LX, y, { ...body, color: INK }),
+    });
+  }
+
+  // ── the signature ───────────────────────────────────────────────────────
+  blocks.push({
+    height: 58, gap: 0,
+    draw: (y) => {
+      let cy = y - 4;
+      doc.text(letter.sign_off || '', LX, cy, { font: 'light', size: b.bodySize, color: INK });
+      cy -= 24;
+      doc.text(model.advisor?.name || '', LX, cy, { font: 'sans5', size: 9.8, color: INK });
+      cy -= 12;
+      const role = L === 'pt-BR' ? 'Assessor de investimentos' : 'Investment advisor';
+      doc.text(`${role} · XP Asset Management${model.advisor?.code ? ` · ${model.advisor.code}` : ''}`, LX, cy, { font: 'light', size: 7.6, color: INK2 });
+      if (model.advisor?.email) { cy -= 11; doc.text(model.advisor.email, LX, cy, { font: 'light', size: 7.6, color: SAGE }); }
+      return cy - 4;
+    },
+  });
+
+  return blocks;
+}
+
+/**
+ * Page two. Everything the letter refers to and does not reproduce: the
+ * figures, what moved them, the points of the meeting, the portfolio and the
+ * sources. It carries the metadata that used to sit above the greeting.
+ */
+function buildAnnexBlocks(doc, model, b) {
+  const L = model.locale;
+  const blocks = [];
+
+  // ── the annex head ──────────────────────────────────────────────────────
+  blocks.push({
+    key: 'annexhead', height: 26, gap: 16,
+    draw: (y) => {
+      // Two lines rather than one. The title already carries the date, so a long
+      // month name has nowhere to collide with the metadata beside it.
+      tracked(doc, model.annex_title || (L === 'pt-BR' ? 'Anexo' : 'Annex'), X, y, { font: 'light', size: 8.4, color: COPPER, track: 0.16 });
+      const meta = [
+        `${L === 'pt-BR' ? 'Perfil' : 'Profile'} ${model.client?.risk_profile || '—'}`,
+        `${L === 'pt-BR' ? 'Assessor' : 'Advisor'} ${model.advisor?.name || ''}${model.advisor?.code ? ` (${model.advisor.code})` : ''}`,
+      ].join(' · ');
+      doc.text(meta, X, y - 12, { font: 'light', size: 6.8, color: INK3 });
+      doc.line(X, y - 20, X + W, y - 20, { color: RULE, width: 0.6 });
+      return y - 26;
+    },
+  });
+
+  // ── the figures, and what moved them ────────────────────────────────────
   {
-    const impact = (model.impact || []).slice(0, b.maxImpact);
-    const rowsH = impact.length ? impact.length * (15 + b.maxImpactLines * 9 + 9) + 8 : 0;
-    section('meaning', model.sections.meaning, {
-      measure: () => doc.paragraphHeight(model.letter.meaning || '', { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W }) + rowsH,
+    const chartH = b.showContributionChart ? contributorsChartHeight(model) : 0;
+    const method = model.method_note ? firstSentences(model.method_note, b.methodSentences) : '';
+    const methodH = method ? doc.paragraphHeight(method, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W }) + 6 : 0;
+    blocks.push({
+      key: 'figures', height: 18 + 52 + chartH + methodH, gap: b.blockGap,
       draw: (y) => {
-        let cy = doc.paragraph(model.letter.meaning || '', X, y, { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W, color: INK });
-        if (!impact.length) return cy;
-        cy -= 8;
-        for (const i of impact) {
-          doc.text(i.title, X, cy, { font: 'sans5', size: SZ.data, color: INK });
-          if (i.exposure_label) {
-            doc.textRight(`${L === 'pt-BR' ? 'exposição' : 'exposure'} ${i.exposure_label}`, X + W, cy, { font: 'light', size: SZ.small, color: INK3 });
-          }
-          cy -= 11;
-          const lines = doc.wrap(firstSentences(i.impact, b.maxImpactLines), { font: 'light', size: SZ.small, maxWidth: W }).slice(0, b.maxImpactLines);
-          for (const l of lines) { doc.text(l, X, cy, { font: 'light', size: SZ.small, color: INK2 }); cy -= 9; }
-          cy += 1;
-          doc.line(X, cy, X + W, cy, { color: RULE2, width: 0.5 });
-          cy -= 8;
+        let cy = sectionTitle(doc, y, L === 'pt-BR' ? 'Quem puxou o resultado' : 'What drove the result');
+        cy = drawFigureStrip(doc, model, X, cy, W);
+        if (b.showContributionChart) { cy -= 6; cy = drawContributorsChart(doc, model, X, cy, W); }
+        if (method) {
+          cy -= 4;
+          cy = doc.paragraph(method, X, cy, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W, color: INK2 });
         }
         return cy;
       },
     });
   }
 
-  // ── 05 recommendations ──────────────────────────────────────────────────
+  // ── the points of the meeting, in the order the letter raised them ──────
   {
-    const recs = (model.recommendations || []).slice(0, b.maxRecommendations);
-    const introH = doc.paragraphHeight(model.letter.recommendations_intro || '', { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W });
-    const omittedH = model.recommendations_omitted_note
-      ? doc.paragraphHeight(model.recommendations_omitted_note, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W }) + 6
-      : 0;
-    const tableH = (recs.length ? 18 + recs.length * 40 : 0) + omittedH;
-    section('recommendations', model.sections.recommendations, {
-      measure: () => introH + 10 + tableH,
-      draw: (y) => {
-        let cy = doc.paragraph(model.letter.recommendations_intro || '', X, y, { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W, color: INK });
-        if (!recs.length) return cy;
-        cy -= 10;
-        cy = drawRecommendationTable(doc, model, recs, X, cy, W);
-        if (model.recommendations_omitted_note) {
-          cy -= 4;
-          cy = doc.paragraph(model.recommendations_omitted_note, X, cy, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W, color: INK2 });
-        }
-        return cy;
-      },
-    }, { note: [L === 'pt-BR' ? 'Sinais técnicos e consenso de analistas: TradingView, capturados na data desta carta.' : 'Technical and analyst signals: TradingView, captured on the date of this letter.'] });
+    const all = model.recommendations || [];
+    const recs = all.slice(0, b.maxRecommendations);
+    if (recs.length) {
+      // What the ladder dropped for space is counted with what was never
+      // selected, so the total the client is told about is the true one.
+      const trimmed = all.length - recs.length;
+      const note = [
+        trimmed > 0
+          ? (L === 'pt-BR'
+            ? `Outros ${trimmed} ${trimmed === 1 ? 'ponto aprovado está' : 'pontos aprovados estão'} no seu portal.`
+            : `A further ${trimmed} approved ${trimmed === 1 ? 'point is' : 'points are'} in your portal.`)
+          : null,
+        model.recommendations_omitted_note,
+      ].filter(Boolean).join(' ');
+      const omittedH = note
+        ? doc.paragraphHeight(note, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W }) + 6
+        : 0;
+      // Measured, not guessed. A flat 40 pt per row assumed two lines of
+      // rationale for every row and cost the whole column a rung on the ladder,
+      // which is how "fora da política" ended up on the page without its reason.
+      const rowsH = recs.reduce((a, r) => {
+        const lines = b.showRationale && r.rationale
+          ? Math.min(2, doc.wrap(r.rationale, { font: 'light', size: SZ.small, maxWidth: W - 8 }).length)
+          : 0;
+        return a + 20 + lines * 9 + 10;
+      }, 0);
+      blocks.push({
+        key: 'meeting', height: 18 + 18 + rowsH + omittedH, gap: b.blockGap,
+        draw: (y) => {
+          let cy = sectionTitle(doc, y, L === 'pt-BR' ? 'Os pontos da reunião' : 'The points for the meeting',
+            L === 'pt-BR' ? 'Sinais técnicos e consenso de analistas: TradingView, capturados na data desta carta' : 'Technical and analyst signals: TradingView, captured on the date of this letter');
+          cy = drawRecommendationTable(doc, model, recs, X, cy, W, b);
+          if (note) {
+            cy -= 4;
+            cy = doc.paragraph(note, X, cy, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W, color: INK2 });
+          }
+          return cy;
+        },
+      });
+    }
   }
 
-  // ── 06 the portfolio ────────────────────────────────────────────────────
+  // ── the portfolio ───────────────────────────────────────────────────────
   {
     const rows = (model.allocation || []).slice(0, b.maxAllocationRows);
-    const barH = 30;
-    const tableH = 16 + rows.length * 15;
-    section('portfolio', model.sections.portfolio, {
-      measure: () => barH + 14 + tableH,
+    blocks.push({
+      // 18 title + 22 bar + 12 gap + (16 band + 4) + 15 a row, less the 5 the
+      // table hands back. Guessed high, this block missed its floor by two
+      // points and cost the annex three rungs of the ladder.
+      key: 'portfolio', height: 18 + 22 + 12 + 20 + rows.length * 15 - 5, gap: b.blockGap,
       draw: (y) => {
-        let cy = drawAllocationBar(doc, model, X, y, W);
+        let cy = sectionTitle(doc, y, L === 'pt-BR' ? 'Sua carteira hoje' : 'Your portfolio today',
+          model.policy_version ? `${L === 'pt-BR' ? 'Política versão' : 'Policy version'} ${model.policy_version}` : null);
+        cy = drawAllocationBar(doc, model, X, cy, W);
         cy -= 12;
         return drawAllocationTable(doc, model, rows, X, cy, W);
       },
     });
   }
 
-  // ── 07 closing ──────────────────────────────────────────────────────────
-  blocks.push({
-    height: doc.paragraphHeight(model.letter.closing || '', { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W }) + 36,
-    gap: 10,
-    draw: (y) => {
-      let cy = doc.paragraph(model.letter.closing || '', X, y, { font: 'light', size: b.bodySize, leading: b.bodyLead, maxWidth: W, color: INK });
-      cy -= 12;
-      doc.text(model.letter.sign_off || '', X, cy, { font: 'light', size: b.bodySize, color: INK });
-      cy -= 14;
-      doc.text(model.advisor?.name || '', X, cy, { font: 'sans5', size: SZ.data, color: INK });
-      cy -= 11;
-      tracked(doc, `XP Asset Management${model.advisor?.code ? ` · ${model.advisor.code}` : ''}`, X, cy, { font: 'light', size: 6.6, color: SAGE });
-      return cy - 6;
-    },
-  });
-
   // ── sources ─────────────────────────────────────────────────────────────
   {
-    const lines = model.source_lines || [];
+    const lines = b.compactSources
+      ? [...new Set((model.sources || []).map((x) => x.provider).filter(Boolean))]
+      : (model.source_lines || []);
     const text = `${L === 'pt-BR' ? 'Fontes' : 'Sources'}: ${lines.join(' · ')}`;
     const unav = (model.unavailable || []).length
       ? `${L === 'pt-BR' ? 'Sem dado disponível' : 'Data unavailable'}: ${model.unavailable.map((u) => `${u.item} — ${u.reason}`).join('; ')}`
       : null;
+    const opts = { font: 'light', size: SZ.small, leading: SZ.small * 1.35, maxWidth: W };
     blocks.push({
-      height: doc.paragraphHeight(text, { font: 'light', size: SZ.small, leading: SZ.small * 1.35, maxWidth: W })
-        + (unav ? doc.paragraphHeight(unav, { font: 'light', size: SZ.small, leading: SZ.small * 1.35, maxWidth: W }) + 6 : 0) + 10,
+      key: 'sources',
+      height: doc.paragraphHeight(text, opts) + (unav ? doc.paragraphHeight(unav, opts) + 6 : 0) + 10,
       gap: 6,
       draw: (y) => {
         doc.line(X, y + 6, X + W, y + 6, { color: RULE, width: 0.6 });
-        let cy = doc.paragraph(text, X, y - 3, { font: 'light', size: SZ.small, leading: SZ.small * 1.35, maxWidth: W, color: INK2 });
-        if (unav) {
-          cy -= 4;
-          cy = doc.paragraph(unav, X, cy, { font: 'light', size: SZ.small, leading: SZ.small * 1.35, maxWidth: W, color: INK2 });
-        }
+        let cy = doc.paragraph(text, X, y - 3, { ...opts, color: INK2 });
+        if (unav) { cy -= 4; cy = doc.paragraph(unav, X, cy, { ...opts, color: INK2 }); }
         return cy;
       },
     });
   }
 
   return blocks;
+}
+
+/** §06 the article title: Roboto Bold, capitals, copper, with an optional note at the right. */
+function sectionTitle(doc, y, title, meta = null) {
+  doc.text(String(title).toUpperCase(), X, y, { font: 'sans7', size: SZ.h2, color: COPPER2, charSpacing: 0.25 });
+  if (meta) doc.textRight(meta, X + W, y, { font: 'light', size: 6.8, color: INK3 });
+  return y - 18;
 }
 
 /** Trim to whole sentences so a truncated line never ends mid-thought. */
@@ -550,7 +561,7 @@ function drawHeaderBand(doc, x, y, w, cells) {
   return y - h - 4;
 }
 
-function drawRecommendationTable(doc, model, recs, x, y, w) {
+function drawRecommendationTable(doc, model, recs, x, y, w, b = { showRationale: true }) {
   const L = model.locale;
   const cols = [
     { key: 'asset', w: 0.30 },
@@ -591,12 +602,14 @@ function drawRecommendationTable(doc, model, recs, x, y, w) {
       lines.slice(0, 2).forEach((l, i) => doc.text(l, xs[3] + 4, cy - i * 8, { font: 'light', size: SZ.small - 0.4, color: INK3 }));
     }
 
-    const fitTone = r.suitability === 'PASS' ? INK : CAUTION;
+    // Two values and no third: the client asked whether their portfolio is
+    // inside the policy they approved, and that question has a yes and a no.
+    const fitTone = r.within_policy ? INK : CAUTION;
     const fitLines = doc.wrap(r.suitability_label || '', { font: 'sans', size: SZ.small, maxWidth: cols[4].w * w - 6 });
     fitLines.slice(0, 2).forEach((l, i) => doc.text(l, xs[4] + 4, cy - i * 8.5, { font: 'sans', size: SZ.small, color: fitTone }));
 
     cy -= 20;
-    if (r.rationale) {
+    if (r.rationale && b.showRationale) {
       const lines = doc.wrap(r.rationale, { font: 'light', size: SZ.small, maxWidth: w - 8 }).slice(0, 2);
       for (const l of lines) { doc.text(l, x + 4, cy, { font: 'light', size: SZ.small, color: INK2 }); cy -= 9; }
     }

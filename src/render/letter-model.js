@@ -10,6 +10,7 @@
  */
 import { money, percent, pp, weight as fmtWeight, monthLabel, dateLong, shortDate, arrow, toneOf, MINUS } from '../core/format.js';
 import { SourceLedger } from '../core/sources.js';
+import { withinPolicy, policyFitLabel } from '../core/suitability.js';
 import { prepareContribution, preparePortfolioVsBenchmark, prepareAllocation, prepareContributors } from './charts.js';
 
 /** Asset-class and signal vocabulary. §5.7 — the client letter is written in
@@ -54,21 +55,25 @@ const SECTIONS_EN = {
   closing: 'Closing',
 };
 
+/**
+ * What the client reads in the "sugestão" column, and it has three values.
+ *
+ * The engine's own vocabulary has five, but two of them are not suggestions
+ * about a position. EXIT is a REDUCE that goes to zero, and the sentence under
+ * the row says so. DISCUSS is what the guardrail returns when it refuses a buy
+ * or when the signals disagree — nothing changes until the meeting, which is
+ * exactly what "manter" means. The whole letter is already a set of discussion
+ * points, so a row labelled "discutir" told the client nothing.
+ */
 const ACTION_PT = {
   ADD: 'Aumentar',
   HOLD: 'Manter',
   REDUCE: 'Reduzir',
-  EXIT: 'Encerrar',
-  DISCUSS: 'Discutir',
+  EXIT: 'Reduzir',
+  DISCUSS: 'Manter',
 };
 
-const SUITABILITY_PT = {
-  PASS: 'Dentro da política',
-  DISCUSS_ONLY: 'Somente discussão',
-  DO_NOT_ADD: 'Não aumentar',
-  REDUCE_REQUIRED: 'Redução necessária',
-  BLOCKED: 'Vedado pela política',
-};
+const ACTION_EN = { ADD: 'Increase', HOLD: 'Hold', REDUCE: 'Reduce', EXIT: 'Reduce', DISCUSS: 'Hold' };
 
 /**
  * What earns a place in a two-page letter.
@@ -100,6 +105,103 @@ export function prioritiseForLetter(recommendations, max = 5) {
     omitted: Math.max(0, approved.length - Math.min(ranked.length, max)),
     total_approved: approved.length,
   };
+}
+
+/**
+ * The house view, or nothing at all.
+ *
+ * A World Overview generated without a language model carries neutral stances
+ * and a rationale that says, in as many words, that the advisor must set them
+ * before using the view with a client. Handing that to the letter would put an
+ * opinion in the firm's mouth that the firm never formed, so an unformed view
+ * reaches the letter as null and the letter simply has no house-view paragraph.
+ */
+export function houseView(wv) {
+  if (!wv) return null;
+  const commentary = wv.advisor_commentary || null;
+  const formed = !wv.generated_without_model && wv.mode !== 'deterministic_template';
+  if (!commentary && !formed) return null;
+  const b = wv.briefing || {};
+  return {
+    headline: wv.headline_pt || wv.headline || null,
+    summary: formed ? (wv.summary_pt || wv.generated_summary || null) : null,
+    commentary,
+    main_risk: formed ? (b.main_risk_or_opportunity_pt || b.main_risk_or_opportunity || null) : null,
+    // Stances only count as the house's when a person or a model actually set them.
+    stance_by_asset_class: formed || commentary ? wv.stance_by_asset_class : null,
+  };
+}
+
+/**
+ * What the model returned, checked against the facts it was given.
+ *
+ * Two things are enforced here and nowhere else. The letter must have the shape
+ * of a letter — a title, a greeting, four to six paragraphs and a sign-off — and
+ * it must not contain a digit that did not come from FACTS.labels. The second
+ * check is the reason the facts carry formatted strings: comparing the digits a
+ * model wrote against the digits it was given is exact, where re-deriving a
+ * number from a float and hoping the rounding matches is not.
+ *
+ * @throws when the reply cannot be used, so the caller can ask again or fall
+ *         back to the deterministic text.
+ */
+export function sanitiseLetter(data, facts) {
+  if (!data || typeof data !== 'object') throw new Error('model returned no object');
+  const paragraphs = (Array.isArray(data.paragraphs) ? data.paragraphs : [])
+    .map((x) => String(x ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (paragraphs.length < 4) throw new Error(`letter has ${paragraphs.length} paragraphs, needs at least 4`);
+  if (!data.title) throw new Error('letter has no title');
+
+  const letter = {
+    title: clip(data.title, 80),
+    greeting: clip(data.greeting || `Prezado ${facts?.client?.first_name || ''},`, 60),
+    paragraphs: paragraphs.slice(0, 6).map((x) => clip(x, 900)),
+    sign_off: clip(data.sign_off || 'Um abraço,', 40),
+    language: 'pt-BR',
+  };
+
+  const stray = strayNumbers([letter.title, ...letter.paragraphs].join(' '), facts);
+  if (stray.length) throw new Error(`letter contains ${stray.length} figure(s) not in FACTS: ${stray.join(', ')}`);
+  return letter;
+}
+
+const clip = (t, n) => {
+  const s = String(t ?? '').replace(/\s+/g, ' ').trim();
+  return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+};
+
+/**
+ * Every run of digits the letter writes that FACTS never offered it.
+ *
+ * The allowed set is drawn from the STRINGS in FACTS and never from its numbers.
+ * That distinction is the whole check. A string is text the model was given and
+ * may reuse — a formatted label, a date, an asset called "iShares S&P 500" or
+ * "Azzas 2154". A raw number is a float the model was told not to format, so
+ * letting its digits through would legitimise exactly the invented figure this
+ * is here to catch.
+ */
+export function strayNumbers(text, facts) {
+  const allowed = new Set();
+  const walk = (v, depth = 0) => {
+    if (depth > 8 || v == null) return;
+    if (typeof v === 'string') {
+      for (const run of v.match(/\d+/g) || []) allowed.add(run);
+      return;
+    }
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    if (typeof v === 'object') { for (const x of Object.values(v)) walk(x, depth + 1); }
+  };
+  walk(facts);
+  // Small counts are the letter's own arithmetic over things it can see —
+  // "três coisas", "dois nomes" — and are allowed as digits too.
+  for (let i = 0; i <= 12; i += 1) allowed.add(String(i));
+
+  const stray = [];
+  for (const run of String(text || '').match(/\d+/g) || []) {
+    if (!allowed.has(run) && !stray.includes(run)) stray.push(run);
+  }
+  return stray;
 }
 
 export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommendations = 5 } = {}) {
@@ -194,7 +296,7 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
     name: r.name,
     asset_class: L === 'pt-BR' ? ASSET_CLASS_PT[r.asset_class] || r.asset_class : r.asset_class,
     action: r.final_action,
-    action_label: L === 'pt-BR' ? ACTION_PT[r.final_action] || r.final_action : r.final_action,
+    action_label: (L === 'pt-BR' ? ACTION_PT : ACTION_EN)[r.final_action] || r.final_action,
     weight: r.current_weight,
     weight_label: fmtWeight(r.current_weight, { locale: L, decimals: 1 }),
     technical: L === 'pt-BR' ? (r.technical_signal ? SIGNAL_PT[r.technical_signal] || r.technical_signal : null) : r.technical_signal,
@@ -203,7 +305,8 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
     analyst_missing_label: r.analyst_signal ? null : (L === 'pt-BR' ? 'Sem consenso de analistas' : 'No analyst consensus available'),
     conflict: r.signal_conflict,
     suitability: r.suitability_result,
-    suitability_label: L === 'pt-BR' ? SUITABILITY_PT[r.suitability_result] || r.suitability_result : (r.statement?.client_suitability ?? r.suitability_result),
+    within_policy: withinPolicy(r),
+    suitability_label: policyFitLabel(r, L),
     market_signal_line: r.statement?.market_signal ?? null,
     suitability_line: r.statement?.client_suitability ?? null,
     rationale: (L === 'pt-BR' ? r.rationale_pt : r.rationale) || r.rationale_pt || r.rationale || null,
@@ -257,16 +360,29 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
     client: report.client,
     advisor: report.advisor,
     period,
+    /**
+     * The letter is one piece of writing: a title, a greeting, the paragraphs
+     * and a sign-off. It used to be eight labelled fields, one per section, and
+     * that is precisely why it never read like a letter.
+     */
     letter: {
-      greeting: letter.greeting,
-      opening: letter.opening,
-      performance: letter.performance,
-      markets: letter.markets,
-      meaning: letter.meaning,
-      recommendations_intro: letter.recommendations_intro,
-      closing: letter.closing,
-      sign_off: letter.sign_off,
+      title: letter.title || null,
+      greeting: letter.greeting || null,
+      paragraphs: Array.isArray(letter.paragraphs) ? letter.paragraphs.filter(Boolean) : [],
+      sign_off: letter.sign_off || null,
     },
+    /** The correspondence head: where and when it was written, and to whom. */
+    dateline: {
+      place_date: `São Paulo, ${dateLong(report.generated_at?.slice(0, 10) || report.reporting_period?.end, L)}`,
+      to: report.client?.name || '',
+      to_line: [
+        // "Perfil moderado" agrees; "Carteira moderado" does not, and the
+        // profile names are masculine nouns in the policy.
+        report.client?.risk_profile ? `Perfil ${String(report.client.risk_profile).toLowerCase()}` : null,
+        `posição de ${dateLong(report.reporting_period?.end, L)}`,
+      ].filter(Boolean).join(' · '),
+    },
+    annex_title: `Anexo · Sua carteira em ${dateLong(report.reporting_period?.end, L)}`,
     figures,
     contributors,
     recommendations,
@@ -316,4 +432,4 @@ function shortDatePt(iso, L) {
   return L === 'pt-BR' ? dateLong(iso, 'pt-BR').replace(/ de (\d{4})$/, ' de $1') : shortDate(iso);
 }
 
-export { ACTION_PT, SUITABILITY_PT, SECTIONS_PT, SECTIONS_EN, ASSET_CLASS_PT, SIGNAL_PT };
+export { ACTION_PT, ACTION_EN, SECTIONS_PT, SECTIONS_EN, ASSET_CLASS_PT, SIGNAL_PT };

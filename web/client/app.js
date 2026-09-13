@@ -168,7 +168,7 @@ async function viewMonth() {
       stat('Diferença', excess == null ? '—' : pp(excess, { locale: L }), { tone: toneClass(excess) })),
 
     h('div.card', { style: { marginBottom: '24px' } },
-      h('p.pull', { text: c.letter?.performance || '' })),
+      h('p.pull', { text: (c.letter?.paragraphs || [])[0] || '' })),
 
     h('div.grid.g2', {},
       h('div.card', {}, barChart(classItems, {
@@ -206,8 +206,9 @@ async function viewMatters() {
     head('O que importa para a sua carteira', `Eventos do período de ${monthLabel(c.reporting_period?.month, L)} com efeito sobre o que você tem hoje`,
       null, [h('b', { text: 'O que importa' }), sep(), monthLabel(c.reporting_period?.month, L)]),
     h('div.card', { style: { marginBottom: '24px' } },
-      h('p.pull', { text: c.letter?.markets || '' }),
-      h('p.reading', { style: { marginTop: '16px', color: 'var(--ink-700)' }, text: c.letter?.meaning || '' })),
+      h('p.pull', { text: (c.letter?.paragraphs || [])[2] || (c.letter?.paragraphs || [])[1] || '' }),
+      h('p.note', { style: { marginTop: '14px' } }, 'Este trecho vem da sua carta deste mês. ',
+        h('a', { href: '#/letter' }, 'Ler a carta inteira'), '.')),
 
     impacts.length ? h('div.stack', {}, impacts.map((i) => h('div.card', {},
       h('div.card-h', {},
@@ -243,11 +244,15 @@ async function viewLetter() {
         h('span', {}, 'Para ', h('b', { text: c.client?.name || '' })),
         h('span', {}, 'De ', h('b', { text: c.advisor?.name || '' }))),
       h('div.letter', {},
+      letter.title ? h('h2.letter-title', { text: letter.title }) : null,
       h('p.greeting', { text: letter.greeting || '' }),
-      ['opening', 'performance', 'markets', 'meaning'].map((k) => letter[k] && h('p', { text: letter[k] })),
+      (letter.paragraphs || []).map((x) => h('p', { text: x })),
+      h('p', { text: letter.sign_off || '' }),
+      h('div.sig', {},
+        h('b', { text: c.advisor?.name || '' }),
+        h('span', { text: `Assessor de investimentos · XP Asset Management${c.advisor?.code ? ` · ${c.advisor.code}` : ''}` })),
       recs.length ? frag(
-        h('h3', { text: 'O que sugiro discutirmos' }),
-        h('p', { text: letter.recommendations_intro || '' }),
+        h('h3', { text: `Anexo · Sua carteira em ${dateLong(c.reporting_period?.end, L)}` }),
         table(['Ativo', 'Sugestão', 'Sinais de mercado', 'Enquadramento na sua política'],
           recs.map((x) => h('tr', {},
             h('td', {}, h('span.name', { text: x.ticker || x.name }), h('span.sub', { text: `${cls(x.asset_class)} · ${weight(x.current_weight, { locale: L, decimals: 1 })} da carteira` })),
@@ -255,27 +260,31 @@ async function viewLetter() {
             h('td', {}, h('div.sig-pair', {},
               h('span', {}, h('b', { text: 'Técnico: ' }), x.technical_signal ? signalPt(x.technical_signal) : h('span.sig-na', { text: 'sem cobertura' })),
               h('span', {}, h('b', { text: 'Analistas: ' }), x.analyst_signal ? `${signalPt(x.analyst_signal)} (${x.analyst_count})` : h('span.sig-na', { text: 'sem consenso disponível' })))),
-            h('td', { class: x.suitability_result === 'PASS' ? '' : 'caution', text: suitabilityPt(x.suitability_result) })))),
+            h('td', { class: withinPolicy(x) ? '' : 'caution', text: policyFitPt(x) })))),
         recs.some((x) => x.rationale_pt) ? h('div', { style: { marginTop: '12px' } },
           recs.filter((x) => x.rationale_pt).map((x) => h('p.note', {}, h('b', { text: `${x.ticker || x.name}: ` }), x.rationale_pt))) : null,
-        h('p.note', { style: { margin: '12px 0 28px' }, text: 'São pontos para conversarmos na próxima reunião. Nenhuma operação é executada automaticamente.' })) : null,
-      letter.closing ? h('p', { text: letter.closing }) : null,
-      h('p', { text: letter.sign_off || '' }),
-      h('div.sig', {},
-        h('b', { text: c.advisor?.name || '' }),
-        h('span', { text: `XP Asset Management${c.advisor?.code ? ` · ${c.advisor.code}` : ''}` })))),
+        h('p.note', { style: { margin: '12px 0 8px' }, text: 'São pontos para conversarmos na próxima reunião. Nenhuma operação é executada automaticamente.' })) : null)),
 
     h('div.card', { style: { marginTop: '20px' } }, sourcesBlock(c.sources, 'Fontes usadas nesta carta')),
     h('div.disclosure', {}, (c.disclosures || []).map((x) => h('p', { text: x }))),
   );
 }
 
-const actionLabel = (a) => ({ ADD: 'Aumentar', HOLD: 'Manter', REDUCE: 'Reduzir', EXIT: 'Encerrar', DISCUSS: 'Discutir' }[a] || a);
+// A suggestion has three values, because a client acts in three ways: buy more,
+// leave it alone, sell some. "Encerrar" is a reduction to zero and "Discutir"
+// was never a suggestion at all — the whole letter is a set of discussion points.
+const actionLabel = (a) => ({ ADD: 'Aumentar', HOLD: 'Manter', REDUCE: 'Reduzir', EXIT: 'Reduzir', DISCUSS: 'Manter' }[a] || a);
 const signalPt = (s) => ({ 'Strong Buy': 'Compra forte', Buy: 'Compra', Neutral: 'Neutro', Sell: 'Venda', 'Strong Sell': 'Venda forte' }[s] || s);
-const suitabilityPt = (s) => ({
-  PASS: 'Dentro da política', DISCUSS_ONLY: 'Somente discussão', DO_NOT_ADD: 'Não aumentar',
-  REDUCE_REQUIRED: 'Redução necessária', BLOCKED: 'Vedado pela política',
-}[s] || s);
+// Enquadramento answers one question — is this inside the policy you approved —
+// and that question has two answers. The reason sits in the line beneath the row.
+const LEGACY_BREACH = new Set(['RESTRICTED_INSTRUMENT', 'RISK_GRADE_ABOVE_PROFILE', 'CLASS_AT_OR_ABOVE_MAX', 'CLASS_BELOW_MIN', 'CONCENTRATION_BREACH']);
+const withinPolicy = (r) => {
+  if (typeof r?.within_policy === 'boolean') return r.within_policy;
+  const flags = r?.flags || [];
+  if (flags.some((f) => f.breach === true)) return false;
+  return !flags.some((f) => f.breach === undefined && LEGACY_BREACH.has(f.code));
+};
+const policyFitPt = (r) => (withinPolicy(r) ? 'Dentro da política' : 'Fora da política');
 
 // ═══ documents ═════════════════════════════════════════════════════════════
 async function viewDocuments() {

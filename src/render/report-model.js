@@ -33,7 +33,8 @@ const CLASS_COLOR = {
 export const RISK_CLASS_PT = { equity: 'Renda variável', debt: 'Renda fixa e caixa', fx_commodities: 'Câmbio e commodities', crypto_other: 'Multimercado, cripto e outros' };
 const RISK_CLASS_COLOR = { equity: '#2A3B43', debt: '#C57D5C', fx_commodities: '#828D6F', crypto_other: '#7F7F7F' };
 const MONTHS_LONG = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-const ACTION_PT = { ADD: 'Aumentar', REDUCE: 'Reduzir', EXIT: 'Encerrar', DISCUSS: 'Discutir' };
+/** The client's three verbs, the same ones the letter uses. */
+const ACTION_PT = { ADD: 'Aumentar', HOLD: 'Manter', REDUCE: 'Reduzir', EXIT: 'Reduzir', DISCUSS: 'Manter' };
 /** Each kind of point: its title, its rank, and whether it is something that could improve the result or something that could make it worse. */
 const KIND = {
   concentration: ['Concentração em um emissor', 0, 'worsen'], above_band: ['Classe acima da faixa', 0, 'worsen'], corporate_action: ['Evento societário', 0, 'worsen'],

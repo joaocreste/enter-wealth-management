@@ -147,9 +147,10 @@ export function parseJsonBlock(text) {
   return null;
 }
 
-export async function runPrompt(env, promptKey, facts, { maxTokens = 2400 } = {}) {
+export async function runPrompt(env, promptKey, facts, { maxTokens = 2400, appendUser = null } = {}) {
   const p = renderPrompt(promptKey, facts);
-  const out = await complete(env, { system: p.system, user: p.user, maxTokens });
+  const user = appendUser ? `${p.user}\n\n${appendUser}` : p.user;
+  const out = await complete(env, { system: p.system, user, maxTokens });
   const parsed = parseJsonBlock(out.text);
   if (!parsed) throw new Error(`model returned no parsable JSON for ${promptKey}`);
   return { data: parsed, model: out.model, provider: out.provider, prompt_version: p.prompt_version, usage: out.usage };
@@ -234,78 +235,117 @@ const L = 'pt-BR';
 
 export function deterministicLetter(facts) {
   const f = facts;
-  const name = (f.client?.name || '').split(' ')[0];
-  const ret = f.performance?.monthly_return;
-  const pnl = f.performance?.absolute_pnl;
-  const bench = f.benchmark?.value;
-  const excess = f.benchmark?.excess_return;
+  const lb = f.labels || {};
+  const first = f.client?.first_name || (f.client?.name || '').split(' ')[0];
+  const month = lb.month || monthLabel(f.reporting_period?.month, L);
   const worst = f.attribution?.worst_contributor;
   const best = f.attribution?.best_contributor;
-  const fx = f.attribution?.fx_contribution;
-  const month = monthLabel(f.reporting_period?.month, L);
+  const nm = (c) => c?.short_name || c?.ticker || c?.name;
+  const paragraphs = [];
 
-  const performance = [];
-  if (ret == null) {
-    performance.push(`Não foi possível apurar a rentabilidade consolidada de ${month} com os dados disponíveis.`);
-    if (f.performance?.unavailable_reason) performance.push(f.performance.unavailable_reason);
+  // 1 · the month, and the one thing that explains it
+  if (lb.monthly_return == null) {
+    paragraphs.push(`Começo por onde precisa começar: não foi possível apurar a rentabilidade consolidada de ${month} com os dados disponíveis.${f.performance?.unavailable_reason ? ` ${cap(f.performance.unavailable_reason)}.` : ''} O anexo traz o que conseguimos apurar, e prefiro lhe dizer isso a lhe entregar um número que não se sustenta.`);
   } else {
-    // House style: the loss is described before the gain.
-    if (worst) {
-      performance.push(`Começo pelo que pesou negativamente. ${worst.name} foi o maior detrator do mês, com contribuição de ${pp(worst.contribution, { locale: L })} sobre o resultado da carteira.`);
-    }
-    if (best) {
-      performance.push(`Do lado positivo, ${best.name} contribuiu com ${pp(best.contribution, { locale: L })}.`);
-    }
-    performance.push(`No agregado, a carteira registrou ${percent(ret, { locale: L })} em ${month}, o equivalente a ${money(pnl, { currency: f.client?.base_currency || 'BRL', locale: L, signed: true })} sobre o patrimônio.`);
-    if (bench != null) {
-      performance.push(excess >= 0
-        ? `A carteira de referência da sua política rendeu ${percent(bench, { locale: L })} no mesmo período, portanto ficamos ${pp(Math.abs(excess), { locale: L, signed: false })} acima dela.`
-        : `A carteira de referência da sua política rendeu ${percent(bench, { locale: L })} no mesmo período, portanto ficamos ${pp(Math.abs(excess), { locale: L, signed: false })} abaixo dela.`);
-    }
-    if (fx != null && Math.abs(fx) > 0.001) {
-      performance.push(fx > 0
-        ? `A variação do câmbio somou ${pp(fx, { locale: L })} ao resultado, por conta das posições no exterior sem proteção cambial.`
-        : `A variação do câmbio subtraiu ${pp(Math.abs(fx), { locale: L, signed: false })} do resultado, por conta das posições no exterior sem proteção cambial.`);
-    }
-    // The method assumption is printed once, as a note beneath the figures.
-    // Repeating it inside the paragraph made the letter read like a footnote.
+    const dir = (f.performance?.monthly_return ?? 0) < 0 ? 'não foi um bom mês para a sua carteira' : 'foi um mês positivo para a sua carteira';
+    const vs = lb.excess_abs && f.benchmark?.value != null
+      ? ` ${dot(`Ela fez ${lb.monthly_return} enquanto a carteira de referência da sua política fez ${lb.benchmark}, e a distância entre as duas ficou em ${lb.excess_abs}`)}`
+      : ` Ela fez ${lb.monthly_return} no mês.`;
+    const cause = worst ? ` A explicação começa em um nome: ${nm(worst)}.` : '';
+    paragraphs.push(`${cap(month)} ${dir}, e prefiro começar por aí.${vs}${cause}`);
   }
 
+  // 2 · what drove it — the loss before the gain, always
+  if (lb.monthly_return != null) {
+    const parts = [];
+    if (worst) parts.push(`${cap(nm(worst))} foi o que mais pesou no resultado do mês.`);
+    if (best) parts.push(`Do lado bom, ${nm(best)} ajudou.`);
+    if (f.attribution?.fx_contribution != null && Math.abs(f.attribution.fx_contribution) > 0.001) {
+      parts.push(f.attribution.fx_contribution > 0
+        ? 'O câmbio também somou, por conta das posições no exterior sem proteção cambial.'
+        : 'O câmbio subtraiu, por conta das posições no exterior sem proteção cambial.');
+    }
+    parts.push('O anexo traz a conta completa, posição por posição.');
+    if (parts.length > 1) paragraphs.push(parts.join(' '));
+  }
+
+  // 3 · the world, and only the part that reaches this portfolio
   const events = (f.events || []).slice(0, 3);
-  const markets = events.length
-    ? events.map((e) => `${e.title_pt || e.title}. ${e.why_it_matters_pt || e.why_it_matters || ''}`.trim()).join(' ')
-    : 'Não houve, no período, eventos de mercado com efeito material sobre as classes de ativos presentes na sua carteira.';
-
-  // The specifics are printed as rows under this paragraph, so the paragraph
-  // synthesises rather than repeating them.
   const impacts = (f.impact || []).filter((i) => i.relevance === 'high' || i.relevance === 'medium');
-  const topExposure = impacts.length ? impacts[0] : null;
-  const meaning = impacts.length
-    ? `Nenhum desses movimentos exige uma ação imediata na sua carteira. ${topExposure?.potential_impact_pt || topExposure?.potential_impact || ''} Abaixo, os pontos com efeito mais direto sobre o que você tem hoje.`.replace(/\s+/g, ' ').trim()
-    : 'A composição atual da carteira permanece dentro das faixas aprovadas na sua política de investimentos, e nenhum desses movimentos exige ação imediata.';
+  if (events.length) {
+    const said = events.map((e) => trimDot(e.title_pt || e.title)).join('. ');
+    const reach = impacts.length
+      ? ` ${dot(cap(impacts[0].potential_impact_pt || impacts[0].potential_impact || ''))}`
+      : ' Nenhum desses movimentos exige uma ação imediata na sua carteira.';
+    paragraphs.push(`${dot(said)}${reach}`);
+  }
 
-  const forLetter = f.letter_recommendations || (f.recommendations || []).filter((r) => r.advisor_status === 'approved');
-  const conflicts = forLetter.filter((r) => r.signal_conflict).length;
-  const recIntro = forLetter.length
-    ? `Separei ${forLetter.length === 1 ? 'um ponto' : `${forLetter.length} pontos`} para conversarmos na nossa próxima reunião. São sugestões de discussão, não ordens de compra ou venda.${conflicts ? ` Em ${conflicts === 1 ? 'um deles' : `${conflicts} deles`}, a leitura técnica e o consenso de analistas discordam, e é exatamente por isso que prefiro decidir com você.` : ''}`
-    : 'Não há, neste mês, alterações que eu recomende discutir na carteira.';
+  // 4 · the house view, marked as a view and spoken in the plural
+  const av = f.advisor_view || null;
+  if (av && (av.commentary || av.main_risk || av.summary || av.headline)) {
+    const body = trimDot(av.commentary || av.main_risk || av.summary || av.headline);
+    const cautious = Object.entries(av.stance_by_asset_class || {}).filter(([, v]) => v === 'cautious').map(([k]) => classPt(k));
+    const tail = cautious.length ? ` Seguimos cautelosos com ${listPt(cautious.slice(0, 2))}, e é isso que sustenta o desenho atual da sua carteira.` : '';
+    paragraphs.push(`${dot(`Na nossa leitura aqui na XP Asset Management, ${lower(body)}`)}${tail}`);
+  }
 
-  const closing = f.next_meeting
-    ? `Nossa próxima reunião está marcada para ${dateLong(f.next_meeting, L)}. Levarei os pontos acima detalhados. Se preferir conversar antes, é só me chamar.`
-    : 'Se quiser conversar sobre qualquer ponto desta carta antes da nossa próxima reunião, é só me chamar.';
+  // 5 · what to discuss, in prose, in the order of the annex
+  const recs = f.letter_recommendations || [];
+  if (recs.length) {
+    const outside = recs.filter((r) => r.within_policy === false);
+    const conflicts = recs.filter((r) => r.signal_conflict);
+    const bits = [`Quero conversar sobre ${countPt(Math.min(recs.length, 3))} na nossa reunião.`];
+    if (outside.length) {
+      bits.push(`${cap(listPt(outside.slice(0, 2).map((r) => r.short_name || r.ticker || r.name)))} ${outside.length === 1 ? 'está fora' : 'estão fora'} da sua política hoje, e ${outside.length === 1 ? 'é o ponto' : 'são os pontos'} em que não se trata de sugestão, e sim de enquadramento.`);
+    }
+    if (conflicts.length) {
+      // "deles" would point back at the count of things to discuss, which is a
+      // different number. Naming the positions keeps the two counts apart.
+      bits.push(`A leitura técnica e o consenso de analistas discordam em ${conflicts.length === 1 ? 'uma das posições' : `${wordFor(conflicts.length)} das posições`}, e quando os dois discordam preferimos decidir com você.`);
+    }
+    bits.push('Nada disso é ordem, e nada acontece sem a sua palavra.');
+    paragraphs.push(bits.join(' '));
+  }
+
+  // 6 · the close
+  paragraphs.push(lb.next_meeting
+    ? `Nossa reunião está marcada para ${lb.next_meeting}. Levo estes pontos e, no anexo, os números em que eles se apoiam. Se quiser falar antes, é só me chamar.`
+    : 'No anexo estão os números em que estes pontos se apoiam. Se quiser conversar sobre qualquer um deles, é só me chamar.');
 
   return {
-    greeting: `Prezado ${name},`,
-    opening: `Segue o resumo da sua carteira em ${month}. Escrevi esta carta para que você entenda o que aconteceu, por que aconteceu e o que vale discutirmos adiante.`,
-    performance: performance.join(' '),
-    markets,
-    meaning,
-    recommendations_intro: recIntro,
-    closing,
+    title: deterministicTitle(f, worst),
+    greeting: `Prezado ${first},`,
+    paragraphs: paragraphs.filter(Boolean).slice(0, 6),
     sign_off: 'Um abraço,',
     language: 'pt-BR',
   };
 }
+
+/** The idea of the month in one line, from the facts rather than from a template. */
+function deterministicTitle(f, worst) {
+  const month = cap(monthLabel(f.reporting_period?.month, L));
+  const r = f.performance?.monthly_return;
+  if (r == null) return `${month}: o que apuramos e o que não conseguimos apurar`;
+  const name = worst?.short_name || worst?.ticker || worst?.name;
+  if (r < 0 && name) return `${month}: o que pesou, e o que fazemos a respeito`;
+  if (r < 0) return `${month}: um mês de queda, e o que ele muda`;
+  return `${month}: o que funcionou, e o que vale rever`;
+}
+
+const cap = (t) => { const s = String(t || '').trim(); return s ? s[0].toUpperCase() + s.slice(1) : s; };
+/** One full stop, never two — "2,96 p.p." already ends in one. */
+const dot = (t) => { const s = String(t || '').trim(); return !s || /[.!?…]$/.test(s) ? s : `${s}.`; };
+const lower = (t) => { const s = String(t || '').trim(); return s ? s[0].toLowerCase() + s.slice(1) : s; };
+const trimDot = (t) => String(t || '').trim().replace(/[.!?]+$/, '');
+const countPt = (n) => ['nenhuma coisa', 'uma coisa', 'duas coisas', 'três coisas'][n] || `${n} coisas`;
+/** A letter writes "três", not "3". */
+const wordFor = (n) => ['zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez'][n] || String(n);
+const listPt = (xs) => (xs.length <= 1 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
+const CLASS_PT_LETTER = {
+  Cash: 'caixa', 'Fixed Income': 'renda fixa', 'Equities BR': 'renda variável Brasil', 'Equities Global': 'renda variável global',
+  Alternatives: 'multimercado e alternativos', 'Real Estate': 'imobiliário listado', Commodities: 'commodities', 'Digital Assets': 'ativos digitais',
+};
+const classPt = (k) => CLASS_PT_LETTER[k] || String(k || '').toLowerCase();
 
 /**
  * The report agent's narrative without a model: the day's summary for the

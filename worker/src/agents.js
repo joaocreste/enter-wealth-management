@@ -756,7 +756,8 @@ function newsToEvents(items, date) {
 }
 const compactNews = (e) => ({ id: e.id, date: e.date, title_pt: e.title_pt, category: e.category, importance: e.importance, source_url: e.source_url, source_title: e.source_title, source_label: e.source_label, source_provider: e.source_provider ?? null });
 
-function dedupeEvents(events) {
+/** Shared with the pipeline's market-intel step, which folds the same two sources. */
+export function dedupeEvents(events) {
   const seen = new Map();
   for (const e of events) {
     const key = e.kind === 'news' || e.kind === 'headline' ? e.id : `${e.indicator_key || ''}|${e.category}`;

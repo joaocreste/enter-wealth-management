@@ -13,12 +13,13 @@ import { all, first, run, id, json, nowIso, audit, resolveClientScope, currentPo
 import { login, logout, sessionFromRequest, hashPassword } from './auth.js';
 import * as P from './pipeline.js';
 import * as LLM from './llm.js';
-import { buildLetterModel, prioritiseForLetter } from '../../src/render/letter-model.js';
+import { buildLetterModel, prioritiseForLetter, sanitiseLetter, houseView } from '../../src/render/letter-model.js';
 import { renderLetterHtml, renderPortalLetter } from '../../src/render/html-email.js';
 import { renderLetterPdf } from '../../src/render/pdf/letter.js';
 import { brandFonts } from '../../src/render/fonts/index.js';
 import { validateReport } from '../../src/core/report-schema.js';
-import { previousMonth, monthBounds } from '../../src/core/format.js';
+import { previousMonth, monthBounds, shortAssetName, monthLabel, dateLong, percent, money, pp } from '../../src/core/format.js';
+import { withinPolicy } from '../../src/core/suitability.js';
 import { INDICATORS } from '../../seed/market.mjs';
 import { eventRegion } from '../../src/core/events.js';
 import { seedDatabase } from './seed-runner.js';
@@ -885,7 +886,7 @@ async function pipelineRoutes(env, step, body, session) {
     const today = new Date().toISOString().slice(0, 10);
     const curated = await P.loadMarketEvents(env, { since: addDays(today, -35), limit: 20 });
     const generated = P.eventsFromIndicatorMoves(indicators);
-    const events = dedupeEvents([...curated, ...generated]);
+    const events = A.dedupeEvents([...curated, ...generated]);
 
     const total = state.perf?.ending_market_value || 1;
     const exposures = {};
@@ -897,7 +898,7 @@ async function pipelineRoutes(env, step, body, session) {
     };
     const impact = events.map((e) => P.mapEventToPortfolio(e, portfolio)).filter((i) => i.relevance !== 'none');
 
-    state.indicators = indicators.map(compactIndicator);
+    state.indicators = indicators.map(A.compactIndicator);
     state.triggers = triggers;
     state.events = events;
     state.impact = impact;
@@ -1260,16 +1261,25 @@ async function buildNarrative(env, state, body) {
   let letter = null; let rationales = null; let mode = 'deterministic_template'; let model = null; let fallbackReason = null;
 
   if (body.mode !== 'deterministic' && LLM.llmAvailable(env)) {
-    try {
-      const r = await LLM.runPrompt(env, 'client_letter', facts, { maxTokens: 2600 });
-      letter = { ...r.data, language: 'pt-BR' };
-      model = r.model; mode = 'model';
+    // A letter that fails the check is asked for once more with the reason
+    // stated, because the usual failure is a stray figure in one sentence and
+    // the second attempt fixes it. After that the deterministic text stands.
+    let note = null;
+    for (let attempt = 1; attempt <= 2 && !letter; attempt += 1) {
+      try {
+        const r = await LLM.runPrompt(env, 'client_letter', facts, { maxTokens: 3000, appendUser: note });
+        letter = sanitiseLetter(r.data, facts);
+        model = r.model; mode = 'model';
+      } catch (err) {
+        fallbackReason = err.message;
+        note = `Your previous reply was rejected: ${err.message}. Reply again with ONLY the JSON object described under "Output", obeying the paragraph count and using no figure that is not in FACTS.labels.`;
+      }
+    }
+    if (letter) {
       try {
         const rr = await LLM.runPrompt(env, 'recommendation_rationale', { recommendations: facts.recommendations }, { maxTokens: 1600 });
         rationales = rr.data;
       } catch { rationales = LLM.deterministicRationales(facts); }
-    } catch (err) {
-      fallbackReason = err.message;
     }
   }
 
@@ -1286,7 +1296,12 @@ function narrativeFacts(state) {
   const perf = state.perf;
   const bench = state.benchmark;
   return {
-    client: { name: state.ctx.client.full_name, risk_profile: state.ctx.client.risk_profile, base_currency: state.ctx.client.base_currency },
+    client: {
+      name: state.ctx.client.full_name,
+      first_name: String(state.ctx.client.full_name || '').trim().split(/\s+/)[0] || '',
+      risk_profile: state.ctx.client.risk_profile,
+      base_currency: state.ctx.client.base_currency,
+    },
     advisor: { name: state.ctx.advisor?.name },
     reporting_period: state.ctx.reporting_period,
     performance: {
@@ -1306,8 +1321,8 @@ function narrativeFacts(state) {
       ? { name: bench.name, value: bench.value, excess_return: perf.monthly_return - bench.value, composition: bench.composition }
       : { unavailable: true, reason: bench.reason },
     attribution: {
-      best_contributor: perf.attribution.best_contributor ? { name: perf.attribution.best_contributor.name, ticker: perf.attribution.best_contributor.ticker, contribution: perf.attribution.best_contributor.contribution, total_return: perf.attribution.best_contributor.total_return } : null,
-      worst_contributor: perf.attribution.worst_contributor ? { name: perf.attribution.worst_contributor.name, ticker: perf.attribution.worst_contributor.ticker, contribution: perf.attribution.worst_contributor.contribution, total_return: perf.attribution.worst_contributor.total_return } : null,
+      best_contributor: perf.attribution.best_contributor ? { name: perf.attribution.best_contributor.name, short_name: shortAssetName(perf.attribution.best_contributor.name), ticker: perf.attribution.best_contributor.ticker, contribution: perf.attribution.best_contributor.contribution, total_return: perf.attribution.best_contributor.total_return } : null,
+      worst_contributor: perf.attribution.worst_contributor ? { name: perf.attribution.worst_contributor.name, short_name: shortAssetName(perf.attribution.worst_contributor.name), ticker: perf.attribution.worst_contributor.ticker, contribution: perf.attribution.worst_contributor.contribution, total_return: perf.attribution.worst_contributor.total_return } : null,
       by_asset_class: perf.attribution.by_asset_class.map((c) => ({ asset_class: c.asset_class, contribution: c.contribution, return: c.return })),
       fx_contribution: perf.attribution.fx_contribution,
     },
@@ -1324,20 +1339,47 @@ function narrativeFacts(state) {
       relevance: i.relevance,
     })),
     recommendations: (state.recommendations || []).map((r) => ({
-      asset_id: r.asset_id, ticker: r.ticker, name: r.name, asset_class: r.asset_class,
+      asset_id: r.asset_id, ticker: r.ticker, name: r.name, short_name: shortAssetName(r.name), asset_class: r.asset_class,
+      within_policy: withinPolicy(r),
       final_action: r.final_action, suitability_result: r.suitability_result, signal_conflict: r.signal_conflict,
       technical_signal: r.technical_signal, analyst_signal: r.analyst_signal, analyst_count: r.analyst_count,
       target_price: r.target_price, implied_upside: r.implied_upside, current_weight: r.current_weight,
       factors: r.factors, flags: r.flags, advisor_status: r.advisor_status,
     })),
     allocation: Object.entries(state.exposures || {}).map(([k, v]) => ({ asset_class: k, weight: v, target: state.ctx.policy?.target_allocation?.[k] ?? null, range: state.ctx.policy?.permitted_ranges?.[k] ?? null })),
-    advisor_view: state.world_view ? { headline: state.world_view.headline, stance_by_asset_class: state.world_view.stance_by_asset_class } : null,
+    /**
+     * The house view. Without this the letter has no opinion in it, and an
+     * opinion is the one thing a client cannot get from their own statement.
+     */
+    advisor_view: houseView(state.world_view),
     /** Exactly the items the letter will print, so the copy and the table agree. */
     letter_recommendations: prioritiseForLetter(state.recommendations || []).selected.map((r) => ({
-      asset_id: r.asset_id, ticker: r.ticker, name: r.name,
+      asset_id: r.asset_id, ticker: r.ticker, name: r.name, short_name: shortAssetName(r.name),
       final_action: r.final_action, suitability_result: r.suitability_result, signal_conflict: r.signal_conflict,
+      within_policy: withinPolicy(r), current_weight: r.current_weight,
+      rationale_pt: r.rationale_pt || r.rationale || null,
     })),
     next_meeting: state.next_meeting ?? null,
+    next_meeting_label: state.next_meeting ? dateLong(state.next_meeting, 'pt-BR') : null,
+    /**
+     * Every figure the letter is allowed to write, already formatted.
+     *
+     * The model is not asked to format a number, because a model that formats is
+     * a model that rounds. It copies one of these strings or it writes the
+     * sentence without a figure — and because they are strings, the check that
+     * no other number reached the letter is exact rather than approximate.
+     */
+    labels: {
+      month: monthLabel(state.ctx.reporting_period?.month, 'pt-BR'),
+      period_end: dateLong(state.ctx.reporting_period?.end, 'pt-BR'),
+      monthly_return: perf.monthly_return == null ? null : percent(perf.monthly_return, { locale: 'pt-BR' }),
+      absolute_pnl: perf.absolute_pnl == null ? null : money(perf.absolute_pnl, { currency: state.ctx.client.base_currency || 'BRL', locale: 'pt-BR', signed: true }),
+      benchmark: bench.available && bench.value != null ? percent(bench.value, { locale: 'pt-BR' }) : null,
+      excess: bench.available && bench.value != null && perf.monthly_return != null ? pp(perf.monthly_return - bench.value, { locale: 'pt-BR' }) : null,
+      excess_abs: bench.available && bench.value != null && perf.monthly_return != null ? pp(Math.abs(perf.monthly_return - bench.value), { locale: 'pt-BR', signed: false }) : null,
+      ending_value: perf.ending_market_value == null ? null : money(perf.ending_market_value, { currency: state.ctx.client.base_currency || 'BRL', locale: 'pt-BR' }),
+      next_meeting: state.next_meeting ? dateLong(state.next_meeting, 'pt-BR') : null,
+    },
   };
 }
 

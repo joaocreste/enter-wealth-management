@@ -16,7 +16,7 @@ import { signals as fetchTvSignals } from '../../src/adapters/tradingview.js';
 import { SourceLedger, makeSource } from '../../src/core/sources.js';
 import { monthlyProfitability, compareToBenchmark, historicalMetrics } from '../../src/core/performance.js';
 import { buildRecommendations } from '../../src/core/recommendations.js';
-import { runSuitability } from '../../src/core/suitability.js';
+import { runSuitability, withinPolicy } from '../../src/core/suitability.js';
 import { evaluateTrigger, mapTriggersToClients, driftTriggers, TRIGGER_STATUS } from '../../src/core/triggers.js';
 import { buildWhatMattersTable, mapEventToPortfolio, notableWindow } from '../../src/core/events.js';
 import { previousMonth, monthBounds } from '../../src/core/format.js';
@@ -587,6 +587,9 @@ export function assembleCanonicalReport({
     proposed_action: r.proposed_action,
     final_action: r.final_action,
     suitability_result: r.suitability_result,
+    // The binary answer, stored beside the five-value one. The letter, the email
+    // and both portals read this rather than each deriving it from the flags.
+    within_policy: withinPolicy(r),
     signal_conflict: r.signal_conflict,
     technical_signal: r.technical_signal,
     analyst_signal: r.analyst_signal,

@@ -743,12 +743,12 @@ data:
                 try { letter = JSON.parse(candidate.slice(start, end + 1)); } catch (e) { console.log('unparsable model output'); }
               }
 
-              const required = ['greeting', 'opening', 'performance', 'markets',
-              'meaning', 'recommendations_intro', 'closing', 'sign_off'];
+              const required = ['title', 'greeting', 'sign_off'];
 
-              const ok = !!letter && required.every((k) => typeof letter[k] ===
-              'string' && letter[k].length > 0);
-
+              const ok = !!letter
+                && required.every((k) => typeof letter[k] === 'string' && letter[k].length > 0)
+                && Array.isArray(letter.paragraphs)
+                && letter.paragraphs.filter((p) => typeof p === 'string' && p.trim()).length >= 4;
               if (!ok) console.log('model output rejected; the deterministic
               renderer will be used');
 
@@ -783,7 +783,7 @@ data:
                     run_id: inputs.run_id.value,
                     mode: 'model_via_rivet',
                     model: inputs.model.value,
-                    prompt_version: 'letter-2026-09-d',
+                    prompt_version: 'letter-2026-09-e',
                     letter: JSON.parse(inputs.letter_json.value || '{}'),
                   }),
                 },
@@ -1083,69 +1083,126 @@ data:
               # Task: write the monthly client letter
 
 
-              Write the monthly investment letter that this client will receive.
-              It is a letter from a named advisor to a named person, not a
-              factsheet.
+              You are {{advisor_name}}, writing to {{client_first_name}}, a
+              client you know, about the month that has just closed. This is a
+              letter, not a factsheet with a greeting on top. Someone who reads
+              it from the first line to the last must find one continuous piece
+              of writing, where each paragraph follows from the one before it.
+
+
+              Everything that is a figure, a table or a chart is printed by the
+              renderer on a second page, the annex. You write the letter. Refer
+              to the annex rather than reproducing it.
 
 
               ## Output
 
 
-              Return STRICT JSON with this exact shape and nothing else:
+              Return STRICT JSON with this exact shape and nothing else — the
+              reply starts with { and ends with }, with no prose before or after
+              and no markdown fence:
 
 
               {
-                "greeting": "one line, e.g. 'Prezado Albert,'",
-                "opening": "2 to 3 sentences. Personal, direct, no market commentary yet.",
-                "performance": "3 to 5 sentences on how the portfolio performed. Describe the loss before the gain. Name the largest negative contributor first, then the largest positive. State the method assumption in plain language if FACTS.performance.method is not 'simple'.",
-                "markets": "3 to 4 sentences on the market events in FACTS.events, and ONLY those. Only mention an event the client has exposure to.",
-                "meaning": "3 to 4 sentences translating those events into what they mean for THIS portfolio, using the exposure figures in FACTS.impact.",
-                "recommendations_intro": "1 to 2 sentences introducing the discussion points.",
-                "closing": "2 to 3 sentences. Reference the next meeting date if FACTS.next_meeting is present. Offer availability.",
+                "title": "the idea of the month in under 60 characters, no final period. It is what you would say if the client asked 'so how was the month?' and you had one line. Never a label like 'Carta mensal' or 'Relatório de agosto'.",
+                "greeting": "e.g. 'Prezado {{client_first_name}},'",
+                "paragraphs": ["...", "...", "...", "...", "...", "..."],
                 "sign_off": "e.g. 'Um abraço,'"
               }
 
 
-              ## Language and register
+              ## The arc — one paragraph each, in this order, 4 to 6 in total
 
 
-              - Write in Brazilian Portuguese. The client is not a finance
-              professional.
+              1. The month, straight away. Say how it went and name the one
+              thing that explains it. Never open by announcing what the letter
+              contains.
 
-              - Formal but warm. The register of a private-banking letter, not a
-              bank circular.
+              2. What drove the result. The loss before the gain, always. Name
+              the largest detractor first, then what helped.
 
-              - Never use bullet points inside these fields; the renderer adds
-              structure.
+              3. What happened in the world, and only the part that touches THIS
+              portfolio. Say how it reaches the client. Skip an event that does
+              not reach them, or say plainly that it does not.
 
-              - Brazilian number format: 1.234,56. Currency always written as R$
-              or US$, never a bare $.
+              4. The house view. What XP Asset Management reads into this, and
+              what it means for the client's positioning.
 
-              - Use the true minus sign − for negative figures, never a hyphen.
+              5. What you want to discuss at the next meeting. Two or three
+              things, in prose, in the order of the annex. Never a list.
 
-              - Do not repeat a figure that the renderer already prints in a
-              table. Refer to it in words.
-
-
-              ## Hard constraints
+              6. The close. The meeting date if FACTS.next_meeting is present, a
+              pointer to the annex, and an offer to talk before then.
 
 
-              - Every figure must come from FACTS. If
-              FACTS.performance.monthly_return is null, say the return could not
-              be computed and why, using FACTS.performance.unavailable_reason.
+              Paragraphs 3 and 4 may be merged when the month is quiet, and
+              paragraph 2 may be merged into 1 when the result has a single
+              cause. Never fewer than four paragraphs, never more than six.
 
-              - Do not name a recommendation as a decision. Use "vale
-              discutirmos", "sugiro avaliarmos", "proponho revisarmos".
 
-              - Where FACTS.recommendations contains an item with
-              suitability_result other than PASS, the letter must not suggest
-              increasing it.
+              ## Voice
 
-              - Never mention an asset the client does not hold unless it
-              appears in FACTS.recommendations as a candidate.
 
-              - The letter is limited to two pages. Stay within the sentence
-              counts above.
+              - Brazilian Portuguese, formal but warm: the register of a
+              private-banking letter.
+
+              - A judgement, a reading or an expectation is the house speaking,
+              in the first person plural, and it must be marked as a view: "Na
+              nossa leitura aqui na XP Asset Management", "seguimos cautelosos",
+              "não vemos motivo para". Never "acho", "na minha leitura", "eu
+              prefiro" for a market view.
+
+              - What the advisor personally does or offers is the first person
+              singular: "quero conversar", "levo estes pontos", "é só me
+              chamar". The commitments are the advisor's; the views are the
+              firm's.
+
+              - Address the client by first name. Short sentences, average under
+              18 words.
+
+              - Call assets what a person calls them. FACTS gives a short_name
+              for each: write "a Hapvida" and "o fundo do S&P 500", never the
+              full legal name.
+
+              - No bullet points, no headings, no section titles inside a
+              paragraph. The renderer adds all structure.
+
+
+              ## Numbers
+
+
+              - FACTS.labels holds every figure you are allowed to write,
+              already formatted. Copy one of those strings character for
+              character, or write the sentence without a figure. Never format,
+              compute, round or estimate a number yourself.
+
+              - At most TWO figures in the whole letter: normally
+              FACTS.labels.monthly_return and FACTS.labels.excess_abs.
+              Everything else is described in words, because the annex prints
+              it.
+
+              - A digit that is not in FACTS.labels is a defect, and the letter
+              is rejected for it. Write "quase toda a diferença", not "84% da
+              diferença".
+
+
+              ## What may never be said
+
+
+              - Never present a suggestion as a decision or an order. The
+              suggestions are points for the next meeting.
+
+              - A position FACTS marks as within_policy false is out of the
+              client's policy: say so plainly, and say what is proposed about
+              it.
+
+              - Where FACTS.performance.monthly_return is null, say the return
+              could not be computed and why, using
+              FACTS.performance.unavailable_reason. Never fill the gap.
+
+              - Never mention an asset that is not in FACTS.
+
+              - Never state a market fact that is not in FACTS.
 
 
               ## FACTS
@@ -1978,7 +2035,7 @@ data:
       number.
 
 
-      Prompt version letter-2026-09-d. Generated by rivet/build-graph.mjs — edit
+      Prompt version letter-2026-09-e. Generated by rivet/build-graph.mjs — edit
       the prompts in src/llm/prompts.js and re-run `npm run build:graph` rather
       than editing prompt text here.
     id: enter_wealth_advisor

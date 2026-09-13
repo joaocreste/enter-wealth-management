@@ -82,6 +82,9 @@ export function checkSuitability(rec, ctx) {
     if (hit) {
       flags.push({
         code: 'RESTRICTED_INSTRUMENT', severity: 'high',
+        // A restricted instrument the client does not hold is a purchase that
+        // will not happen, not a portfolio that sits outside its policy.
+        breach: (rec.current_weight ?? 0) > 0,
         message: r.label_en || `Restricted by the investment policy: ${r.type} = ${r.value}`,
         message_pt: r.label || `Vedado pela política de investimentos: ${r.type} = ${r.value}`,
         policy_reference: r.id || null,
@@ -97,6 +100,9 @@ export function checkSuitability(rec, ctx) {
     flags.push({
       code: 'RISK_GRADE_ABOVE_PROFILE',
       severity: held ? 'medium' : 'high',
+      // Held above the profile's grade ceiling is a real deviation. It is
+      // tolerated rather than force-sold, but it is not "within policy".
+      breach: held,
       message: held
         ? `Instrument risk grade ${asset.risk_grade} is above the maximum of ${maxGrade} for a ${policy?.risk_profile} profile. The existing position may be held and discussed, but not increased.`
         : `Instrument risk grade ${asset.risk_grade} exceeds the maximum of ${maxGrade} for a ${policy?.risk_profile} profile.`,
@@ -113,6 +119,9 @@ export function checkSuitability(rec, ctx) {
     if (classWeight >= (classBand.max ?? 1)) {
       flags.push({
         code: 'CLASS_AT_OR_ABOVE_MAX', severity: rec.proposed_action === ACTIONS.ADD ? 'high' : 'medium',
+        // Sitting exactly on the ceiling is inside the approved range; only
+        // crossing it puts the portfolio outside.
+        breach: classWeight > (classBand.max ?? 1) + 1e-9,
         message: `${asset.asset_class} is at ${(classWeight * 100).toFixed(1)}% against a policy maximum of ${((classBand.max ?? 1) * 100).toFixed(1)}%. Adding would breach the approved range.`,
         message_pt: `${pt(asset.asset_class)} está em ${(classWeight * 100).toFixed(1).replace('.', ',')}% contra um máximo de ${((classBand.max ?? 1) * 100).toFixed(0)}% na política. Aumentar romperia a faixa aprovada.`,
       });
@@ -128,7 +137,7 @@ export function checkSuitability(rec, ctx) {
     }
     if (classWeight < (classBand.min ?? 0) && rec.proposed_action === ACTIONS.REDUCE) {
       flags.push({
-        code: 'CLASS_BELOW_MIN', severity: 'medium',
+        code: 'CLASS_BELOW_MIN', severity: 'medium', breach: true,
         message: `${asset.asset_class} is already below its ${((classBand.min ?? 0) * 100).toFixed(1)}% floor; reducing further would move the portfolio away from the approved policy.`,
         message_pt: `${pt(asset.asset_class)} já está abaixo do mínimo de ${((classBand.min ?? 0) * 100).toFixed(0)}% da política; reduzir mais afastaria a carteira do que foi aprovado.`,
       });
@@ -147,7 +156,7 @@ export function checkSuitability(rec, ctx) {
   const concentrationExempt = asset.concentration_exempt ?? asset.type === 'etf';
   if (!concentrationExempt && w > cap) {
     flags.push({
-      code: 'CONCENTRATION_BREACH', severity: 'high',
+      code: 'CONCENTRATION_BREACH', severity: 'high', breach: true,
       message: `Position is ${(w * 100).toFixed(1)}% of the portfolio against a ${(cap * 100).toFixed(0)}% single-name cap.`,
       message_pt: `A posição representa ${(w * 100).toFixed(1).replace('.', ',')}% da carteira, acima do teto de ${(cap * 100).toFixed(0)}% por emissor previsto na política.`,
     });
@@ -160,7 +169,7 @@ export function checkSuitability(rec, ctx) {
     const fxExposure = portfolio.unhedged_fx_weight ?? null;
     if (fxCap != null && fxExposure != null && fxExposure >= fxCap && rec.proposed_action === ACTIONS.ADD) {
       flags.push({
-        code: 'FX_EXPOSURE_AT_CAP', severity: 'high',
+        code: 'FX_EXPOSURE_AT_CAP', severity: 'high', breach: fxExposure > fxCap + 1e-9,
         message: `Unhedged exposure outside ${policy.base_currency} is ${(fxExposure * 100).toFixed(1)}% against a ${(fxCap * 100).toFixed(0)}% limit.`,
         message_pt: `A exposição sem proteção cambial fora do ${policy.base_currency} está em ${(fxExposure * 100).toFixed(1).replace('.', ',')}%, contra um limite de ${(fxCap * 100).toFixed(0)}%.`,
       });
@@ -206,6 +215,16 @@ export function checkSuitability(rec, ctx) {
 
   return {
     suitability_result: result,
+    /**
+     * The one thing a client is entitled to a straight answer on: is this
+     * position, as it stands today, inside the policy they approved?
+     *
+     * It is deliberately NOT derived from suitability_result. That result mixes
+     * two different statements — "what you hold breaks a limit" and "buying more
+     * would break one" — and a client letter must not call the second one a
+     * breach. Only the flags that describe the CURRENT holding decide this.
+     */
+    within_policy: !flags.some((f) => f.breach),
     flags,
     final_action: finalAction,
     downgraded: finalAction !== rec.proposed_action,
@@ -215,6 +234,33 @@ export function checkSuitability(rec, ctx) {
       client_suitability: suitabilityLine(result, finalAction),
     },
   };
+}
+
+/**
+ * Is a stored recommendation within its policy?
+ *
+ * Rows written before the guardrail marked its own flags carry neither
+ * `within_policy` nor `breach`, so the codes that always describe the current
+ * holding stand in for them. A row that cannot be judged is reported as inside,
+ * because asserting a breach we cannot evidence is the worse error.
+ */
+const LEGACY_BREACH_CODES = new Set([
+  'RESTRICTED_INSTRUMENT', 'RISK_GRADE_ABOVE_PROFILE', 'CLASS_AT_OR_ABOVE_MAX', 'CLASS_BELOW_MIN', 'CONCENTRATION_BREACH',
+]);
+
+export function withinPolicy(rec) {
+  if (typeof rec?.within_policy === 'boolean') return rec.within_policy;
+  const flags = rec?.flags || [];
+  if (flags.some((f) => f.breach === true)) return false;
+  if (flags.some((f) => f.breach === undefined && LEGACY_BREACH_CODES.has(f.code))) return false;
+  return true;
+}
+
+/** What the client reads in the "enquadramento" column. It has two values and no third. */
+export function policyFitLabel(rec, locale = 'pt-BR') {
+  const inside = withinPolicy(rec);
+  if (locale === 'pt-BR') return inside ? 'Dentro da política' : 'Fora da política';
+  return inside ? 'Within policy' : 'Outside policy';
 }
 
 function applyGuardrail(action, result) {

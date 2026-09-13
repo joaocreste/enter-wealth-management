@@ -38,17 +38,13 @@ export function renderLetterHtml(model, { variant = 'email', pdfUrl = null, port
   const isEmail = variant === 'email';
   const maxW = isEmail ? 640 : 780;
 
+  // The letter first and whole, then everything it refers to. The annex is one
+  // rule down the page, not five numbered sections interleaved with the prose.
   const body = `
-${byline(model)}
-${clientRow(model)}
-${greeting(model)}
-${figureStrip(model, isEmail)}
-${section(model, '01', model.sections.performance, performanceBody(model, isEmail))}
-${section(model, '02', model.sections.markets, `<p class="reading">${e(model.letter.markets || '')}</p>`)}
-${section(model, '03', model.sections.meaning, meaningBody(model))}
-${section(model, '04', model.sections.recommendations, recommendationsBody(model, isEmail))}
-${section(model, '05', model.sections.portfolio, portfolioBody(model, isEmail))}
-${closing(model)}
+${dateline(model)}
+${letterBody(model)}
+${signature(model)}
+${annex(model, isEmail)}
 ${sources(model)}
 ${(pdfUrl || portalUrl) ? actions(model, pdfUrl, portalUrl) : ''}
 `;
@@ -109,11 +105,17 @@ b,strong{font-weight:500}
 .bar .title b{font-weight:700}
 .bar .sep{color:${COPPER};font-size:8px;margin:0 12px 0 14px;font-weight:300}
 .bar .date{font-size:8px;letter-spacing:.32em;text-transform:uppercase;color:${SAGE};font-weight:300;white-space:nowrap}
-.byline{font-size:9px;letter-spacing:.3em;text-transform:uppercase;font-weight:300;color:${INK};margin:0 0 14px}
-.byline b{font-weight:400}
-.client-row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;border-bottom:1px solid ${RULE};padding-bottom:10px;margin-bottom:22px}
-.client-name{font-size:19px;font-weight:400;color:${INK}}
-.client-meta{font-size:11px;color:${INK3}}
+.dateline{margin:0 0 26px}
+.dateline .to{font-size:15px;font-weight:500;color:${INK}}
+.dateline .to-line{font-size:11px;color:${SAGE};margin-top:3px}
+.dateline .place-date{font-size:12px;font-weight:300;color:${INK2};white-space:nowrap}
+.letter-title{font-size:${isEmail ? 20 : 23}px;font-weight:700;line-height:1.25;color:${COPPER2};margin:0 0 20px;max-width:26ch}
+.reading.greeting{margin-bottom:1.1em}
+/* The annex begins below a rule, so a reader can see where the letter ends. */
+.annex{margin-top:40px;border-top:1px solid ${RULE};padding-top:20px}
+.annex-head{display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.annex-title{font-size:9px;letter-spacing:.16em;text-transform:uppercase;font-weight:300;color:${COPPER}}
+.annex-meta{font-size:10px;color:${INK3}}
 
 .sec{margin:26px 0 0}
 .sec-head{display:flex;gap:12px;align-items:baseline;margin-bottom:10px}
@@ -161,6 +163,8 @@ table.data .sub{display:block;font-size:10.5px;color:${INK3};font-weight:300;mar
 .sign{margin-top:22px}
 .sign .name{font-size:13px;font-weight:500;color:${INK}}
 .sign .org{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:${SAGE};margin-top:4px;font-weight:300}
+/* An address is read, not tracked: capitals and letter-spacing make it unusable. */
+.sign .contact{font-size:11px;color:${SAGE};margin-top:5px;font-weight:300}
 
 .sources{border-top:1px solid ${RULE};margin-top:24px;padding-top:12px;font-size:10.5px;color:${INK2};line-height:1.5;font-weight:300}
 .sources b{font-weight:400;color:${INK};display:block;margin-bottom:4px}
@@ -184,7 +188,7 @@ table.data .sub{display:block;font-size:10.5px;color:${INK3};font-weight:300;mar
   .figs td{display:block;width:100%!important;border-bottom:1px solid ${RULE2};padding:9px 0}
   .figs .val.big{font-size:20px}
   table.data th:nth-child(3),table.data td:nth-child(3){display:none}
-  .client-row{flex-direction:column}
+  .annex-head{flex-direction:column;gap:4px}
   .bar .date{display:none}
 }
 `;
@@ -199,22 +203,45 @@ function masthead(model) {
 </tr></table>`;
 }
 
-function byline(model) {
-  const L = model.locale;
-  return `<p class="byline">${e(L === 'pt-BR' ? 'Por' : 'By')} <b>${e(model.advisor?.name || '')}</b>, XP Asset Management</p>`;
+/** To whom, from where, and when — the head of a letter, not a CRM record. */
+function dateline(model) {
+  const d = model.dateline || {};
+  return `<table role="presentation" class="dateline" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+<td align="left" valign="top"><div class="to">${e(d.to || model.client?.name || '')}</div><div class="to-line">${e(d.to_line || '')}</div></td>
+<td align="right" valign="top"><div class="place-date">${e(d.place_date || '')}</div></td>
+</tr></table>`;
 }
 
-function clientRow(model) {
+function letterBody(model) {
+  const l = model.letter || {};
+  return `${l.title ? `<h1 class="letter-title">${e(l.title)}</h1>` : ''}
+<p class="reading greeting">${e(l.greeting || '')}</p>
+${(l.paragraphs || []).map((x) => `<p class="reading">${e(x)}</p>`).join('\n')}`;
+}
+
+function signature(model) {
   const L = model.locale;
-  return `<div class="client-row">
-<div class="client-name">${e(model.client?.name || '')}</div>
-<div class="client-meta">${e(`${L === 'pt-BR' ? 'Perfil' : 'Profile'}: ${model.client?.risk_profile} · ${L === 'pt-BR' ? 'Assessor' : 'Advisor'}: ${model.advisor?.name}${model.advisor?.code ? ` (${model.advisor.code})` : ''}`)}</div>
+  const role = L === 'pt-BR' ? 'Assessor de investimentos' : 'Investment advisor';
+  return `<div class="sign"><p class="reading" style="margin-bottom:1.2em">${e(model.letter.sign_off || '')}</p>
+<div class="name">${e(model.advisor?.name || '')}</div>
+<div class="org">${e(role)} · XP Asset Management${model.advisor?.code ? ` · ${e(model.advisor.code)}` : ''}</div>
+${model.advisor?.email ? `<div class="contact">${e(model.advisor.email)}</div>` : ''}</div>`;
+}
+
+/** Page two, as a block: the figures, what moved them, the meeting and the portfolio. */
+function annex(model, isEmail) {
+  const L = model.locale;
+  const meta = [
+    `${L === 'pt-BR' ? 'Perfil' : 'Profile'} ${model.client?.risk_profile || '—'}`,
+    `${L === 'pt-BR' ? 'Assessor' : 'Advisor'} ${model.advisor?.name || ''}${model.advisor?.code ? ` (${model.advisor.code})` : ''}`,
+  ].join(' · ');
+  return `<div class="annex">
+<div class="annex-head"><span class="annex-title">${e(model.annex_title || 'Anexo')}</span><span class="annex-meta">${e(meta)}</span></div>
+${figureStrip(model, isEmail)}
+${section(model, '01', L === 'pt-BR' ? 'Quem puxou o resultado' : 'What drove the result', performanceBody(model, isEmail))}
+${(model.recommendations || []).length ? section(model, '02', L === 'pt-BR' ? 'Os pontos da reunião' : 'The points for the meeting', recommendationsBody(model, isEmail)) : ''}
+${section(model, '03', model.sections.portfolio, portfolioBody(model, isEmail))}
 </div>`;
-}
-
-function greeting(model) {
-  return `<p class="reading" style="font-size:17px;margin-bottom:0.7em">${e(model.letter.greeting || '')}</p>
-<p class="reading">${e(model.letter.opening || '')}</p>`;
 }
 
 function figureStrip(model, isEmail) {
@@ -239,8 +266,7 @@ function performanceBody(model, isEmail) {
     caption: buildChartCaption(model),
     locale: L,
   });
-  return `<p class="reading">${e(model.letter.performance || '')}</p>
-${chart}
+  return `${chart}
 ${model.method_note ? `<p class="note">${e(model.method_note)}</p>` : ''}
 ${model.coverage_note ? `<p class="note">${e(model.coverage_note)}</p>` : ''}`;
 }
@@ -253,21 +279,10 @@ function buildChartCaption(model) {
     : `Period: ${model.period.start} to ${model.period.end} · Currency: ${model.currency} · Basis: contribution to portfolio return${providers.length ? ` · Sources: ${providers.join(', ')}` : ''}`;
 }
 
-function meaningBody(model) {
-  const items = (model.impact || []).map((i) => `<div class="impact-item">
-<div><span class="impact-title">${e(i.title)}</span>${i.exposure_label ? `<span class="impact-exp">${e(model.locale === 'pt-BR' ? 'exposição' : 'exposure')} ${e(i.exposure_label)}</span>` : ''}</div>
-<div class="impact-body">${e(i.impact || '')}</div>
-</div>`).join('');
-  return `<p class="reading">${e(model.letter.meaning || '')}</p>
-${items ? `<div class="impact">${items}</div>` : ''}`;
-}
-
 function recommendationsBody(model, isEmail) {
   const L = model.locale;
   const recs = model.recommendations || [];
-  if (!recs.length) {
-    return `<p class="reading">${e(model.letter.recommendations_intro || '')}</p>`;
-  }
+  if (!recs.length) return '';
   const heads = L === 'pt-BR'
     ? ['Ativo', 'Sugestão', 'Sinais de mercado', 'Enquadramento na sua política']
     : ['Asset', 'Suggestion', 'Market signals', 'Fit with your policy'];
@@ -279,12 +294,11 @@ function recommendationsBody(model, isEmail) {
 <b>${e(L === 'pt-BR' ? 'Técnico' : 'Technical')}:</b> ${r.technical ? e(r.technical) : `<span class="na">${e(L === 'pt-BR' ? 'sem cobertura' : 'not covered')}</span>`}<br>
 <b>${e(L === 'pt-BR' ? 'Analistas' : 'Analyst')}:</b> ${r.analyst ? `${e(r.analyst)}${r.analyst_count ? ` <span class="na">(${r.analyst_count})</span>` : ''}` : `<span class="na">${e(r.analyst_missing_label || '')}</span>`}
 </div></td>
-<td><span class="fit ${r.suitability === 'PASS' ? 'pass' : 'flag'}">${e(r.suitability_label)}</span></td>
+<td><span class="fit ${r.within_policy ? 'pass' : 'flag'}">${e(r.suitability_label)}</span></td>
 </tr>
 ${r.rationale ? `<tr><td colspan="4" class="rationale">${e(r.rationale)}</td></tr>` : ''}`).join('');
 
-  return `<p class="reading">${e(model.letter.recommendations_intro || '')}</p>
-<table class="data"><thead><tr>${heads.map((h) => `<th>${e(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
+  return `<table class="data"><thead><tr>${heads.map((h) => `<th>${e(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
 <p class="note">${e(L === 'pt-BR'
     ? 'Estas são sugestões para discussão na próxima reunião. Nenhuma operação é executada automaticamente.'
     : 'These are discussion points for the next meeting. No transaction is executed automatically.')}${model.recommendations_omitted_note ? ` ${e(model.recommendations_omitted_note)}` : ''}</p>`;
@@ -311,13 +325,6 @@ function portfolioBody(model, isEmail) {
 </tr>`).join('');
   return `${bar}
 <table class="data"><thead><tr>${heads.map((h) => `<th${h === heads[0] ? '' : ' style="text-align:right"'}>${e(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
-}
-
-function closing(model) {
-  return `<div class="sec"><p class="reading">${e(model.letter.closing || '')}</p>
-<div class="sign"><p class="reading" style="margin-bottom:0.5em">${e(model.letter.sign_off || '')}</p>
-<div class="name">${e(model.advisor?.name || '')}</div>
-<div class="org">XP Asset Management${model.advisor?.code ? ` · ${e(model.advisor.code)}` : ''}</div></div></div>`;
 }
 
 function sources(model) {

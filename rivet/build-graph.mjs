@@ -553,8 +553,11 @@ let letter = null;
 if (start >= 0 && end > start) {
   try { letter = JSON.parse(candidate.slice(start, end + 1)); } catch (e) { console.log('unparsable model output'); }
 }
-const required = ['greeting', 'opening', 'performance', 'markets', 'meaning', 'recommendations_intro', 'closing', 'sign_off'];
-const ok = !!letter && required.every((k) => typeof letter[k] === 'string' && letter[k].length > 0);
+const required = ['title', 'greeting', 'sign_off'];
+const ok = !!letter
+  && required.every((k) => typeof letter[k] === 'string' && letter[k].length > 0)
+  && Array.isArray(letter.paragraphs)
+  && letter.paragraphs.filter((p) => typeof p === 'string' && p.trim()).length >= 4;
 if (!ok) console.log('model output rejected; the deterministic renderer will be used');
 return {
   letter_json: { type: 'string', value: ok ? JSON.stringify(letter) : '' },

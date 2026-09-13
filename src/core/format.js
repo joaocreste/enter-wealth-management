@@ -133,3 +133,35 @@ export function monthBounds(ym) {
   const prevEnd = new Date(Date.UTC(y, m - 1, 0));
   return { start: iso(start), end: iso(end), priorEnd: iso(prevEnd) };
 }
+
+/**
+ * The name a person uses for an asset.
+ *
+ * A client letter that writes "Hapvida Participações e Investimentos S.A." and
+ * "iShares S&P 500 FIC de Fundo de Índice — Investimento no Exterior" reads like
+ * a custody statement, because that is where those strings come from. The annex
+ * keeps the full legal name, which is the one that matters for identification;
+ * the letter uses this.
+ *
+ * The rule: keep what comes before the first legal or fund-structure token, and
+ * never more than three words. Everything after that token is the wrapper, not
+ * the thing.
+ */
+const NAME_STOP = new Set([
+  's.a.', 's/a', 'sa', 'ltda', 'ltda.', 'participações', 'participacoes', 'investimentos',
+  'fic', 'fim', 'fia', 'firf', 'ref', 'di', 'cp', 'fundo', 'fundos', 'advisory',
+  'global', 'company', 'indústria', 'industria', 'comércio', 'comercio', 'holding', 'holdings',
+]);
+
+export function shortAssetName(name) {
+  const head = String(name || '').split(' — ')[0].split(' - ')[0].split(' (')[0].trim();
+  const words = head.split(/\s+/).filter(Boolean);
+  const kept = [];
+  for (const w of words) {
+    if (NAME_STOP.has(w.toLowerCase().replace(/[,;]$/, ''))) break;
+    kept.push(w);
+    if (kept.length === 3) break;
+  }
+  const out = kept.join(' ').replace(/[,\s]+$/, '');
+  return out || head || String(name || '');
+}

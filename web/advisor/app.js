@@ -172,7 +172,7 @@ function refreshButton() {
     onclick: async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      try { followRun((await api('/api/advisor/refresh')).run); } catch (err) { b.disabled = false; alert(`Não foi possível iniciar a atualização: ${err.message}`); }
+      try { followRun((await api('/api/advisor/refresh', {})).run); } catch (err) { b.disabled = false; alert(`Não foi possível iniciar a atualização: ${err.message}`); }
     },
   }, icon('refresh', { size: 15 }), h('span', { text: 'atualizar dados de mercado' }));
 }

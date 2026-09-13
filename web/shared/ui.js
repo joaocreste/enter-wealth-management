@@ -172,6 +172,27 @@ export async function api(path, body, method) {
     headers: { 'content-type': 'application/json', ...(auth.token ? { authorization: `Bearer ${auth.token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
+  return readApi(res);
+}
+
+/**
+ * A file to an API route. Deliberately not api(): the browser has to set the
+ * multipart boundary itself, so this sends no content-type of its own.
+ */
+export async function apiUpload(path, file, fields = {}) {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  for (const [k, v] of Object.entries(fields)) if (v != null && v !== '') form.append(k, v);
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { ...(auth.token ? { authorization: `Bearer ${auth.token}` } : {}) },
+    body: form,
+  });
+  return readApi(res);
+}
+
+/** One reading of an API response, whatever put the request on the wire. */
+async function readApi(res) {
   if (res.status === 401) {
     auth.clear();
     if (!isLoginPage()) location.href = `${loginUrl()}?reason=expired`;
@@ -586,6 +607,27 @@ export function donut({ size = 96 } = {}) {
       label.textContent = `${Math.round(v)}%`;
     },
   };
+}
+
+/**
+ * A modal over the page: a title, a body to fill and a footer for the actions.
+ * It closes on the backdrop, on Escape and on its own button — nothing shown
+ * this way is important enough to trap the reader on it.
+ */
+export function dialog({ title, sub = null, width = 620 } = {}) {
+  const body = h('div.dlg-body');
+  const foot = h('div.dlg-foot');
+  const close = () => { document.removeEventListener('keydown', onKey); veil.remove(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const card = h('div.dlg', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: { width: `min(${width}px, 100%)` } },
+    h('div.dlg-head', {},
+      h('div', {}, h('h3', { text: title }), sub ? h('div.dlg-sub', { text: sub }) : null),
+      h('button.btn.sm', { type: 'button', 'aria-label': 'Fechar', onclick: close }, icon('x', { size: 14 }))),
+    body, foot);
+  const veil = h('div.veil', { onclick: (e) => { if (e.target === veil) close(); } }, card);
+  document.addEventListener('keydown', onKey);
+  document.body.append(veil);
+  return { el: veil, card, body, foot, close };
 }
 
 /**

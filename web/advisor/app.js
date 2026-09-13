@@ -8,7 +8,7 @@
 import {
   h, mount, frag, api, auth, stat, table, router, setActive,
   pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix,
-  progressCard, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday, donut,
+  progressCard, dialog, apiUpload, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday, donut,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
   barChart, allocationBar, bandChart, lineChart, sparkline, scatterChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
@@ -607,6 +607,8 @@ async function viewClient({ id, tab = 'overview' }) {
       h('a.btn', { href: `#/client/${id}/relatorio`, target: '_blank', rel: 'noopener' }, icon('documents', { size: 15 }), h('span', { text: 'criar relatório pdf' })),
       h('a.btn', { href: `#/client/${id}/prep` }, icon('prep', { size: 15 }), h('span', { text: 'preparar reunião' })),
       h('a.btn.primary', { href: `#/client/${id}/editor` }, icon('edit', { size: 15 }), h('span', { text: 'editar carteira' })),
+      // the signed policy, over the page: reading it should not cost the tab
+      policyDocButton(id),
     ], [h('b', { text: 'Cliente' }), sep(), `perfil ${c.risk_profile}`, c.segment ? sep() : null, c.segment || null]),
     tabsEl,
     body);
@@ -679,6 +681,98 @@ function refreshDoneText(r) {
     ? ` O panorama do dia é de ${dmy(s.overview.date)}: atualize-o na visão geral antes de gerar a carta.`
     : '';
   return `${money(s.total_value, { locale: L })} em ${dmy(s.to)}${move}. ${s.counts?.priced} de ${s.counts?.total} posições remarcadas${kept} · ${fontes}.${stale}`;
+}
+
+// ── the investment policy, as the document it was signed in ────────────────
+// The Política tab shows the parameters the engine measures against. What an
+// advisor opens in a meeting and replaces when a new one is signed is the file
+// itself, so it lives here: over the page, because looking at it or swapping it
+// should not cost the advisor the place they were reading.
+function policyDocButton(clientId) {
+  return h('button.btn', { type: 'button', onclick: () => openPolicyDoc(clientId) },
+    icon('documents', { size: 15 }), h('span', { text: 'ver PI' }));
+}
+
+const fileSize = (n) => (n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const sentWhen = (iso) => `${dateLong(iso, L)}${hhmm(iso) ? ` às ${hhmm(iso)}` : ''}`;
+
+async function openPolicyDoc(clientId) {
+  const dlg = dialog({
+    title: 'Política de investimento',
+    sub: 'O documento assinado: abrir, baixar, ou substituir quando uma versão nova for assinada.',
+  });
+  // One hidden picker for the life of the dialog; the handler is swapped rather
+  // than the element, so re-rendering the body never loses the open file dialog.
+  const pick = h('input', { type: 'file', accept: '.pdf,.doc,.docx', hidden: true });
+  dlg.card.append(pick);
+  pick.addEventListener('change', () => {
+    const file = pick.files?.[0];
+    pick.value = '';
+    if (file) upload(file);
+  });
+
+  const upload = async (file) => {
+    mount(dlg.foot, h('div.grow', { text: `Enviando ${file.name}…` }));
+    try {
+      const r = await apiUpload(`/api/clients/${clientId}/policy-document`, file);
+      await render(r.unchanged
+        ? 'Este arquivo é idêntico ao que já estava guardado; nada foi trocado.'
+        : r.replaced
+          ? `Versão ${r.document.version} guardada. A v${r.replaced} continua no histórico.`
+          : 'Documento guardado.');
+    } catch (err) {
+      await render(`Não foi possível enviar: ${err.message}`, 'caution');
+    }
+  };
+
+  const render = async (message = null, tone = '') => {
+    mount(dlg.body, loader());
+    mount(dlg.foot);
+    let d;
+    try { d = await api(`/api/clients/${clientId}/policy-document`); } catch (err) {
+      mount(dlg.body, h('div.empty', { text: `Não foi possível ler o documento: ${err.message}` }));
+      return;
+    }
+    const c = d.current;
+    mount(dlg.body, c ? policyDocCurrent(c, d.versions) : h('div.empty', {},
+      'Nenhum documento guardado para este cliente ainda. Envie o PDF da política assinada e ele fica a um clique daqui.'));
+    mount(dlg.foot,
+      h('div.grow', { class: tone },
+        message || `Aceita PDF, DOC ou DOCX até ${Math.round(d.max_bytes / 1048576)} MB. Substituir não apaga: a versão anterior fica no histórico.`),
+      c ? h('a.btn', { href: apiUrl(c.links.view), target: '_blank', rel: 'noopener' }, icon('external', { size: 15 }), h('span', { text: 'abrir' })) : null,
+      c ? h('a.btn', { href: apiUrl(c.links.download) }, icon('download', { size: 15 }), h('span', { text: 'baixar' })) : null,
+      h('button.btn.primary', { type: 'button', onclick: () => pick.click() },
+        icon('refresh', { size: 15 }), h('span', { text: c ? 'atualizar' : 'enviar arquivo' })));
+  };
+
+  await render();
+}
+
+function policyDocCurrent(c, versions) {
+  const older = (versions || []).filter((v) => v.id !== c.id);
+  return frag(
+    h('div.doc', {},
+      icon('documents', { size: 30 }),
+      h('div', {},
+        h('div.doc-name', { text: c.filename }),
+        h('div.doc-meta', {
+          text: [
+            `versão ${c.version}`,
+            c.policy_version ? `documenta a política v${c.policy_version}` : null,
+            fileSize(c.size_bytes),
+            `enviado ${sentWhen(c.uploaded_at)}`,
+            c.uploaded_by ? `por ${c.uploaded_by}` : null,
+          ].filter(Boolean).join(' · '),
+        }),
+        c.note ? h('div.doc-note', {}, h('b', { text: 'Nota: ' }), c.note) : null)),
+    older.length ? h('div.doc-old', {},
+      h('div.lab', { text: 'versões anteriores' }),
+      h('ul', {}, older.map((v) => h('li', {},
+        h('span.nm', {}, h('span.v', { text: `v${v.version}` }), ' ', v.filename),
+        h('span.rt', {},
+          h('span.v', { text: `${dateLong(v.uploaded_at, L)} · ${fileSize(v.size_bytes)}` }),
+          h('a.btn.sm', { href: apiUrl(v.links.download), 'aria-label': `Baixar a versão ${v.version}` }, icon('download', { size: 13 }))))))) : null,
+  );
 }
 
 async function renderClientTab(tab, id, d) {

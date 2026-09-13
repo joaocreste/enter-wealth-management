@@ -36,6 +36,7 @@ import * as S from './series.js';
 import * as R from './report-agent.js';
 import * as B from './bulk-reports.js';
 import * as CR from './client-refresh.js';
+import * as PD from './policy-document.js';
 import { gateEnabled, gatePassed, gateSubmit, gatePage } from './gate.js';
 import { hydrateRecommendation, allocationOf, meetingPrep, runProfitabilityLive } from './client-analysis.js';
 import { assetRiskReturn } from './risk-return.js';
@@ -136,7 +137,10 @@ async function route(request, env, url, ctx) {
   const db = env.DB;
   const path = url.pathname.replace(/\/+$/, '') || '/api';
   const method = request.method;
-  const body = method === 'POST' || method === 'PATCH' ? await readJson(request) : {};
+  // A multipart upload is left on the request for the route that wants it:
+  // reading it as JSON here would consume the stream before formData() sees it.
+  const multipart = /^multipart\/form-data/i.test(request.headers.get('content-type') || '');
+  const body = (method === 'POST' || method === 'PATCH') && !multipart ? await readJson(request) : {};
   const session = await sessionFromRequest(request, env, db);
 
   P.attachKv(env);
@@ -216,6 +220,23 @@ async function route(request, env, url, ctx) {
       if (!advisor || (advisor.id !== row.advisor_id && session.role !== 'service')) return bad(404, 'run not found');
     }
     return B.serveBulkZip(env, row);
+  }
+
+  // ── the policy document, by signed link or by the advisor who owns the client ──
+  // Same reasoning as the report artefacts above: the browser fetches this by
+  // navigation, which carries neither the Authorization header nor a
+  // cross-origin cookie, so the metadata comes with a signed link for it.
+  const policyDocMatch = path.match(/^\/api\/policy-documents\/([^/]+)\/file$/);
+  if (policyDocMatch) {
+    const row = await PD.documentRow(db, policyDocMatch[1]);
+    if (!row) return bad(404, 'document not found');
+    const signed = await verifyArtefactToken(env, row.id, PD.ARTEFACT_KIND, url.searchParams.get('t'));
+    if (!signed) {
+      if (!session) return bad(401, 'authentication required');
+      const docScope = await resolveClientScope(db, session, row.client_id);
+      if (!docScope.ok || docScope.actingAs === 'client') return bad(404, 'document not found');
+    }
+    return PD.serveDocument(env, row, { download: url.searchParams.get('dl') === '1' });
   }
 
   if (!session) return bad(401, 'authentication required');
@@ -701,6 +722,19 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
   if (sub === '/indicators/series') {
     const r = await S.indicatorSeries(env, { window: url.searchParams.get('window') || '30d', from: url.searchParams.get('from'), to: url.searchParams.get('to') });
     return r.error ? bad(400, r.error) : ok(r);
+  }
+
+  // ── the investment policy as a document, advisor only ────────────────────
+  // The policy the engine reads lives in investment_policies; this is the PDF
+  // it was agreed in, which is what an advisor opens in a meeting and replaces
+  // when a new one is signed.
+  if (sub === '/policy-document') {
+    if (!isAdvisor) return bad(403, 'advisor only');
+    if (method === 'POST') {
+      const stored = await PD.storeDocument(env, request, { scope, session });
+      return stored.error ? bad(400, stored.error) : ok(stored);
+    }
+    return ok(await PD.policyDocuments(env, client.id));
   }
 
   // ── this client's data, brought to today's prices ─────────────────────────

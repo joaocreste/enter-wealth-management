@@ -267,6 +267,30 @@ instruments accrue from the Banco Central index plus their spread; cash, matured
 lines and short series are listed as excluded with the reason. The chart sits on
 the Sinais de mercado page.
 
+### The investment policy, as a document
+
+`investment_policies` holds the policy the engine reads — the bands, the caps,
+the restrictions every suitability check is measured against. What the advisor
+hands a client, opens in a meeting and replaces when a new one is signed is the
+PDF those parameters were agreed in, and **ver PI** on the client page opens it
+over the page: the file in force, who uploaded it and when, the policy version
+it documents, buttons to open or download it, and **atualizar** to replace it.
+
+Replacing never deletes. The previous document is marked superseded and its R2
+object stays, so a letter written under an older policy can still be read
+against the document that governed it. An upload byte-identical to the one
+already stored is refused rather than filed as a new version — pressing the
+button twice should not invent a second version of the same policy. PDF, DOC and
+DOCX up to 20 MB are accepted, as an allowlist rather than a blocklist, because
+the file is handed back to a browser later.
+
+Rows live in `policy_documents` (migration `0006`) and the files in the
+`enter-wealth-reports` bucket under `policies/<client>/`. `GET` and `POST
+/api/clients/:id/policy-document` read and replace it, both advisor-only; the
+file itself is served from `/api/policy-documents/:id/file` through a signed
+link, because a download is a navigation and carries neither the Authorization
+header nor a cross-origin cookie.
+
 ### Bringing one client's data to today
 
 Half an hour before a meeting the advisor does not need the whole book rebuilt —

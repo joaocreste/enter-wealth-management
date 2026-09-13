@@ -19,7 +19,7 @@ import { analyseForReport, factsForNarrative, buildReportModel } from '../src/re
 import { renderReportPdf } from '../src/render/pdf/report.js';
 import { deterministicReportNarrative, deterministicLetter } from '../worker/src/llm.js';
 import { buildLetterModel, sanitiseLetter, strayNumbers, houseView, ACTION_PT } from '../src/render/letter-model.js';
-import { renderLetterPdf } from '../src/render/pdf/letter.js';
+import { renderLetterPdf, contributorBars } from '../src/render/pdf/letter.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
 import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, efficientFrontier } from '../src/core/risk.js';
@@ -620,8 +620,16 @@ const LETTER_REPORT = {
     net_flows: 0, method: 'modified_dietz', method_note: { pt: 'Método de Dietz modificado.' }, source_ids: ['src_stmt'],
   },
   performance_attribution: {
-    top_positive: [{ ticker: 'IVVB11', name: 'iShares S&P 500', contribution: 0.0047, total_return: 0.031 }],
-    top_negative: [{ ticker: 'HAPV3', name: 'Hapvida', contribution: -0.0179, total_return: -0.414 }],
+    top_positive: [
+      { ticker: 'IVVB11', name: 'iShares S&P 500', contribution: 0.0047, total_return: 0.031 },
+      { ticker: 'IVV', name: 'IVV', contribution: 0.0037 },
+      { ticker: 'MBRF3', name: 'MBRF', contribution: 0.0027 },
+    ],
+    top_negative: [
+      { ticker: 'HAPV3', name: 'Hapvida', contribution: -0.0179, total_return: -0.414 },
+      { ticker: 'LREN3', name: 'Lojas Renner', contribution: -0.011 },
+      { ticker: 'AZZA3', name: 'Azzas', contribution: -0.0007 },
+    ],
     fx_contribution: 0.0016, reconciles: true,
   },
   benchmark: { name: 'Carteira de referência da política', value: 0.0176, comparison: { excess_return: -0.0296 } },
@@ -745,6 +753,20 @@ t('a view the firm never formed never reaches the client as the firm\'s view', (
   const byHand = houseView({ advisor_commentary: 'Sigo cauteloso com bolsa local.', mode: 'deterministic_template', generated_without_model: true, stance_by_asset_class: { 'Equities BR': 'cautious' } });
   eq(byHand.commentary, 'Sigo cauteloso com bolsa local.');
   eq(byHand.summary, null, 'a template summary was passed off as the house view');
+});
+
+t('a contributors chart with no room for every bar still shows the losses', () => {
+  const model = buildLetterModel(LETTER_REPORT, { locale: 'pt-BR' });
+  const all = model.charts.contributors.items;
+  eq(all.length, 6);
+  const four = contributorBars(model, 4).map((i) => i.label);
+  // Taking the first four of a list sorted by contribution keeps the winners.
+  ok(four.includes('HAPV3'), `the largest detractor was dropped: ${four.join(', ')}`);
+  ok(four.includes('LREN3'), `the second detractor was dropped: ${four.join(', ')}`);
+  // And the survivors are still drawn best to worst.
+  const order = contributorBars(model, 4).map((i) => i.value);
+  eq(order.slice().sort((a, b) => b - a).join(), order.join(), 'the bars lost their order');
+  eq(contributorBars(model, 6).length, 6, 'trimming ran when there was room for every bar');
 });
 
 await ta('the pdf is a letter on page one and the annex on page two', async () => {

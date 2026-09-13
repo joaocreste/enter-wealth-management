@@ -60,25 +60,40 @@ const SZ = {
 };
 const TRACK = 0.3; // em — the brand's tracked capitals
 
+/**
+ * Two independent ladders, because the two pages have nothing to do with
+ * each other.
+ *
+ * With one shared ladder, a long letter on page one climbed the rungs until it
+ * fit — and took the annex's chart and its "why" column with it, leaving page
+ * two two-thirds empty. The letter is never cut for space: only its type
+ * tightens, and only as far as the last rung. The annex gives up content, in
+ * the order a client misses it least.
+ */
 export async function renderLetterPdf(model, { fonts, maxPages = 2 } = {}) {
-  let attempt = 0;
-  let reductions = 0;
-  let doc = null;
+  const probe = new PdfDocument({ title: 'probe' });
+  registerFonts(probe, fonts);
+  probe.addPage();
+  const discH = disclaimerHeight(probe, model);
+  const letterRoom = A4.height - PAGE.headerH - 44 - (PAGE.footerH + 24);
+  const annexRoom = A4.height - PAGE.headerH - 30 - (PAGE.footerH + discH + 8);
+  const needs = (blocks) => blocks.reduce((a, b, i) => a + b.height + (i < blocks.length - 1 ? (b.gap ?? 14) : 0), 0);
 
-  while (attempt < 10) {
-    doc = new PdfDocument({
-      title: `Carta mensal — ${model.client?.name} — ${model.period.label}`,
-      author: `${model.advisor?.name} · XP Asset Management`,
-      subject: `Relatório mensal de investimentos — ${model.period.label}`,
-      keywords: 'carta mensal, investimentos, XP Asset Management',
-    });
-    registerFonts(doc, fonts);
-    const overflow = compose(doc, model, reductions, maxPages);
-    doc.reductionLevel = reductions;
-    if (!overflow && doc.pageCount <= maxPages) return doc;
-    reductions += 1;
-    attempt += 1;
-  }
+  let type = 0;
+  while (type < LETTER_LADDER - 1 && needs(buildLetterBlocks(probe, model, letterBudget(type))) > letterRoom) type += 1;
+  let level = 0;
+  while (level < ANNEX_LADDER - 1 && needs(buildAnnexBlocks(probe, model, annexBudget(level))) > annexRoom) level += 1;
+
+  const doc = new PdfDocument({
+    title: `Carta mensal — ${model.client?.name} — ${model.period.label}`,
+    author: `${model.advisor?.name} · XP Asset Management`,
+    subject: `Relatório mensal de investimentos — ${model.period.label}`,
+    keywords: 'carta mensal, investimentos, XP Asset Management',
+  });
+  registerFonts(doc, fonts);
+  doc.overflow = compose(doc, model, letterBudget(type), annexBudget(level), maxPages);
+  doc.reductionLevel = level;
+  doc.letterTypeLevel = type;
   return doc;
 }
 
@@ -97,35 +112,38 @@ function tracked(doc, str, x, y, { font = 'light', size = 8, color: c = INK, tra
 }
 
 /**
- * Reduction ladder — what gets dropped when two pages are not enough.
- *
- * The letter itself is never cut for space: a paragraph the advisor wrote is
- * what the client is here to read. Only the annex gives ground, and it gives it
- * in the order a client would miss it least: supporting rows, then table length,
- * then the chart. If the letter alone genuinely cannot fit on one page, the last
- * two rungs tighten its type rather than removing a sentence.
+ * The letter's only concession to space is its type, and it has four settings.
+ * A paragraph the advisor wrote is what the client opened the envelope for.
  */
-function budget(level) {
+const LETTER_LADDER = 4;
+function letterBudget(t) {
+  return {
+    bodySize: [SZ.body, 9.9, 9.5, 9.1][t] ?? 9.1,
+    bodyLead: [SZ.bodyLead, 15.6, 14.8, 14.0][t] ?? 14.0,
+    type: t,
+  };
+}
+
+/**
+ * The annex gives up content, in the order a client would miss it least:
+ * supporting rows, then table length, then the exhaustive ticker list, then the
+ * method note's justification, then the chart, and only last the reasons under
+ * the rows. The letter's second paragraph already narrates what moved the month,
+ * so the chart repeats it in another form; nothing anywhere else explains why a
+ * position is outside the client's policy, which is the one verdict in the
+ * annex a client could be alarmed by and unable to interpret.
+ */
+const ANNEX_LADDER = 9;
+function annexBudget(level) {
   return {
     maxAllocationRows: level >= 1 ? 6 : 8,
-    // Fewer rows before shorter rows. The line under a row is where "fora da
-    // política" says WHY, and a client who reads that verdict without the reason
-    // has been told something alarming and nothing else.
     maxRecommendations: level >= 3 ? 3 : level >= 2 ? 4 : 5,
-    // The exhaustive ticker list is the least-read text on the page, so it is
-    // compacted to the providers and their as-of dates before anything a client
-    // actually looks at is touched. The chart goes last: "who moved my
-    // portfolio" is the question the annex exists to answer.
     compactSources: level >= 4,
-    // The method note's third sentence justifies the method to a reader who
-    // already accepted it in the first two, and the gaps between blocks are the
-    // cheapest points on the page.
     methodSentences: level >= 2 ? 2 : 99,
-    blockGap: level >= 2 ? 10 : 14,
-    showRationale: level < 6,
+    blockGap: level >= 5 ? 8 : level >= 2 ? 10 : 14,
+    chartBars: level >= 5 ? 4 : 6,
     showContributionChart: level < 7,
-    bodySize: level >= 7 ? 9.4 : level >= 6 ? 9.8 : SZ.body,
-    bodyLead: level >= 7 ? 14.2 : level >= 6 ? 15.2 : SZ.bodyLead,
+    showRationale: level < 8,
     level,
   };
 }
@@ -136,8 +154,7 @@ function budget(level) {
  * That single decision is what separates a letter with figures attached from a
  * report with a greeting on top.
  */
-function compose(doc, model, level, maxPages) {
-  const b = budget(level);
+function compose(doc, model, letterB, annexB, maxPages) {
   const discH = disclaimerHeight(doc, model);
   const floorLetter = PAGE.footerH + 24;
   // The disclaimer block carries 32 pt of its own padding, so the gap above it
@@ -151,7 +168,7 @@ function compose(doc, model, level, maxPages) {
 
   // ── page one: the letter ────────────────────────────────────────────────
   newPage();
-  for (const block of buildLetterBlocks(doc, model, b)) {
+  for (const block of buildLetterBlocks(doc, model, letterB)) {
     if (y - block.height < floorLetter) { overflow = true; break; }
     y = block.draw(y) - (block.gap ?? 14);
   }
@@ -159,7 +176,7 @@ function compose(doc, model, level, maxPages) {
 
   // ── page two: the annex ─────────────────────────────────────────────────
   newPage();
-  for (const block of buildAnnexBlocks(doc, model, b)) {
+  for (const block of buildAnnexBlocks(doc, model, annexB)) {
     if (y - block.height < floorAnnex) { overflow = true; break; }
     y = block.draw(y) - (block.gap ?? 12);
   }
@@ -329,15 +346,16 @@ function buildAnnexBlocks(doc, model, b) {
 
   // ── the figures, and what moved them ────────────────────────────────────
   {
-    const chartH = b.showContributionChart ? contributorsChartHeight(model) : 0;
+    const chartH = b.showContributionChart ? contributorsChartHeight(model, b.chartBars) : 0;
     const method = model.method_note ? firstSentences(model.method_note, b.methodSentences) : '';
     const methodH = method ? doc.paragraphHeight(method, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W }) + 6 : 0;
     blocks.push({
-      key: 'figures', height: 18 + 52 + chartH + methodH, gap: b.blockGap,
+      // 18 for the title, 44 for the figure strip: what those two actually draw.
+      key: 'figures', height: 18 + 44 + chartH + methodH, gap: b.blockGap,
       draw: (y) => {
         let cy = sectionTitle(doc, y, L === 'pt-BR' ? 'Quem puxou o resultado' : 'What drove the result');
         cy = drawFigureStrip(doc, model, X, cy, W);
-        if (b.showContributionChart) { cy -= 6; cy = drawContributorsChart(doc, model, X, cy, W); }
+        if (b.showContributionChart) { cy -= 6; cy = drawContributorsChart(doc, model, X, cy, W, b.chartBars); }
         if (method) {
           cy -= 4;
           cy = doc.paragraph(method, X, cy, { font: 'light', size: SZ.small, leading: SZ.small * 1.4, maxWidth: W, color: INK2 });
@@ -376,7 +394,8 @@ function buildAnnexBlocks(doc, model, b) {
         return a + 20 + lines * 9 + 10;
       }, 0);
       blocks.push({
-        key: 'meeting', height: 18 + 18 + rowsH + omittedH, gap: b.blockGap,
+        // 18 title + 22 header band and its gap, both measured from the drawing.
+        key: 'meeting', height: 18 + 22 + rowsH + omittedH, gap: b.blockGap,
         draw: (y) => {
           let cy = sectionTitle(doc, y, L === 'pt-BR' ? 'Os pontos da reunião' : 'The points for the meeting',
             L === 'pt-BR' ? 'Sinais técnicos e consenso de analistas: TradingView, capturados na data desta carta' : 'Technical and analyst signals: TradingView, captured on the date of this letter');
@@ -503,15 +522,39 @@ function wrapTracked(doc, str, { font, size, maxWidth, charSpacing }) {
   return lines;
 }
 
-function contributorsChartHeight(model) {
-  const n = Math.min(6, (model.charts?.contributors?.items || []).length);
-  return n ? n * 15 + 26 : 0;
+/**
+ * How tall the contributors chart is, for `bars` rows.
+ *
+ * Dropping from six bars to four is a far better trade than dropping the chart:
+ * the bars are sorted, so the four that remain are the four that moved the
+ * month, and the client still sees the shape of the answer.
+ */
+function contributorsChartHeight(model, bars = 6) {
+  return contributorBars(model, bars).length ? contributorBars(model, bars).length * 15 + 26 : 0;
+}
+
+/**
+ * The bars to draw, when there is not room for all of them.
+ *
+ * Taking the first N of a list sorted by contribution keeps the winners and
+ * throws away the losers, which is the exact opposite of what this chart is
+ * for and of the house rule that the loss is described before the gain. Select
+ * by how far a position moved the month in either direction, then restore the
+ * order so the chart still reads from best to worst.
+ */
+export function contributorBars(model, bars = 6) {
+  const items = model.charts?.contributors?.items || [];
+  if (items.length <= bars) return items;
+  const kept = new Set(
+    items.slice().sort((a, c) => Math.abs(c.value ?? c.contribution ?? 0) - Math.abs(a.value ?? a.contribution ?? 0)).slice(0, bars),
+  );
+  return items.filter((i) => kept.has(i));
 }
 
 /** §09 bars are slate, negative bars red; the value sits outside the bar with its sign. */
-function drawContributorsChart(doc, model, x, y, w) {
+function drawContributorsChart(doc, model, x, y, w, bars = 6) {
   const data = model.charts?.contributors;
-  const items = (data?.items || []).slice(0, 6);
+  const items = contributorBars(model, bars);
   if (!items.length) return y;
   const L = model.locale;
 

@@ -38,6 +38,14 @@ name = "enter-wealth-report-agent"
 binding = "REPORT_AGENT"
 class_name = "ReportAgent"
 
+# Bulk letters: one durable step per client in the advisor's book, then one for
+# the zip. A sweep over a whole book is minutes of model calls end to end, so it
+# needs to outlive the request that started it even more than a single letter does.
+[[workflows]]
+name = "enter-wealth-bulk-reports"
+binding = "BULK_REPORTS"
+class_name = "BulkReports"
+
 # ── D1: the relational record (§24, §25) ────────────────────────────────────
 [[d1_databases]]
 binding = "DB"

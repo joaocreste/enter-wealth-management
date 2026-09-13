@@ -34,11 +34,13 @@ import { makeSource, SourceLedger } from '../../src/core/sources.js';
 import * as A from './agents.js';
 import * as S from './series.js';
 import * as R from './report-agent.js';
+import * as B from './bulk-reports.js';
 import { gateEnabled, gatePassed, gateSubmit, gatePage } from './gate.js';
 import { hydrateRecommendation, allocationOf, meetingPrep, runProfitabilityLive } from './client-analysis.js';
 import { assetRiskReturn } from './risk-return.js';
 export { OverviewAgents } from './agents.js';
 export { ReportAgent } from './report-agent.js';
+export { BulkReports } from './bulk-reports.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 
@@ -197,6 +199,24 @@ async function route(request, env, url, ctx) {
     return R.servePdfReport(env, row);
   }
 
+  // ── the bulk run's zip, by signed link or by the advisor who owns the run ──
+  // Same reasoning as the two blocks above: the browser downloads this by
+  // navigation, which carries neither the Authorization header nor a
+  // cross-origin cookie, so the run hands out a signed link for it.
+  const zipMatch = path.match(/^\/api\/bulk-reports\/([^/]+)\/zip$/);
+  if (zipMatch) {
+    const row = await first(db, 'SELECT * FROM bulk_reports WHERE id = ?', zipMatch[1]);
+    if (!row) return bad(404, 'run not found');
+    const signed = await verifyArtefactToken(env, row.id, B.ARTEFACT_KIND, url.searchParams.get('t'));
+    if (!signed) {
+      if (!session) return bad(401, 'authentication required');
+      if (session.role === 'client') return bad(403, 'advisor surface');
+      const advisor = await advisorFor(env, session);
+      if (!advisor || (advisor.id !== row.advisor_id && session.role !== 'service')) return bad(404, 'run not found');
+    }
+    return B.serveBulkZip(env, row);
+  }
+
   if (!session) return bad(401, 'authentication required');
 
   if (path === '/api/auth/me') {
@@ -232,6 +252,30 @@ async function route(request, env, url, ctx) {
     const row = await first(db, 'SELECT * FROM overview_runs WHERE id = ?', runMatch[1]);
     if (!row || (advisor && row.advisor_id !== advisor.id && session.role !== 'service')) return bad(404, 'run not found');
     return ok({ run: A.runView(row) });
+  }
+
+  // Every client's letter in one go, and the zip that holds them. The run is
+  // returned at once and polled like the daily agents; only the archive at the
+  // end is new, the letters themselves are ordinary report-agent runs.
+  if (path === '/api/advisor/bulk-reports') {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    const advisor = await advisorFor(env, session);
+    if (!advisor) return bad(404, 'no advisor record');
+    if (method === 'POST') {
+      await audit(db, { entity: 'bulk_report', entity_id: advisor.id, action: 'requested', actor_id: session.user_id });
+      const started = await B.startBulkRun(env, ctx, { advisor, actorId: session.user_id });
+      return started.error ? bad(400, started.error) : ok({ run: started.run });
+    }
+    return ok({ runs: await B.listBulkRuns(env, advisor.id) });
+  }
+
+  const bulkMatch = path.match(/^\/api\/advisor\/bulk-reports\/([^/]+)$/);
+  if (bulkMatch) {
+    if (session.role === 'client') return bad(403, 'advisor surface');
+    const advisor = await advisorFor(env, session);
+    const row = await first(db, 'SELECT * FROM bulk_reports WHERE id = ?', bulkMatch[1]);
+    if (!row || (advisor && row.advisor_id !== advisor.id && session.role !== 'service')) return bad(404, 'run not found');
+    return ok({ run: await B.runView(env, row) });
   }
 
   if (path === '/api/advisor/clients') {

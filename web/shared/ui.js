@@ -591,11 +591,25 @@ export function donut({ size = 96 } = {}) {
 /**
  * The card that pops up while the agents run. `update(run)` takes the run as
  * the API reports it; `onDone` fires when the person dismisses a finished run.
+ *
+ * A run that ends in a file rather than in a page passes `onComplete`, to start
+ * the download the moment it is ready, and `doneButtons`, to keep offering it:
+ * a browser that blocks the automatic download must leave something to click.
  */
-export function progressCard({ title = 'Atualizando o panorama do dia', agents = DAILY_AGENTS, onDone = null } = {}) {
+export function progressCard({
+  title = 'Atualizando o panorama do dia',
+  agents = DAILY_AGENTS,
+  onDone = null,
+  onComplete = null,
+  waitingText = 'Os três agentes rodam em sequência. Com o modelo pesquisando o noticiário, isto leva de um a cinco minutos; a página pode ser fechada, a execução continua.',
+  doneText = 'Concluído. O panorama abaixo já reflete esta execução.',
+  doneLabel = 'ver o panorama',
+  doneButtons = null,
+  autoFinish = true,
+} = {}) {
   const ring = donut({ size: 96 });
   const msg = h('div.pmsg', { text: 'Na fila…' });
-  const state = h('div.pstate', { text: 'Os três agentes rodam em sequência. Com o modelo pesquisando o noticiário, isto leva de um a cinco minutos; a página pode ser fechada, a execução continua.' });
+  const state = h('div.pstate', { text: waitingText });
   const rows = agents.map((a) => h('li', { dataset: { step: a.step } },
     h('span.idx', {}, h('b', { text: String(a.step) }), icon('check', { size: 14 })),
     h('span', {}, h('b', { text: a.title }), h('small', { text: a.what }))));
@@ -625,9 +639,12 @@ export function progressCard({ title = 'Atualizando o panorama do dia', agents =
       }
       if (run.status === 'completed' && !finished) {
         finished = true;
-        state.textContent = 'Concluído. O panorama abaixo já reflete esta execução.';
-        mount(foot, clock, h('button.btn.primary', { type: 'button', onclick: finish }, h('span', { text: 'ver o panorama' }), icon('arrow', { size: 15 })));
-        setTimeout(() => { if (veil.isConnected) finish(); }, 1400);
+        state.textContent = typeof doneText === 'function' ? doneText(run) : doneText;
+        onComplete?.(run);
+        mount(foot, clock, ...(doneButtons
+          ? [].concat(doneButtons(run, finish))
+          : [h('button.btn.primary', { type: 'button', onclick: finish }, h('span', { text: doneLabel }), icon('arrow', { size: 15 }))]));
+        if (autoFinish) setTimeout(() => { if (veil.isConnected) finish(); }, 1400);
       } else if (run.status === 'failed' && !finished) {
         finished = true;
         state.textContent = `A execução falhou: ${run.error || 'erro desconhecido'}.`;

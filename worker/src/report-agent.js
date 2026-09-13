@@ -71,14 +71,23 @@ export async function listReportRuns(env, clientId) {
   return out;
 }
 
+/**
+ * The run row, queued but not dispatched. The bulk run (worker/src/bulk-reports.js)
+ * drives the four steps itself, one client at a time, so it stops here.
+ */
+export async function createReportRun(env, { clientId, advisorId, actorId = null }) {
+  const runId = id('pdf');
+  await run(env.DB,
+    'INSERT INTO pdf_reports (id, client_id, advisor_id, status, step, progress, message, actor_id, started_at) VALUES (?,?,?,?,?,?,?,?,?)',
+    runId, clientId, advisorId, 'running', 0, 0, 'Na fila', actorId, nowIso());
+  return runId;
+}
+
 /** Start a run in the background and return its row at once. The tab polls it. */
 export async function startReportRun(env, ctx, { scope, actorId = null }) {
   const db = env.DB;
   const { client, advisor } = scope;
-  const runId = id('pdf');
-  await run(db,
-    'INSERT INTO pdf_reports (id, client_id, advisor_id, status, step, progress, message, actor_id, started_at) VALUES (?,?,?,?,?,?,?,?,?)',
-    runId, client.id, advisor.id, 'running', 0, 0, 'Na fila', actorId, nowIso());
+  const runId = await createReportRun(env, { clientId: client.id, advisorId: advisor.id, actorId });
   if (env.REPORT_AGENT) {
     await env.REPORT_AGENT.create({ id: runId, params: { runId } });
   } else {
@@ -349,19 +358,31 @@ async function agentDiagramacao(env, runId, s3) {
   }
 }
 
-/** The PDF from R2, or re-rendered from the stored model when the object is gone. */
-export async function servePdfReport(env, row) {
-  const headers = {
-    'content-type': 'application/pdf',
-    'content-disposition': `inline; filename="relatorio-${row.reporting_month || 'carteira'}.pdf"`,
-    'cache-control': 'private, max-age=300',
-  };
+/**
+ * The rendered PDF as bytes: the R2 object when it is there, re-rendered from
+ * the model the run stored when it is not. `null` when the run never got as far
+ * as diagramming anything.
+ */
+export async function pdfBytes(env, row) {
   if (env.REPORTS && row.pdf_r2_key) {
     const obj = await env.REPORTS.get(row.pdf_r2_key);
-    if (obj) return new Response(obj.body, { headers });
+    if (obj) return new Uint8Array(await obj.arrayBuffer());
   }
   const model = json(row.model_json, null);
-  if (!model) return new Response(JSON.stringify({ error: 'report not rendered' }), { status: 404, headers: { 'content-type': 'application/json' } });
+  if (!model) return null;
   const doc = await renderReportPdf(model, { fonts: brandFonts(), maxPages: 2 });
-  return new Response(doc.build(), { headers });
+  return doc.build();
+}
+
+/** The PDF from R2, or re-rendered from the stored model when the object is gone. */
+export async function servePdfReport(env, row) {
+  const bytes = await pdfBytes(env, row);
+  if (!bytes) return new Response(JSON.stringify({ error: 'report not rendered' }), { status: 404, headers: { 'content-type': 'application/json' } });
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `inline; filename="relatorio-${row.reporting_month || 'carteira'}.pdf"`,
+      'cache-control': 'private, max-age=300',
+    },
+  });
 }

@@ -1,5 +1,5 @@
 /**
- * Client analysis shared by the API routes and the report agent: the current
+ * Client analysis shared by the API routes and the meeting preparation: the current
  * allocation against the policy, the discussion points a meeting should open
  * with, and the live profitability of a month that has no published letter.
  * Moved out of the route file so the agent does not import the router.

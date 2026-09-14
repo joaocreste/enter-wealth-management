@@ -15,10 +15,8 @@ import { validateReport, emptyReport, standardDisclosures } from '../src/core/re
 import { money, percent, pp, previousMonth, monthBounds, MINUS } from '../src/core/format.js';
 import { TrueTypeFont } from '../src/render/pdf/ttf.js';
 import { brandFonts } from '../src/render/fonts/index.js';
-import { analyseForReport, factsForNarrative, buildReportModel } from '../src/render/report-model.js';
-import { renderReportPdf } from '../src/render/pdf/report.js';
-import { deterministicReportNarrative, deterministicLetter } from '../worker/src/llm.js';
-import { buildLetterModel, sanitiseLetter, strayNumbers, houseView, ACTION_PT } from '../src/render/letter-model.js';
+import { deterministicLetter } from '../worker/src/llm.js';
+import { buildLetterModel, sanitiseLetter, strayNumbers, houseView, stanceStep, ACTION_PT } from '../src/render/letter-model.js';
 import { renderLetterPdf, contributorBars } from '../src/render/pdf/letter.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
@@ -481,59 +479,42 @@ if (process.argv.includes('--live')) {
     eq(new TextDecoder().decode(pdf.slice(0, 8)), '%PDF-1.7');
     ok(full.report.page_count <= 2, `pdf is ${full.report.page_count} pages`);
   });
+  await tAsync('the letter agent writes one client\'s carta, and stops at a published month', async () => {
+    const login = await (await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'antonio.bicudo@xpi.com.br', password: 'xp2026' }) })).json();
+    const H = { authorization: `Bearer ${login.token}`, 'content-type': 'application/json' };
+    const start = async (body) => (await (await fetch(`${BASE}/api/clients/cli_albert/letters`, { method: 'POST', headers: H, body: JSON.stringify(body) })).json()).run;
+    const settle = async (runId) => {
+      for (let i = 0; i < 90; i += 1) {
+        const { run } = await (await fetch(`${BASE}/api/clients/cli_albert/letters/${runId}`, { headers: H })).json();
+        if (run.status !== 'running') return run;
+        await new Promise((r) => { setTimeout(r, 2000); });
+      }
+      throw new Error('the run never settled');
+    };
+
+    // A month already published is refused, and says so in a way the tab can act on.
+    const published = await (await fetch(`${BASE}/api/clients/cli_albert/reports`, { headers: H })).json();
+    if (published.reports.some((r) => r.status === 'published')) {
+      const blocked = await settle((await start({})).id);
+      eq(blocked.status, 'failed');
+      eq(blocked.blocked_by, 'published');
+    }
+
+    // Asked for deliberately, it writes the letter and leaves it for approval.
+    const done = await settle((await start({ reissue: true })).id);
+    eq(done.status, 'completed');
+    ok(done.report_id, done.error || 'the run produced no letter');
+    ok(done.page_count <= 2, `the letter is ${done.page_count} pages`);
+    const full = await (await fetch(`${BASE}/api/clients/cli_albert/reports/${done.report_id}`, { headers: H })).json();
+    eq(full.report.status, 'pending_approval');
+    ok(full.report.canonical.letter.greeting.startsWith('Prezado'), 'the letter does not greet the client');
+  });
   await tAsync('a client cannot read another client', async () => {
     const login = await (await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'albert.dasilva@exemplo.com.br', password: 'albert2026' }) })).json();
     const res = await fetch(`${BASE}/api/clients/cli_beatriz`, { headers: { authorization: `Bearer ${login.token}` } });
     eq(res.status, 403);
   });
 }
-
-console.log('\n  The report agent — two pages is a rule, not an aspiration');
-const heavyState = () => {
-  const classes = ['Cash', 'Fixed Income', 'Equities BR', 'Equities Global', 'Alternatives', 'Real Estate', 'Commodities', 'Digital Assets'];
-  const positions = [];
-  for (let i = 0; i < 40; i += 1) positions.push({ asset_id: `a${i}`, ticker: `TIC${i}`, name: `Um nome de ativo bastante comprido para testar a quebra número ${i}`, asset_class: classes[i % 8], type: 'stock', market_value: 1000 + i * 137, weight: 0, pricing_mode: 'market' });
-  const total = positions.reduce((a, p) => a + p.market_value, 0);
-  for (const p of positions) p.weight = p.market_value / total;
-  const months = [];
-  for (let y = 2018; y <= 2026; y += 1) for (let m = 1; m <= 12; m += 1) { const ym = `${y}-${String(m).padStart(2, '0')}`; if (ym <= '2026-08') months.push({ month: ym, portfolio: ((m * 7 + y) % 9 - 4) / 100, benchmark: ((m * 5 + y) % 7 - 3) / 100, method: 'reconstructed_from_statements' }); }
-  const long = 'Uma frase longa que o modelo poderia escrever se ninguém o contivesse, repetida para forçar o limite de duas páginas. '.repeat(12);
-  return {
-    date: '2026-09-12', month: '2026-08',
-    client: { id: 'cli_x', name: 'Cliente de Teste com Nome Longo da Silva Pereira', risk_profile: 'Moderado', segment: 'Middle market', base_currency: 'BRL' },
-    advisor: { name: 'Antonio Bicudo', code: 'A7699', team: 'SP' },
-    policy: { version: 3, effective_date: '2026-03-16', target_allocation: Object.fromEntries(classes.map((c) => [c, 0.125])), permitted_ranges: Object.fromEntries(classes.map((c) => [c, { min: 0.05, max: 0.2 }])), rebalance_trigger: 0.05 },
-    snapshot: { id: 's', effective_date: '2026-07-15' }, total, positions, previous_weights: Object.fromEntries(classes.map((c) => [c, 0.1])),
-    returns_history: months,
-    overview: { date: '2026-09-12', headline: long.slice(0, 200), summary: long, briefing: { equities: long, rates_credit: long, fx_commodities: long, macro_political: long, main_risk_or_opportunity: long }, indicators: [], triggers: Array.from({ length: 6 }, (_, i) => ({ label: `Limiar ${i}`, status: 'BREACHED', asset_classes: ['Equities BR'], action_pt: long.slice(0, 300) })), what_matters: Array.from({ length: 12 }, (_, i) => ({ title: `Evento número ${i} com um título bastante comprido para o cartão`, why: long.slice(0, 500), region: i % 2 ? 'br' : 'intl', importance: 'high', source: 'Valor Econômico', touches: true })), sources: ['Yahoo Finance'] },
-    risk_return: { window: { from: '2025-08-29', to: '2026-08-31', months: [] }, assets: positions.map((p, i) => ({ id: p.asset_id, ticker: p.ticker, name: p.name, asset_class: p.asset_class, risk_class: ['equity', 'debt', 'fx_commodities', 'crypto_other'][i % 4], total_return: ((i * 37) % 60 - 20) / 100, volatility: ((i * 13) % 45 + 3) / 100, partial: false, simulated: false, weight: p.weight })), references: [{ key: 'ibovespa', label: 'Ibovespa', total_return: 0.31, volatility: 0.16 }, { key: 'cdi', label: 'CDI', total_return: 0.14, volatility: 0.002 }], excluded: [{ label: 'Caixa', reason: 'saldo em conta' }], sources: ['Yahoo Finance'] },
-    perf: { performance: { monthly_return: -0.012, absolute_pnl: -4852 }, attribution: { top_negative: [{ ticker: 'HAPV3', contribution: -0.0179 }], top_positive: [{ ticker: 'IVVB11', contribution: 0.0047 }], fx_contribution: 0.0016 }, benchmark: { value: 0.0176 }, metrics: null, sources: ['Yahoo Finance'] },
-    discussion_opportunities: Array.from({ length: 12 }, (_, i) => ({ kind: i % 2 ? 'drift' : 'concentration', severity: 'high', message: long.slice(0, 400), asset_class: 'Equities BR' })),
-    recommendations: Array.from({ length: 6 }, (_, i) => ({ asset_id: `a${i}`, ticker: `TIC${i}`, name: `Ativo ${i}`, final_action: 'DISCUSS', suitability_result: 'PASS', rationale: long.slice(0, 300), current_weight: 0.05 })),
-    next_meeting: '2026-09-18',
-  };
-};
-await ta('a report with forty positions, nine years of history, twelve events and twelve discussion points stays on two pages', async () => {
-  const s = heavyState();
-  s.analysis = analyseForReport(s);
-  s.narrative = deterministicReportNarrative(factsForNarrative(s));
-  s.narrative.world = s.overview.summary;
-  const model = buildReportModel(s);
-  const doc = await renderReportPdf(model, { fonts: brandFonts(), maxPages: 2 });
-  ok(doc.pageCount <= 2, `rendered ${doc.pageCount} pages`);
-  ok(doc.build().length > 20000, 'the PDF is not empty');
-});
-await ta('an ordinary report needs no reduction and names nothing omitted', async () => {
-  const s = heavyState();
-  s.positions = s.positions.slice(0, 12); s.total = s.positions.reduce((a, p) => a + p.market_value, 0);
-  s.returns_history = s.returns_history.slice(-37); s.discussion_opportunities = s.discussion_opportunities.slice(0, 3); s.recommendations = s.recommendations.slice(0, 2);
-  s.overview.summary = 'Quatro limiares rompidos; o petróleo pesa sobre a inflação. Nada exige ação imediata.'; s.overview.triggers = s.overview.triggers.slice(0, 1);
-  s.overview.what_matters = s.overview.what_matters.slice(0, 4).map((e) => ({ ...e, why: e.why.slice(0, 160) })); s.risk_return.assets = s.risk_return.assets.slice(0, 12);
-  s.analysis = analyseForReport(s);
-  s.narrative = deterministicReportNarrative(factsForNarrative(s));
-  const doc = await renderReportPdf(buildReportModel(s), { fonts: brandFonts(), maxPages: 2 });
-  eq(doc.pageCount, 2); eq(doc.reductionLevel, 0); eq(doc.omitted.length, 0);
-});
 
 console.log('\n  Indicators — a rate has a level and a last change, never a day move');
 t('the Selic is a step: the day it changed and the value before it, no percentage', () => {
@@ -658,11 +639,11 @@ const LETTER_REPORT = {
   approved_portfolio: {
     policy_version: 3,
     allocation: [
-      { asset_class: 'Fixed Income', weight: 0.326, value: 129734, target: 0.40, range: { min: 0.30, max: 0.55 } },
-      { asset_class: 'Equities BR', weight: 0.283, value: 112636, target: 0.20, range: { min: 0.10, max: 0.30 } },
-      { asset_class: 'Equities Global', weight: 0.182, value: 72391, target: 0.15, range: { min: 0.05, max: 0.25 } },
-      { asset_class: 'Alternatives', weight: 0.134, value: 53400, target: 0.12, range: { min: 0.05, max: 0.20 } },
-      { asset_class: 'Cash', weight: 0.075, value: 30000, target: 0.05, range: { min: 0.02, max: 0.12 } },
+      { asset_class: 'Fixed Income', weight: 0.326, value: 129734, target: 0.40, range: { min: 0.30, max: 0.55 }, opening_weight: 0.3185 },
+      { asset_class: 'Equities BR', weight: 0.283, value: 112636, target: 0.20, range: { min: 0.10, max: 0.30 }, opening_weight: 0.3067 },
+      { asset_class: 'Equities Global', weight: 0.182, value: 72391, target: 0.15, range: { min: 0.05, max: 0.25 }, opening_weight: 0.1713 },
+      { asset_class: 'Alternatives', weight: 0.134, value: 53400, target: 0.12, range: { min: 0.05, max: 0.20 }, opening_weight: 0.1291 },
+      { asset_class: 'Cash', weight: 0.075, value: 30000, target: 0.05, range: { min: 0.02, max: 0.12 }, opening_weight: 0.0744 },
     ],
   },
   portfolio_impact: [],
@@ -778,6 +759,61 @@ await ta('the pdf is a letter on page one and the annex on page two', async () =
   ok(model.letter.paragraphs.length >= 4, 'the model lost the paragraphs');
   eq(model.recommendations[0].suitability_label, 'Fora da política');
   ok(model.dateline.place_date.startsWith('São Paulo,'), model.dateline.place_date);
+});
+
+console.log('\n  The positioning chart — the policy decides the step, not an opinion');
+t('the five steps are read off the client\'s own band, and its two halves separately', () => {
+  const band = { min: 0.05, max: 0.20 };
+  eq(stanceStep(0.10, 0.10, band), 0, 'at target');
+  eq(stanceStep(0.25, 0.10, band), 2, 'above the band');
+  eq(stanceStep(0.03, 0.10, band), -2, 'below the band');
+  eq(stanceStep(0.20, 0.10, band), 2, 'on the ceiling');
+  eq(stanceStep(0.05, 0.10, band), -2, 'on the floor');
+  // The band is asymmetric: 10 points of room above, 5 below. The same 2-point
+  // drift must not read neutral going up and overweight going down.
+  eq(stanceStep(0.12, 0.10, band), 0, '2 points into 10 of room is still neutral');
+  eq(stanceStep(0.08, 0.10, band), -1, '2 points into 5 of room is underweight');
+  eq(stanceStep(0.10, null, null), 0, 'no policy, no position to be over or under');
+});
+
+t('the chart and the annex table cannot disagree: a class outside its band is at the end of the scale', () => {
+  const model = buildLetterModel(LETTER_REPORT, { locale: 'pt-BR' });
+  eq(model.stance.length, model.allocation.length, 'a class the table lists is missing from the chart');
+  for (const [i, row] of model.stance.entries()) {
+    const a = model.allocation[i];
+    eq(row.label, a.asset_class);
+    if (!a.inside_band) ok(Math.abs(row.step) === 2, `${a.asset_class} is outside its band but not at the end of the scale`);
+    if (Math.abs(row.step) < 2) ok(a.inside_band, `${a.asset_class} is mid-scale but outside its band`);
+  }
+  eq(model.stance.find((r) => r.label === 'Renda variável Brasil').change, 'down', 'the class that fell reads as unchanged');
+  // Nine hundredths of a point is the portfolio breathing, not a decision.
+  eq(model.stance.find((r) => r.label === 'Caixa').change, 'flat');
+});
+
+t('a first letter shows position without claiming a movement it cannot see', () => {
+  const noOpen = { ...LETTER_REPORT, approved_portfolio: { ...LETTER_REPORT.approved_portfolio,
+    allocation: LETTER_REPORT.approved_portfolio.allocation.map(({ opening_weight, ...a }) => a) } };
+  const model = buildLetterModel(noOpen, { locale: 'pt-BR' });
+  ok(model.stance.every((r) => r.change === null), 'a direction was drawn with nothing to compare against');
+  ok(model.stance.every((r) => Number.isInteger(r.step)), 'the position went missing with the direction');
+});
+
+await ta('the chart holds its place on page one, and gives it up before a paragraph does', async () => {
+  const model = buildLetterModel(LETTER_REPORT, { locale: 'pt-BR' });
+  const doc = await renderLetterPdf(model, { fonts: brandFonts(), maxPages: 2 });
+  eq(doc.pageCount, 2, 'the chart pushed the letter onto a third page');
+  ok(!doc.overflow, 'the letter overflowed');
+
+  // Six paragraphs of the longest thing the model is allowed to write, which is
+  // more than the sanitiser lets through, so the chart has to climb the ladder.
+  const long = 'Uma frase longa que o modelo poderia escrever se ninguém o contivesse, repetida para forçar o limite de duas páginas. '.repeat(4);
+  const heavy = buildLetterModel({ ...LETTER_REPORT,
+    letter: { ...LETTER_REPORT.letter, paragraphs: Array.from({ length: 6 }, () => long) } }, { locale: 'pt-BR' });
+  const doc2 = await renderLetterPdf(heavy, { fonts: brandFonts(), maxPages: 2 });
+  eq(doc2.pageCount, 2, 'a long letter with the chart spilled onto a third page');
+  ok(!doc2.overflow, 'a long letter with the chart overflowed');
+  ok(doc2.letterTypeLevel > 0, 'the ladder never tightened for a letter this long');
+  eq(heavy.letter.paragraphs.length, 6, 'a paragraph the advisor wrote was dropped for the chart');
 });
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);

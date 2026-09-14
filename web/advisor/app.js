@@ -70,7 +70,7 @@ function crumbsFor(hash, extra = {}) {
   if (!tab || tab === 'overview') trail.push({ label: 'Visão geral' });
   else if (tab === 'prep') trail.push({ label: 'Preparação de reunião' });
   else if (tab === 'editor') trail.push({ label: 'Editor de carteira' });
-  else if (tab === 'relatorio') trail.push({ label: 'Relatório em PDF' });
+  else if (tab === 'carta') trail.push({ label: 'Cartas', href: `#/client/${id}/reports` }, { label: 'Nova carta mensal' });
   else if (tab === 'report') trail.push({ label: 'Cartas', href: `#/client/${id}/reports` }, { label: extra.report || 'Carta' });
   else trail.push({ label: Object.fromEntries(CLIENT_TABS)[tab] || tab });
   return trail;
@@ -603,8 +603,8 @@ async function viewClient({ id, tab = 'overview' }) {
     head(c.name, sub, [
       // the client's own data first: the numbers every other action reads
       clientRefreshButton(id),
-      // opens its own tab: the report agent runs there and the PDF lands there
-      h('a.btn', { href: `#/client/${id}/relatorio`, target: '_blank', rel: 'noopener' }, icon('documents', { size: 15 }), h('span', { text: 'criar relatório pdf' })),
+      // opens its own tab: the letter agent runs there and the carta lands there
+      h('a.btn', { href: `#/client/${id}/carta`, target: '_blank', rel: 'noopener' }, icon('letter', { size: 15 }), h('span', { text: 'criar carta mensal' })),
       h('a.btn', { href: `#/client/${id}/prep` }, icon('prep', { size: 15 }), h('span', { text: 'preparar reunião' })),
       h('a.btn.primary', { href: `#/client/${id}/editor` }, icon('edit', { size: 15 }), h('span', { text: 'editar carteira' })),
       // the signed policy, over the page: reading it should not cost the tab
@@ -1102,12 +1102,20 @@ async function tabMeetings(id) {
   );
 }
 
+const newLetterButton = (id, { small = false } = {}) => h(`a.btn${small ? '.sm' : ''}`, {
+  href: `#/client/${id}/carta`, target: '_blank', rel: 'noopener',
+}, icon('letter', { size: small ? 13 : 15 }), h('span', { text: 'criar carta mensal' }));
+
 async function tabReports(id) {
   const d = await api(`/api/clients/${id}/reports`);
-  if (!d.reports.length) return h('div.empty', { text: 'Nenhuma carta gerada. Rode o workflow Rivet para este cliente.' });
+  if (!d.reports.length) {
+    return h('div.empty', {},
+      h('p', { text: 'Nenhuma carta escrita para este cliente ainda.' }),
+      h('div.split', { style: { marginTop: '12px', justifyContent: 'center' } }, newLetterButton(id)));
+  }
   return frag(
     h('section.section', {},
-      h('div.section-h', {}, h('h2', { text: 'Cartas mensais' })),
+      h('div.section-h', {}, h('h2', { text: 'Cartas mensais' }), newLetterButton(id, { small: true })),
       table(['Mês', 'Status', { label: 'Páginas', num: true }, 'Aprovada', 'Publicada', 'Formatos'],
         d.reports.map((r) => h('tr', {},
           h('td.name', {}, h('a', { href: `#/client/${id}/report/${r.id}`, text: monthLabel(r.reporting_month, L) })),
@@ -1396,31 +1404,37 @@ function renderCanonicalSummary(c) {
   );
 }
 
-// ═══ the report agent: a two-page PDF, in its own tab ══════════════════════
+// ═══ the letter agent: the month's carta, in its own tab ═══════════════════
 /**
  * Opened from the client page in a new tab. Without a run id it starts one and
- * moves to that run's address; with one it follows the four steps as the
- * Worker reports them and shows the PDF when the last step ends.
+ * moves to that run's address; with one it follows the four steps as the Worker
+ * reports them and shows the letter when the last step ends.
+ *
+ * What comes out is a carta waiting for approval, not a published one: the
+ * advisor reads it here, and the page that approves and publishes it is the
+ * letter's own page, which this one hands over to.
  */
-async function viewPdfReport({ id, runId = null }) {
+async function viewMonthlyLetter({ id, runId = null }) {
   const d = await api(`/api/clients/${id}`);
   const c = d.client;
   crumbs(crumbsFor(currentHash(), { clientName: c.name }));
 
   if (!runId) {
-    const started = await api(`/api/clients/${id}/pdf-reports`, {});
-    location.replace(`#/client/${id}/relatorio/${started.run.id}`);
-    return h('div.loading', {}, loader(), h('span', { text: 'Iniciando o agente de relatórios…' }));
+    const started = await api(`/api/clients/${id}/letters`, {});
+    location.replace(`#/client/${id}/carta/${started.run.id}`);
+    return h('div.loading', {}, loader(), h('span', { text: 'Iniciando o agente de cartas…' }));
   }
 
   const runBox = h('div');
-  const pdfBox = h('div');
+  const letterBox = h('div');
   const history = h('div');
-  const again = h('button.btn', { type: 'button', onclick: async (e) => {
+  const start = async (e, body = {}) => {
     e.currentTarget.disabled = true;
-    const started = await api(`/api/clients/${id}/pdf-reports`, {});
-    location.hash = `#/client/${id}/relatorio/${started.run.id}`;
-  } }, icon('refresh', { size: 15 }), h('span', { text: 'gerar novamente' }));
+    const started = await api(`/api/clients/${id}/letters`, body);
+    location.hash = `#/client/${id}/carta/${started.run.id}`;
+  };
+  const again = h('button.btn', { type: 'button', onclick: (e) => start(e) },
+    icon('refresh', { size: 15 }), h('span', { text: 'escrever de novo' }));
 
   const ring = donut({ size: 96 });
   const msg = h('div.pmsg');
@@ -1430,7 +1444,7 @@ async function viewPdfReport({ id, runId = null }) {
   const agentsList = h('ol.agents');
   const foot = h('div.pfoot', {}, clock);
   const panel = h('div.progress-card.inline', { role: 'status', 'aria-live': 'polite' },
-    h('div.phead', {}, ring.el, h('div', {}, h('h3', { text: 'Criando o relatório em PDF' }), msg, state)),
+    h('div.phead', {}, ring.el, h('div', {}, h('h3', { text: 'Escrevendo a carta mensal' }), msg, state)),
     agentsList, foot);
   mount(runBox, panel);
 
@@ -1450,51 +1464,65 @@ async function viewPdfReport({ id, runId = null }) {
     }
   };
 
-  const showPdf = (run) => {
-    const src = apiUrl(run.links.pdf);
-    const omitted = run.omitted || [];
-    mount(pdfBox,
+  // The letter as the client will read it, and the one button that matters next:
+  // a carta sitting at pending_approval is not a finished job until it is approved.
+  const showLetter = (run) => {
+    const src = apiUrl(run.links.portal);
+    mount(letterBox,
       h('div.split', { style: { margin: '20px 0 12px' } },
-        h('a.btn.primary', { href: src, target: '_blank' }, icon('download', { size: 15 }), h('span', { text: 'abrir o pdf' })),
+        h('a.btn.primary', { href: `#/client/${id}/report/${run.report_id}` }, icon('check', { size: 15 }), h('span', { text: 'ver e aprovar a carta' })),
+        h('a.btn', { href: apiUrl(run.links.pdf), target: '_blank' }, icon('download', { size: 15 }), h('span', { text: 'abrir o pdf' })),
         again,
-        h('span.note', {}, `${run.page_count} ${run.page_count === 1 ? 'página' : 'páginas'} · redação ${run.narrative_mode === 'model' ? 'pelo modelo' : 'determinística, sem modelo de linguagem'} · nível de redução ${run.reduction_level ?? 0}${omitted.length ? ` · blocos omitidos para caber em duas páginas: ${omitted.join(', ')}` : ''}`)),
-      h('iframe.doc', { src, title: 'Relatório em PDF', style: { height: '1120px' } }));
+        h('span.note', {}, `${run.page_count} ${run.page_count === 1 ? 'página' : 'páginas'} · redação ${run.narrative_mode === 'model' ? 'pelo modelo' : 'determinística, sem modelo de linguagem'} · aguardando a sua aprovação; o cliente só a vê depois de publicada`)),
+      h('iframe.doc', { src, title: 'Carta mensal', style: { height: '1120px' } }));
   };
 
   const paintHistory = async () => {
-    const list = await api(`/api/clients/${id}/pdf-reports`);
-    const done = list.reports.filter((r) => r.status === 'completed' && r.id !== runId);
+    const list = await api(`/api/clients/${id}/letters`);
+    const done = list.runs.filter((r) => r.status === 'completed' && r.id !== runId);
     mount(history, done.length ? h('section.section', { style: { marginTop: '32px' } },
-      h('div.section-h', {}, h('h2', { text: 'Relatórios anteriores' }), h('span.meta', { text: `${done.length} ${done.length === 1 ? 'relatório' : 'relatórios'}` })),
-      table(['Gerado em', 'Mês de referência', { label: 'Páginas', num: true }, 'Redação', ''],
+      h('div.section-h', {}, h('h2', { text: 'Execuções anteriores' }), h('span.meta', { text: `${done.length} ${done.length === 1 ? 'carta escrita' : 'cartas escritas'}` })),
+      table(['Escrita em', 'Mês de referência', { label: 'Páginas', num: true }, 'Redação', ''],
         done.map((r) => h('tr', {},
           h('td.name', { text: r.finished_at ? `${shortDate(r.finished_at)} ${String(r.finished_at).slice(11, 16)}` : '—' }),
           h('td', { text: r.reporting_month ? monthLabel(r.reporting_month, L) : '—' }),
           h('td.num', { text: r.page_count ?? '—' }),
           h('td', { text: r.narrative_mode === 'model' ? 'modelo' : 'determinística' }),
           h('td', {}, h('div.split', {},
-            h('a.btn.sm', { href: `#/client/${id}/relatorio/${r.id}`, text: 'ver' }),
-            h('a.btn.sm', { href: apiUrl(r.links.pdf), target: '_blank', text: 'pdf' }))))))) : null);
+            r.report_id ? h('a.btn.sm', { href: `#/client/${id}/report/${r.report_id}`, text: 'ver' }) : null,
+            r.links?.pdf ? h('a.btn.sm', { href: apiUrl(r.links.pdf), target: '_blank', text: 'pdf' }) : null)))))) : null);
   };
 
   let stopped = false;
   const poll = async () => {
     if (stopped) return;
     let run;
-    try { run = (await api(`/api/clients/${id}/pdf-reports/${runId}`)).run; } catch (err) { msg.textContent = err.message; return; }
+    try { run = (await api(`/api/clients/${id}/letters/${runId}`)).run; } catch (err) { msg.textContent = err.message; return; }
     ring.set(run.progress ?? 0);
     msg.textContent = run.message || '';
     paintAgents(run);
     if (run.status === 'completed') {
       stopped = true; clearInterval(timer);
-      state.textContent = 'O PDF está abaixo, no mesmo endereço desta aba. Gere novamente para uma versão com os dados de agora.';
-      showPdf(run);
+      state.textContent = 'A carta está abaixo. Ela ainda não foi publicada: aprove-a para que o cliente possa lê-la.';
+      showLetter(run);
       return;
     }
     if (run.status === 'failed') {
       stopped = true; clearInterval(timer);
+      // A month already published is not a failure to retry: it is a decision.
+      // The button says what it replaces, and asks once before replacing it.
+      if (run.blocked_by === 'published') {
+        state.textContent = run.error || '';
+        mount(letterBox, h('div.split', { style: { marginTop: '16px' } },
+          h('button.btn', { type: 'button', onclick: (e) => {
+            if (!confirm(`Reescrever a carta de ${monthLabel(run.reporting_month, L)}?\n\nA carta publicada será substituída pela nova, que volta a aguardar a sua aprovação. O cliente deixa de ver a que leu até você publicar esta.`)) return;
+            start(e, { reissue: true });
+          } }, icon('edit', { size: 15 }), h('span', { text: 'reescrever mesmo assim' })),
+          h('a.btn', { href: `#/client/${id}/reports` }, icon('letter', { size: 15 }), h('span', { text: 'ver a carta publicada' }))));
+        return;
+      }
       state.textContent = `A execução falhou: ${run.error || 'erro desconhecido'}.`;
-      mount(pdfBox, h('div.split', { style: { marginTop: '16px' } }, again));
+      mount(letterBox, h('div.split', { style: { marginTop: '16px' } }, again));
       return;
     }
     setTimeout(poll, 1500);
@@ -1503,10 +1531,10 @@ async function viewPdfReport({ id, runId = null }) {
   paintHistory();
 
   return frag(
-    head('Relatório em PDF', `${c.name} · perfil ${c.risk_profile} · ${money(d.total_value, { locale: L })} sob assessoria. Visão de mercado, performance, alocação e pontos a discutir, em duas páginas.`,
+    head('Carta mensal', `${c.name} · perfil ${c.risk_profile} · ${money(d.total_value, { locale: L })} sob assessoria. O mês, o que aconteceu nos mercados e o que isso significa para esta carteira, em duas páginas.`,
       [h('a.btn', { href: `#/client/${id}` }, icon('back', { size: 15 }), h('span', { text: 'voltar ao cliente' }))],
-      [h('b', { text: c.name }), sep(), 'Agente de relatórios']),
-    runBox, pdfBox, history,
+      [h('b', { text: c.name }), sep(), 'Agente de cartas']),
+    runBox, letterBox, history,
   );
 }
 
@@ -1530,8 +1558,8 @@ async function viewPdfReport({ id, runId = null }) {
     ['/client/:id/prep', viewMeetingPrep],
     ['/client/:id/editor', viewEditor],
     ['/client/:id/report/:reportId', viewReport],
-    ['/client/:id/relatorio', viewPdfReport],
-    ['/client/:id/relatorio/:runId', viewPdfReport],
+    ['/client/:id/carta', viewMonthlyLetter],
+    ['/client/:id/carta/:runId', viewMonthlyLetter],
     ['/client/:id/:tab', viewClient],
   ], { root });
 

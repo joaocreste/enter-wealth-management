@@ -458,10 +458,33 @@ export async function buildAndCheckRecommendations(env, ctx, market, perf, signa
   return { recommendations: checked, exposures, unhedged_fx_weight: unhedgedFx, max_class_drift: maxDrift, portfolio_flags: portfolioFlags };
 }
 
+/**
+ * What each class weighed on the first day of the month, from the same holdings
+ * priced at the month's opening price and opening PTAX.
+ *
+ * A position no provider could price, and cash, carry their closing value: the
+ * letter would rather say a class did not move than invent the distance it did.
+ * `{}` when nothing in the carteira had an opening price at all, and then the
+ * letter shows position without direction.
+ */
+function classWeightsAtOpen(market) {
+  const priced = market?.priced || [];
+  if (!priced.some((p) => p.open_price != null)) return {};
+  const valueAtOpen = (p) => (p.open_price == null
+    ? (p.market_value ?? 0)
+    : p.open_price * (p.quantity ?? 0) * (p.fx_open ?? 1));
+  const total = priced.reduce((a, p) => a + valueAtOpen(p), 0);
+  if (!(total > 0)) return {};
+  const out = {};
+  for (const p of priced) out[p.asset.asset_class] = (out[p.asset.asset_class] ?? 0) + valueAtOpen(p) / total;
+  return out;
+}
+
 // ── 20. canonical report assembly ───────────────────────────────────────────
 export function assembleCanonicalReport({
   ctx, market, perf, benchmark, metrics, signals, recommendations, worldView,
-  eventsForClient, narrative, exposures, locale = 'pt-BR', reportId = null, graphRunId = null, promptVersion = null,
+  eventsForClient, narrative, exposures,
+  locale = 'pt-BR', reportId = null, graphRunId = null, promptVersion = null,
 }) {
   const ledger = new SourceLedger();
   ledger.addAll(market.ledger || []);
@@ -619,18 +642,24 @@ export function assembleCanonicalReport({
     : null;
 
   const totalValue = perf.ending_market_value || 0;
+  const openingWeights = classWeightsAtOpen(market);
   report.approved_portfolio = {
     snapshot_id: ctx.snapshot.id,
     effective_date: ctx.snapshot.effective_date,
     policy_version: ctx.policy?.version,
     total_value: totalValue,
     base_currency: ctx.policy?.base_currency || 'BRL',
+    // opening_weight is what the class weighed at the start of the month the
+    // letter covers, on the same holdings, so the letter can say which way each
+    // class moved and not only where it ended. The month, not an older
+    // snapshot: a letter about August should compare with August's first day.
     allocation: Object.entries(exposures || {}).map(([asset_class, weight]) => ({
       asset_class,
       weight,
       target: ctx.policy?.target_allocation?.[asset_class] ?? null,
       range: ctx.policy?.permitted_ranges?.[asset_class] ?? null,
       value: weight * totalValue,
+      opening_weight: openingWeights[asset_class] ?? null,
     })).sort((a, b) => b.weight - a.weight),
     holdings: market.priced.map((p) => ({
       asset_id: p.asset.id,

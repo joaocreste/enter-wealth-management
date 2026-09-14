@@ -197,6 +197,72 @@ ${caption ? `<figcaption class="chart-caption">${esc(caption)}</figcaption>` : '
 </figure>`;
 }
 
+/**
+ * The positioning chart: where each class sits against the policy, on the
+ * five-step scale, with the direction its weight took over the month.
+ *
+ * The same geometry as the drawing in src/render/pdf/letter.js — the columns
+ * are the same fractions of the measure — so the client reading the letter in
+ * the portal and the client reading the PDF see one chart, not two that
+ * resemble each other.
+ */
+const STANCE_MARKS = [`${MINUS}${MINUS}`, MINUS, '=', '+', '++'];
+
+export function svgStance(rows, { width = 520, rowHeight = 21, title = null, caption = null } = {}) {
+  const items = (rows || []).filter((r) => r && r.label);
+  if (!items.length) return '';
+  const P = color.position;
+  const mudCx = width * 0.465;
+  const ruleX = width * 0.505;
+  const scaleX0 = ruleX + 12;
+  const gap = (width - scaleX0) / STANCE_MARKS.length;
+  const at = (i) => scaleX0 + gap * (i + 0.5);
+  const mid = (a, c) => (a + c) / 2;
+
+  const headY = 11;
+  const markY = 25;
+  const top = 32;
+  const height = top + items.length * rowHeight + 4;
+  const cap = (label, cx, y) => `<text x="${cx.toFixed(1)}" y="${y}" text-anchor="middle" font-size="7.4" letter-spacing="2" font-weight="500" fill="${color.ink[600]}" font-family="${type.sans}">${esc(String(label).toUpperCase())}</text>`;
+
+  const head = [
+    cap('Underweight', mid(at(0), at(1)), headY),
+    cap('Neutro', at(2), headY),
+    cap('Overweight', mid(at(3), at(4)), headY),
+    `<text x="${mudCx.toFixed(1)}" y="${headY}" text-anchor="middle" font-size="8" font-weight="300" fill="${color.ink[600]}" font-family="${type.sans}">Mud.</text>`,
+    ...STANCE_MARKS.map((m, i) => `<text x="${at(i).toFixed(1)}" y="${markY}" text-anchor="middle" font-size="10" font-weight="500" fill="${color.ink[600]}" font-family="${type.sans}">${esc(m)}</text>`),
+  ].join('\n');
+
+  const body = items.map((r, i) => {
+    const y = top + i * rowHeight + rowHeight / 2;
+    const step = Math.max(-2, Math.min(2, r.step ?? 0));
+    const fill = step < 0 ? P.underweight : step > 0 ? P.overweight : P.neutral;
+    const change = r.change === 'up'
+      ? `<path d="M${(mudCx - 4.6).toFixed(1)} ${(y + 3.4).toFixed(1)} L${(mudCx + 4.6).toFixed(1)} ${(y + 3.4).toFixed(1)} L${mudCx.toFixed(1)} ${(y - 3.4).toFixed(1)} Z" fill="${P.up}"/>`
+      : r.change === 'down'
+        ? `<path d="M${(mudCx - 4.6).toFixed(1)} ${(y - 3.4).toFixed(1)} L${(mudCx + 4.6).toFixed(1)} ${(y - 3.4).toFixed(1)} L${mudCx.toFixed(1)} ${(y + 3.4).toFixed(1)} Z" fill="${P.down}"/>`
+        : r.change === 'flat'
+          ? `<line x1="${(mudCx - 4.8).toFixed(1)}" y1="${y.toFixed(1)}" x2="${(mudCx + 4.8).toFixed(1)}" y2="${y.toFixed(1)}" stroke="${P.unchanged}" stroke-width="2.4"/>`
+          : '';
+    return `<text x="0" y="${(y + 2.6).toFixed(1)}" font-size="7.6" letter-spacing="0.4" font-weight="700" fill="${INK}" font-family="${type.sans}">${esc(String(r.label).toUpperCase())}</text>
+${change}
+<line x1="${scaleX0.toFixed(1)}" y1="${y.toFixed(1)}" x2="${width}" y2="${y.toFixed(1)}" stroke="${RULE}" stroke-width="2.4"/>
+<circle cx="${at(step + 2).toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="${fill}"/>`;
+  }).join('\n');
+
+  const ruleY1 = top + 2;
+  const ruleY2 = top + items.length * rowHeight;
+  return `<figure class="chart" style="margin:0">
+${title ? `<figcaption class="chart-title">${esc(title)}</figcaption>` : ''}
+<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="${esc(title || 'posicionamento por classe')}" style="display:block;overflow:visible">
+${head}
+<line x1="${ruleX.toFixed(1)}" y1="${ruleY1}" x2="${ruleX.toFixed(1)}" y2="${ruleY2}" stroke="${INK}" stroke-width="1.2"/>
+${body}
+</svg>
+${caption ? `<figcaption class="chart-caption">${esc(caption)}</figcaption>` : ''}
+</figure>`;
+}
+
 /** Cumulative line: portfolio in slate, benchmark in copper, dotted (§09). */
 export function svgCumulative(series, { width = 520, height = 150, title = null, caption = null, locale = 'pt-BR' } = {}) {
   const port = series.portfolio || [];

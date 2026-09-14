@@ -295,7 +295,7 @@ header nor a cross-origin cookie.
 
 Half an hour before a meeting the advisor does not need the whole book rebuilt —
 they need *this* client's numbers to be current. The **atualizar dados** button
-sits to the left of **criar relatório pdf** on the client page and runs three
+sits to the left of **criar carta mensal** on the client page and runs three
 steps (`worker/src/client-refresh.js`), reporting each to the same progress card
 the daily agents use.
 
@@ -323,46 +323,68 @@ source ledger; `POST /api/clients/:id/refresh` starts one and
 page header then reads *valores de <date>* followed by the providers that
 supplied them.
 
-### The report agent
+### The monthly letter agent
 
-From a client's page the advisor has a **criar relatório pdf** button. It opens a
-tab of its own and starts a fourth agent, which runs as a Cloudflare Workflow like
-the daily ones (`worker/src/report-agent.js`) and reports each step to the tab.
-The report is written for the client, not the advisor: it greets them by name,
-says what is happening in the world and which events matter, shows their
-performance, says what could improve the result and what could make it worse,
-and closes with the portfolio as it stands and the advisor's sign-off.
+From a client's page the advisor has a **criar carta mensal** button. It opens a
+tab of its own and starts a fourth agent, which runs as a Cloudflare Workflow
+like the daily ones (`worker/src/letter-agent.js`) and reports each step to the
+tab. What it writes is the carta mensal — the same document the Rivet graph
+produces, landing in the same `reports` row — so the portal has exactly one
+monthly document per client per month and one place it is read, approved and
+published.
 
-1. **Dados** — the approved portfolio, the policy, the return history, the day's
-   World Overview with its What Matters events, the month's profitability, and
-   twelve months of return and volatility for every asset held, from the same
-   computation the signals page draws (`worker/src/risk-return.js`).
-2. **Análise** — returns for the month, the year, twelve months and since the
-   start; the cumulative curve; the events that touch the portfolio first; the
-   scatter of the client's own assets with the Ibovespa, the S&P 500 in reais and
-   the CDI as references; the points split into what could improve the result
-   (a class below its band, a drift back to target, an approved addition) and
-   what could make it worse (concentration, a class above its band, a breached
-   threshold, divergent signals, an approved reduction). Pure functions in
-   `src/render/report-model.js`.
-3. **Redação** — the model writes the greeting, the world, one line per event,
-   the performance comment, a reading of the scatter, one line per point and the
-   closing from a FACTS object; it is never asked for a number. Without a key a
+1. **Dados** — the approved portfolio, the policy, the month's flows, the
+   opening and closing prices of every position with the exchange rate, and the
+   next meeting already in the diary, each with the source record that says who
+   supplied it.
+2. **Análise** — the month's profitability by modified Dietz against the
+   policy's own target allocation priced as a benchmark; the monitored
+   indicators, the curated events and the moves large enough to be events, kept
+   only where they touch this carteira; the technical reading and the analyst
+   consensus for every position held; and the proposals, measured against the
+   policy and written to `recommendations` with the advisor's earlier decisions
+   carried forward.
+3. **Redação** — the model writes the title, the greeting and four to six
+   paragraphs from a FACTS object in which every figure is already a formatted
+   string; it is never asked for a number, and a letter carrying a figure the
+   facts never supplied is rejected and asked for again. Without a key a
    template phrases the same facts.
-4. **Diagramação** — `src/render/pdf/report.js` draws it in the Carteira XP
-   Global Strategies grammar inside the Carta's frame: the event cards, the
-   figure strip, the framed cumulative chart beside the framed scatter, the two
-   columns of points under slate bands, the pie and the positions table.
+4. **Diagramação** — `src/render/pdf/letter.js` draws the letter on page one and
+   the annex on page two, `src/render/html-email.js` renders the e-mail and the
+   portal page, and all three go to R2 with the canonical report behind them.
+   Page one keeps its own reading measure — a letter is read straight through
+   and the annex is scanned, and the two measures are what make the break
+   between them read as a break.
 
-**Two pages is a rule.** Every block is measured before it is drawn. When the
-content does not fit, a reduction ladder trims the least important material first
-(positions, events, points, sentences, the positions table, the pie, the
-cumulative chart, the scatter's labels) and the composition is tried again;
-whatever still does not fit on page two is left out and named on the run. A
-third page is never started, and `npm run verify` throws forty positions, nine
-years of history, twelve events and twelve points at the renderer to prove it.
-Runs live in `pdf_reports` (migration `0003`), the PDFs in R2, and the API is
-advisor-only.
+Near the end of page one, between the last thing the letter argues and the way
+it closes, is the positioning chart: each class of the carteira on the five-step
+scale from underweight to overweight, with the direction its weight took over
+the month beside it. The step is not an opinion — `stanceStep` in
+`src/render/letter-model.js` reads it off the client's own permitted range, and
+measures the two halves of the band separately, because a policy rarely makes
+them symmetrical. So the chart and the allocation table in the annex cannot
+disagree: the same two numbers decide both. It is drawn twice from one geometry
+— vector in the PDF, `svgStance` in `src/render/charts.js` for the e-mail and
+the portal — and it is the last thing the two-page ladder gives up, after the
+type has run out of room and before anything the advisor wrote is at risk.
+
+The stages themselves live in `worker/src/letter-pipeline.js`, not in the agent:
+the Rivet graph calls the same functions through `/api/pipeline/*`, one step at
+a time, so the prompts stay visible and editable inside the graph. Two drivers,
+one document.
+
+**A letter lands as `pending_approval`.** It is written for the advisor to read
+and approve, and only a published letter reaches the client. Only proposals the
+advisor has already approved are printed, so a first run for the month is
+usually a letter without a table — which is the honest state of it. Regenerating
+a month replaces the draft; a month already published is refused, because a
+letter a client has read is not something a button overwrites.
+
+Runs live in `letter_runs` (migration `0007`) beside a `graph_runs` row carrying
+the intermediate state, so a letter written from the portal appears in the
+client's Auditoria tab exactly as one written from the graph does. The API is
+advisor-only: `POST /api/clients/:id/letters` starts one and
+`GET /api/clients/:id/letters/:runId` reports it.
 
 ### The portal's design
 

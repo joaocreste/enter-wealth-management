@@ -13,13 +13,12 @@ import { all, first, run, id, json, nowIso, audit, resolveClientScope, currentPo
 import { login, logout, sessionFromRequest, hashPassword } from './auth.js';
 import * as P from './pipeline.js';
 import * as LLM from './llm.js';
-import { buildLetterModel, prioritiseForLetter, sanitiseLetter, houseView } from '../../src/render/letter-model.js';
+import * as LP from './letter-pipeline.js';
+import { buildLetterModel } from '../../src/render/letter-model.js';
 import { renderLetterHtml, renderPortalLetter } from '../../src/render/html-email.js';
 import { renderLetterPdf } from '../../src/render/pdf/letter.js';
 import { brandFonts } from '../../src/render/fonts/index.js';
-import { validateReport } from '../../src/core/report-schema.js';
-import { previousMonth, monthBounds, shortAssetName, monthLabel, dateLong, percent, money, pp } from '../../src/core/format.js';
-import { withinPolicy } from '../../src/core/suitability.js';
+import { previousMonth } from '../../src/core/format.js';
 import { INDICATORS } from '../../seed/market.mjs';
 import { eventRegion } from '../../src/core/events.js';
 import { seedDatabase } from './seed-runner.js';
@@ -33,7 +32,7 @@ import * as bcb from '../../src/adapters/bcb.js';
 import { makeSource, SourceLedger } from '../../src/core/sources.js';
 import * as A from './agents.js';
 import * as S from './series.js';
-import * as R from './report-agent.js';
+import * as L from './letter-agent.js';
 import * as B from './bulk-reports.js';
 import * as CR from './client-refresh.js';
 import * as PD from './policy-document.js';
@@ -41,7 +40,7 @@ import { gateEnabled, gatePassed, gateSubmit, gatePage } from './gate.js';
 import { hydrateRecommendation, allocationOf, meetingPrep, runProfitabilityLive } from './client-analysis.js';
 import { assetRiskReturn } from './risk-return.js';
 export { OverviewAgents } from './agents.js';
-export { ReportAgent } from './report-agent.js';
+export { LetterAgent } from './letter-agent.js';
 export { BulkReports } from './bulk-reports.js';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
@@ -189,21 +188,6 @@ async function route(request, env, url, ctx) {
     return serveArtefact(env, report, kind);
   }
 
-  // ── the report agent's PDFs, by signed link or by a scoped session ────────
-  const pdfMatch = path.match(/^\/api\/pdf-reports\/([^/]+)\/pdf$/);
-  if (pdfMatch) {
-    const row = await first(db, 'SELECT * FROM pdf_reports WHERE id = ?', pdfMatch[1]);
-    if (!row) return bad(404, 'report not found');
-    const signed = await verifyArtefactToken(env, row.id, R.ARTEFACT_KIND, url.searchParams.get('t'));
-    if (!signed) {
-      if (!session) return bad(401, 'authentication required');
-      if (session.role === 'client') return bad(403, 'advisor surface');
-      const scope = await resolveClientScope(db, session, row.client_id);
-      if (!scope.ok) return bad(scope.status, scope.error);
-    }
-    return R.servePdfReport(env, row);
-  }
-
   // ── the bulk run's zip, by signed link or by the advisor who owns the run ──
   // Same reasoning as the two blocks above: the browser downloads this by
   // navigation, which carries neither the Authorization header nor a
@@ -278,7 +262,7 @@ async function route(request, env, url, ctx) {
 
   // Every client's letter in one go, and the zip that holds them. The run is
   // returned at once and polled like the daily agents; only the archive at the
-  // end is new, the letters themselves are ordinary report-agent runs.
+  // end is new, the letters themselves are ordinary letter-agent runs.
   if (path === '/api/advisor/bulk-reports') {
     if (session.role === 'client') return bad(403, 'advisor surface');
     const advisor = await advisorFor(env, session);
@@ -759,21 +743,23 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
     return ok({ run: CR.runView(row) });
   }
 
-  // ── the report agent: a two-page PDF on demand, advisor only ──────────────
-  if (sub === '/pdf-reports') {
+  // ── the monthly letter agent: one client's letter on demand, advisor only ──
+  // The letter it writes is the same document the Rivet graph produces and
+  // lands in the same `reports` row, waiting for the advisor's approval.
+  if (sub === '/letters') {
     if (!isAdvisor) return bad(403, 'advisor only');
     if (method === 'POST') {
-      await audit(db, { entity: 'pdf_report', entity_id: client.id, action: 'requested', actor_id: session.user_id });
-      return ok({ run: await R.startReportRun(env, ctx, { scope, actorId: session.user_id }) });
+      await audit(db, { entity: 'letter_run', entity_id: client.id, action: 'requested', actor_id: session.user_id });
+      return ok({ run: await L.startLetterRun(env, ctx, { scope, actorId: session.user_id, month: body.month || null, reissue: !!body.reissue }) });
     }
-    return ok({ reports: await R.listReportRuns(env, client.id) });
+    return ok({ runs: await L.listLetterRuns(env, client.id) });
   }
-  const pdfRun = sub.match(/^\/pdf-reports\/([^/]+)$/);
-  if (pdfRun) {
+  const letterRun = sub.match(/^\/letters\/([^/]+)$/);
+  if (letterRun) {
     if (!isAdvisor) return bad(403, 'advisor only');
-    const row = await first(db, 'SELECT * FROM pdf_reports WHERE id = ? AND client_id = ?', pdfRun[1], client.id);
+    const row = await first(db, 'SELECT * FROM letter_runs WHERE id = ? AND client_id = ?', letterRun[1], client.id);
     if (!row) return bad(404, 'run not found');
-    return ok({ run: await R.runView(env, row) });
+    return ok({ run: await L.runView(env, row) });
   }
 
   if (sub === '/recommendations') {
@@ -1024,7 +1010,7 @@ async function pipelineRoutes(env, step, body, session) {
   if (step === 'signals') {
     const { state } = await loadRun(env, body.run_id);
     const heldAssets = state.market.priced.map((p) => p.asset).filter((a) => a.tv_symbol);
-    const candidateIds = body.candidates || await defaultCandidates(env, state);
+    const candidateIds = body.candidates || await LP.defaultCandidates(env, state);
     const candidateRows = candidateIds.length
       ? await all(db, `SELECT * FROM assets WHERE id IN (${candidateIds.map(() => '?').join(',')})`, ...candidateIds)
       : [];
@@ -1050,55 +1036,11 @@ async function pipelineRoutes(env, step, body, session) {
 
   if (step === 'recommendations') {
     const { state } = await loadRun(env, body.run_id);
-    const advisorId = state.ctx.advisor?.id;
-    const wv = advisorId ? await first(db, 'SELECT * FROM world_overviews WHERE advisor_id = ? ORDER BY date DESC LIMIT 1', advisorId) : null;
-    const worldView = wv ? { ...json(wv.briefing_json, {}), stance_by_asset_class: json(wv.stance_json, {}), date: wv.date, approval_status: wv.approval_status, advisor_commentary: wv.advisor_commentary } : {};
+    const worldView = await LP.loadWorldView(env, state.ctx.advisor?.id);
     const built = await P.buildAndCheckRecommendations(env, state.ctx, state.market, state.perf, state.signals, worldView, state.candidates || []);
 
-    const month = state.ctx.reporting_period.month;
-    const existingRows = await all(db, 'SELECT * FROM recommendations WHERE client_id = ? AND reporting_month = ?', state.ctx.client.id, month);
-    const existingByAsset = new Map(existingRows.map((r) => [r.asset_id, r]));
-    const setId = existingRows[0]?.recommendation_set_id || id('recset');
-    let carried = 0;
-    let reopened = 0;
+    const { setId, carried, reopened } = await LP.persistRecommendations(env, state, built);
 
-    for (const r of built.recommendations) {
-      const prev = existingByAsset.get(r.asset_id);
-      // An advisor decision survives a re-run of the workflow. It is reset only
-      // when the underlying proposal actually changed, and the reason is recorded.
-      const materiallyChanged = prev
-        && (prev.proposed_action !== r.proposed_action
-          || prev.suitability_result !== r.suitability_result
-          || (prev.signal_conflict === 1) !== r.signal_conflict);
-      const advisorStatus = prev && !materiallyChanged ? prev.advisor_status : 'proposed';
-      const advisorNote = prev && !materiallyChanged ? prev.advisor_note : null;
-      const finalAction = prev && !materiallyChanged && prev.advisor_status === 'edited' ? prev.final_action : r.final_action;
-      if (prev && !materiallyChanged && prev.advisor_status !== 'proposed') carried += 1;
-      if (prev && materiallyChanged && prev.advisor_status !== 'proposed') reopened += 1;
-
-      await run(db, `INSERT INTO recommendations (id, client_id, asset_id, reporting_month, recommendation_set_id, tradingview_signal_id, proposed_action, final_action, suitability_result, score, conviction, signal_conflict, current_weight, rationale, factors_json, flags_json, statement_json, advisor_status, advisor_note, decided_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(client_id, reporting_month, asset_id) DO UPDATE SET
-          recommendation_set_id = excluded.recommendation_set_id,
-          tradingview_signal_id = excluded.tradingview_signal_id,
-          proposed_action = excluded.proposed_action, final_action = excluded.final_action,
-          suitability_result = excluded.suitability_result, score = excluded.score,
-          conviction = excluded.conviction, signal_conflict = excluded.signal_conflict,
-          current_weight = excluded.current_weight, factors_json = excluded.factors_json,
-          flags_json = excluded.flags_json, statement_json = excluded.statement_json,
-          advisor_status = excluded.advisor_status, advisor_note = excluded.advisor_note`,
-        prev?.id || id('rec'), state.ctx.client.id, r.asset_id, month, setId, r.tradingview_signal_id ?? null,
-        r.proposed_action, finalAction, r.suitability_result, r.score, r.conviction,
-        r.signal_conflict ? 1 : 0, r.current_weight, null,
-        JSON.stringify(r.factors), JSON.stringify(r.flags), JSON.stringify(r.statement),
-        advisorStatus, advisorNote, prev?.decided_at ?? null);
-    }
-
-    // An asset that left the book no longer needs a decision.
-    const currentAssets = new Set(built.recommendations.map((r) => r.asset_id));
-    for (const prev of existingRows) {
-      if (!currentAssets.has(prev.asset_id)) await run(db, 'DELETE FROM recommendations WHERE id = ?', prev.id);
-    }
     state.recommendations = built.recommendations;
     state.portfolio_flags = built.portfolio_flags;
     state.recommendation_set_id = setId;
@@ -1141,8 +1083,8 @@ async function pipelineRoutes(env, step, body, session) {
    */
   if (step === 'narrative-facts') {
     const { state } = await loadRun(env, body.run_id);
-    const refreshed = { ...state, recommendations: await refreshRecommendationStatus(env, state) };
-    const facts = narrativeFacts(refreshed);
+    const refreshed = { ...state, recommendations: await LP.refreshRecommendationStatus(env, state) };
+    const facts = LP.narrativeFacts(refreshed);
     const { renderPrompt } = await import('../../src/llm/prompts.js');
     const p = renderPrompt(body.prompt || 'client_letter', facts);
     return ok({
@@ -1164,7 +1106,7 @@ async function pipelineRoutes(env, step, body, session) {
     // Worker only fills in when the graph did not produce one.
     let narrative;
     if (body.letter && typeof body.letter === 'object' && body.letter.greeting) {
-      const facts = narrativeFacts({ ...state, recommendations: await refreshRecommendationStatus(env, state) });
+      const facts = LP.narrativeFacts({ ...state, recommendations: await LP.refreshRecommendationStatus(env, state) });
       narrative = {
         letter: { ...body.letter, language: 'pt-BR' },
         rationales: body.rationales && Object.keys(body.rationales).length ? body.rationales : LLM.deterministicRationales(facts),
@@ -1173,7 +1115,7 @@ async function pipelineRoutes(env, step, body, session) {
         prompt_version: body.prompt_version || PROMPT_VERSION,
       };
     } else {
-      narrative = await buildNarrative(env, state, body);
+      narrative = await LP.buildNarrative(env, state, body);
     }
     state.narrative = narrative;
     await saveRun(env, body.run_id, state);
@@ -1182,51 +1124,33 @@ async function pipelineRoutes(env, step, body, session) {
 
   if (step === 'assemble') {
     const { state, row } = await loadRun(env, body.run_id);
-    const decided = await refreshRecommendationStatus(env, state);
-    const recs = decided.map((r) => ({ ...r, rationale_pt: state.narrative?.rationales?.[r.asset_id] ?? null }));
-
-    // One report per client per month. Regenerating reuses the existing id so
-    // the link an advisor already has keeps working and the stored source
-    // records stay attached to it.
-    const existing = await first(db, 'SELECT id, status FROM reports WHERE client_id = ? AND reporting_month = ?',
-      state.ctx.client.id, state.ctx.reporting_period.month);
-    if (existing?.status === 'published' && !body.force) {
+    const built = await LP.assembleLetter(env, state, {
+      force: !!body.force, reportId: body.report_id || null,
+      graphRunId: body.run_id, promptVersion: row.prompt_version,
+    });
+    if (built.conflict) {
       return bad(409, 'a published client letter is immutable; reissue it deliberately if the advisor has decided to', {
-        report_id: existing.id,
-        published_at: existing.published_at,
+        report_id: built.conflict.report_id,
+        published_at: built.conflict.published_at,
         how_to_reissue: 'set the reissue graph input to true, or POST assemble with { "force": true }',
       });
     }
-    const reportId = body.report_id || existing?.id || id('rep');
-    const report = P.assembleCanonicalReport({
-      ctx: state.ctx, market: state.market, perf: state.perf, benchmark: state.benchmark,
-      metrics: state.metrics, signals: state.signals, recommendations: recs,
-      worldView: state.world_view,
-      eventsForClient: state.impact.map((i) => {
-        const src = state.events.find((e) => e.id === i.event_id) || {};
-        return { ...i, summary: src.summary, summary_pt: src.summary_pt ?? null, category: src.category, importance: src.importance, direction: src.direction, date: i.date ?? src.date };
-      }),
-      narrative: state.narrative, exposures: state.exposures,
-      locale: env.REPORT_LOCALE || 'pt-BR', reportId, graphRunId: body.run_id,
-      promptVersion: row.prompt_version,
-    });
-    state.report = report;
-    state.report_id = reportId;
+    state.report = built.report;
+    state.report_id = built.report_id;
     await saveRun(env, body.run_id, state);
 
     // Validation before the advisor gate. Recommendations are still "proposed"
     // at this point, so the approval error is expected and reported as pending.
-    const check = validateReport(report);
-    const pendingApproval = check.errors.filter((e) => e.includes('only advisor-approved'));
+    const pendingApproval = built.check.errors.filter((e) => e.includes('only advisor-approved'));
     return ok({
-      run_id: body.run_id, report_id: reportId,
-      valid: check.ok,
-      blocking_errors: check.errors.filter((e) => !e.includes('only advisor-approved')),
+      run_id: body.run_id, report_id: built.report_id,
+      valid: built.check.ok,
+      blocking_errors: built.check.errors.filter((e) => !e.includes('only advisor-approved')),
       pending_advisor_approval: pendingApproval.length,
-      warnings: check.warnings,
-      sections: Object.keys(report).length,
-      sources: report.sources.length,
-      unavailable: report.data_quality.unavailable,
+      warnings: built.check.warnings,
+      sections: Object.keys(built.report).length,
+      sources: built.report.sources.length,
+      unavailable: built.report.data_quality.unavailable,
     });
   }
 
@@ -1235,46 +1159,15 @@ async function pipelineRoutes(env, step, body, session) {
     if (!state.report) {
       return bad(409, 'nothing to render: the assemble stage did not produce a report for this run', { run_id: body.run_id, stages_completed: Object.keys(state) });
     }
-    const approvedOnly = body.approved_only !== false;
-    let report = state.report;
+    const drawn = await LP.renderLetter(env, state, { approvedOnly: body.approved_only !== false });
+    if (drawn.invalid) return bad(422, 'the report does not pass validation and will not be rendered', { errors: drawn.invalid.errors, warnings: drawn.invalid.warnings });
 
-    if (approvedOnly) {
-      const decided = await refreshRecommendationStatus(env, state);
-      const byAsset = new Map(decided.map((d) => [d.asset_id, d]));
-      report = {
-        ...report,
-        recommendations: report.recommendations
-          .map((r) => {
-            const d = byAsset.get(r.asset_id);
-            return d ? { ...r, advisor_status: d.advisor_status, advisor_note: d.advisor_note, final_action: d.final_action ?? r.final_action } : r;
-          })
-          .filter((r) => r.advisor_status === 'approved'),
-      };
-      const check = validateReport(report);
-      if (!check.ok) return bad(422, 'the report does not pass validation and will not be rendered', { errors: check.errors, warnings: check.warnings });
-    }
-
-    const model = buildLetterModel(report, { locale: report.locale });
-    const html = renderLetterHtml(model, { variant: 'email', pdfUrl: `/api/reports/${state.report_id}/pdf`, portalUrl: `/client/#/report/${state.report_id}` });
-    const portalHtml = renderPortalLetter(model);
-    const pdfDoc = await renderLetterPdf(model, { fonts: brandFonts() });
-    const pdf = pdfDoc.build();
-
-    const keys = {
-      html: `reports/${state.ctx.client.id}/${state.ctx.reporting_period.month}/${state.report_id}.email.html`,
-      portal: `reports/${state.ctx.client.id}/${state.ctx.reporting_period.month}/${state.report_id}.portal.html`,
-      pdf: `reports/${state.ctx.client.id}/${state.ctx.reporting_period.month}/${state.report_id}.pdf`,
-    };
-    if (env.REPORTS) {
-      await env.REPORTS.put(keys.html, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
-      await env.REPORTS.put(keys.portal, portalHtml, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
-      await env.REPORTS.put(keys.pdf, pdf, { httpMetadata: { contentType: 'application/pdf' } });
-    }
-    state.report = report;
-    state.render = { keys, page_count: pdfDoc.pageCount, pdf_bytes: pdf.length, html_bytes: html.length, layout_reduction_level: pdfDoc.reductionLevel ?? 0 };
+    state.report = drawn.report;
+    state.render = drawn.render;
     await saveRun(env, body.run_id, state);
 
-    return ok({ run_id: body.run_id, report_id: state.report_id, page_count: pdfDoc.pageCount, pdf_bytes: pdf.length, html_bytes: html.length, keys, within_two_pages: pdfDoc.pageCount <= 2, layout_reduction_level: pdfDoc.reductionLevel ?? 0, approved_recommendations: report.recommendations.length, letter_rows: model.recommendations.length, letter_rows_omitted: model.recommendations_omitted });
+    const r = drawn.render;
+    return ok({ run_id: body.run_id, report_id: state.report_id, page_count: r.page_count, pdf_bytes: r.pdf_bytes, html_bytes: r.html_bytes, keys: r.keys, within_two_pages: r.page_count <= 2, layout_reduction_level: r.layout_reduction_level, approved_recommendations: drawn.report.recommendations.length, letter_rows: drawn.model.recommendations.length, letter_rows_omitted: drawn.model.recommendations_omitted });
   }
 
   if (step === 'persist') {
@@ -1283,28 +1176,9 @@ async function pipelineRoutes(env, step, body, session) {
       await saveRun(env, body.run_id, state, { status: 'failed', finished_at: nowIso(), error: 'no report to persist' });
       return bad(409, 'nothing to persist: this run has no assembled report', { run_id: body.run_id, stages_completed: Object.keys(state) });
     }
-    const r = state.report;
-    const status = body.status || 'pending_approval';
-    await run(db, `INSERT INTO reports (id, client_id, advisor_id, portfolio_snapshot_id, reporting_month, canonical_report_json, html_r2_key, pdf_r2_key, portal_r2_key, status, page_count, graph_run_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(client_id, reporting_month) DO UPDATE SET canonical_report_json=excluded.canonical_report_json,
-        html_r2_key=excluded.html_r2_key, pdf_r2_key=excluded.pdf_r2_key, portal_r2_key=excluded.portal_r2_key,
-        status=excluded.status, page_count=excluded.page_count, graph_run_id=excluded.graph_run_id`,
-      state.report_id, state.ctx.client.id, state.ctx.advisor.id, state.ctx.snapshot.id,
-      state.ctx.reporting_period.month, JSON.stringify(r),
-      state.render?.keys?.html ?? null, state.render?.keys?.pdf ?? null, state.render?.keys?.portal ?? null,
-      status, state.render?.page_count ?? null, body.run_id);
-
-    await run(db, 'DELETE FROM data_sources WHERE report_id = ?', state.report_id);
-    for (const s of r.sources || []) {
-      await run(db, `INSERT INTO data_sources (id, report_id, provider, kind, instrument, identifier, requested_range, retrieval_timestamp, last_observation, source_reference, fallback_for, mocked, metadata_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        id('ds'), state.report_id, s.provider, s.kind, s.instrument, s.identifier, s.requested_range,
-        s.retrieval_timestamp, s.last_observation, s.reference, s.fallback_for, s.mocked ? 1 : 0, JSON.stringify(s));
-    }
-    await audit(db, { entity: 'report', entity_id: state.report_id, action: 'generated', actor_id: session.user_id, detail: { month: state.ctx.reporting_period.month, run_id: body.run_id, page_count: state.render?.page_count, narrative_mode: state.narrative?.mode } });
+    const stored = await LP.persistLetter(env, state, { status: body.status || 'pending_approval', actorId: session.user_id, graphRunId: body.run_id });
     await saveRun(env, body.run_id, state, { status: 'completed', finished_at: nowIso() });
-    return ok({ run_id: body.run_id, report_id: state.report_id, status, stored: true, sources_persisted: (r.sources || []).length });
+    return ok({ run_id: body.run_id, ...stored, stored: true });
   }
 
   if (step === 'publish') {
@@ -1322,170 +1196,6 @@ async function pipelineRoutes(env, step, body, session) {
   }
 
   return bad(404, `unknown pipeline step ${step}`);
-}
-
-async function defaultCandidates(env, state) {
-  // A candidate is an instrument that would move an under-allocated class back
-  // toward its policy target. Nothing is proposed for a class already in range.
-  const db = env.DB;
-  const policy = state.ctx.policy;
-  const total = state.perf?.ending_market_value || 1;
-  const exposures = {};
-  for (const p of state.market.priced) exposures[p.asset.asset_class] = (exposures[p.asset.asset_class] ?? 0) + (p.market_value ?? 0) / total;
-  const held = new Set(state.market.priced.map((p) => p.asset.id));
-
-  const under = Object.entries(policy?.permitted_ranges || {})
-    .filter(([k, band]) => band.min != null && (exposures[k] ?? 0) < band.min)
-    .map(([k]) => k);
-  if (!under.length) return [];
-
-  const rows = await all(db, `SELECT id FROM assets WHERE asset_class IN (${under.map(() => '?').join(',')}) AND tv_symbol IS NOT NULL AND pricing_mode = 'market'`, ...under);
-  return rows.map((r) => r.id).filter((x) => !held.has(x)).slice(0, 3);
-}
-
-/**
- * The run state holds the recommendations as the engine proposed them. The
- * advisor's decisions live in D1. Every step that speaks for the client — the
- * narrative, the validation and the render — reads the decisions back first, so
- * an approval made in the portal is reflected without re-running the pipeline.
- */
-async function refreshRecommendationStatus(env, state) {
-  if (!state.recommendation_set_id) return state.recommendations || [];
-  const decided = await all(env.DB, 'SELECT * FROM recommendations WHERE client_id = ? AND reporting_month = ?',
-    state.ctx.client.id, state.ctx.reporting_period.month);
-  const byAsset = new Map(decided.map((d) => [d.asset_id, d]));
-  return (state.recommendations || []).map((r) => {
-    const d = byAsset.get(r.asset_id);
-    return d ? { ...r, advisor_status: d.advisor_status, advisor_note: d.advisor_note, final_action: d.final_action ?? r.final_action } : r;
-  });
-}
-
-async function buildNarrative(env, state, body) {
-  state = { ...state, recommendations: await refreshRecommendationStatus(env, state) };
-  const facts = narrativeFacts(state);
-  let letter = null; let rationales = null; let mode = 'deterministic_template'; let model = null; let fallbackReason = null;
-
-  if (body.mode !== 'deterministic' && LLM.llmAvailable(env)) {
-    // A letter that fails the check is asked for once more with the reason
-    // stated, because the usual failure is a stray figure in one sentence and
-    // the second attempt fixes it. After that the deterministic text stands.
-    let note = null;
-    for (let attempt = 1; attempt <= 2 && !letter; attempt += 1) {
-      try {
-        const r = await LLM.runPrompt(env, 'client_letter', facts, { maxTokens: 3000, appendUser: note });
-        letter = sanitiseLetter(r.data, facts);
-        model = r.model; mode = 'model';
-      } catch (err) {
-        fallbackReason = err.message;
-        note = `Your previous reply was rejected: ${err.message}. Reply again with ONLY the JSON object described under "Output", obeying the paragraph count and using no figure that is not in FACTS.labels.`;
-      }
-    }
-    if (letter) {
-      try {
-        const rr = await LLM.runPrompt(env, 'recommendation_rationale', { recommendations: facts.recommendations }, { maxTokens: 1600 });
-        rationales = rr.data;
-      } catch { rationales = LLM.deterministicRationales(facts); }
-    }
-  }
-
-  if (!letter) {
-    letter = LLM.deterministicLetter(facts);
-    rationales = LLM.deterministicRationales(facts);
-    mode = LLM.llmAvailable(env) ? 'deterministic_fallback_after_error' : 'deterministic_template';
-  }
-  return { letter, rationales: rationales || {}, mode, model, prompt_version: PROMPT_VERSION, fallback_reason: fallbackReason, facts_digest: Object.keys(facts) };
-}
-
-/** The FACTS object. Nothing outside it may appear in the letter. */
-function narrativeFacts(state) {
-  const perf = state.perf;
-  const bench = state.benchmark;
-  return {
-    client: {
-      name: state.ctx.client.full_name,
-      first_name: String(state.ctx.client.full_name || '').trim().split(/\s+/)[0] || '',
-      risk_profile: state.ctx.client.risk_profile,
-      base_currency: state.ctx.client.base_currency,
-    },
-    advisor: { name: state.ctx.advisor?.name },
-    reporting_period: state.ctx.reporting_period,
-    performance: {
-      monthly_return: perf.monthly_return,
-      absolute_pnl: perf.absolute_pnl,
-      beginning_market_value: perf.beginning_market_value,
-      ending_market_value: perf.ending_market_value,
-      contributions: perf.contributions,
-      withdrawals: perf.withdrawals,
-      income: perf.income,
-      method: perf.method,
-      method_note: perf.method_note,
-      unavailable_reason: perf.monthly_return == null ? 'não foi possível apurar o retorno com os dados disponíveis' : null,
-      excluded_positions: perf.coverage.excluded.map((e) => ({ name: e.name, reason: e.reason })),
-    },
-    benchmark: bench.available
-      ? { name: bench.name, value: bench.value, excess_return: perf.monthly_return - bench.value, composition: bench.composition }
-      : { unavailable: true, reason: bench.reason },
-    attribution: {
-      best_contributor: perf.attribution.best_contributor ? { name: perf.attribution.best_contributor.name, short_name: shortAssetName(perf.attribution.best_contributor.name), ticker: perf.attribution.best_contributor.ticker, contribution: perf.attribution.best_contributor.contribution, total_return: perf.attribution.best_contributor.total_return } : null,
-      worst_contributor: perf.attribution.worst_contributor ? { name: perf.attribution.worst_contributor.name, short_name: shortAssetName(perf.attribution.worst_contributor.name), ticker: perf.attribution.worst_contributor.ticker, contribution: perf.attribution.worst_contributor.contribution, total_return: perf.attribution.worst_contributor.total_return } : null,
-      by_asset_class: perf.attribution.by_asset_class.map((c) => ({ asset_class: c.asset_class, contribution: c.contribution, return: c.return })),
-      fx_contribution: perf.attribution.fx_contribution,
-    },
-    events: (state.events || []).slice(0, 6).map((e) => ({
-      id: e.id, title: e.title, title_pt: e.title_pt ?? null,
-      why_it_matters: e.summary, why_it_matters_pt: e.summary_pt ?? null,
-      category: e.category, importance: e.importance,
-    })),
-    impact: (state.impact || []).map((i) => ({
-      event_id: i.event_id, title: i.title, title_pt: i.title_pt ?? null,
-      exposure: i.portfolio_exposure.total_exposure,
-      potential_impact: i.potential_impact, potential_impact_pt: i.potential_impact_pt ?? null,
-      discussion_prompt_pt: i.discussion_prompt_pt ?? null,
-      relevance: i.relevance,
-    })),
-    recommendations: (state.recommendations || []).map((r) => ({
-      asset_id: r.asset_id, ticker: r.ticker, name: r.name, short_name: shortAssetName(r.name), asset_class: r.asset_class,
-      within_policy: withinPolicy(r),
-      final_action: r.final_action, suitability_result: r.suitability_result, signal_conflict: r.signal_conflict,
-      technical_signal: r.technical_signal, analyst_signal: r.analyst_signal, analyst_count: r.analyst_count,
-      target_price: r.target_price, implied_upside: r.implied_upside, current_weight: r.current_weight,
-      factors: r.factors, flags: r.flags, advisor_status: r.advisor_status,
-    })),
-    allocation: Object.entries(state.exposures || {}).map(([k, v]) => ({ asset_class: k, weight: v, target: state.ctx.policy?.target_allocation?.[k] ?? null, range: state.ctx.policy?.permitted_ranges?.[k] ?? null })),
-    /**
-     * The house view. Without this the letter has no opinion in it, and an
-     * opinion is the one thing a client cannot get from their own statement.
-     */
-    advisor_view: houseView(state.world_view),
-    /** Exactly the items the letter will print, so the copy and the table agree. */
-    letter_recommendations: prioritiseForLetter(state.recommendations || []).selected.map((r) => ({
-      asset_id: r.asset_id, ticker: r.ticker, name: r.name, short_name: shortAssetName(r.name),
-      final_action: r.final_action, suitability_result: r.suitability_result, signal_conflict: r.signal_conflict,
-      within_policy: withinPolicy(r), current_weight: r.current_weight,
-      rationale_pt: r.rationale_pt || r.rationale || null,
-    })),
-    next_meeting: state.next_meeting ?? null,
-    next_meeting_label: state.next_meeting ? dateLong(state.next_meeting, 'pt-BR') : null,
-    /**
-     * Every figure the letter is allowed to write, already formatted.
-     *
-     * The model is not asked to format a number, because a model that formats is
-     * a model that rounds. It copies one of these strings or it writes the
-     * sentence without a figure — and because they are strings, the check that
-     * no other number reached the letter is exact rather than approximate.
-     */
-    labels: {
-      month: monthLabel(state.ctx.reporting_period?.month, 'pt-BR'),
-      period_end: dateLong(state.ctx.reporting_period?.end, 'pt-BR'),
-      monthly_return: perf.monthly_return == null ? null : percent(perf.monthly_return, { locale: 'pt-BR' }),
-      absolute_pnl: perf.absolute_pnl == null ? null : money(perf.absolute_pnl, { currency: state.ctx.client.base_currency || 'BRL', locale: 'pt-BR', signed: true }),
-      benchmark: bench.available && bench.value != null ? percent(bench.value, { locale: 'pt-BR' }) : null,
-      excess: bench.available && bench.value != null && perf.monthly_return != null ? pp(perf.monthly_return - bench.value, { locale: 'pt-BR' }) : null,
-      excess_abs: bench.available && bench.value != null && perf.monthly_return != null ? pp(Math.abs(perf.monthly_return - bench.value), { locale: 'pt-BR', signed: false }) : null,
-      ending_value: perf.ending_market_value == null ? null : money(perf.ending_market_value, { currency: state.ctx.client.base_currency || 'BRL', locale: 'pt-BR' }),
-      next_meeting: state.next_meeting ? dateLong(state.next_meeting, 'pt-BR') : null,
-    },
-  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

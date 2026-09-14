@@ -146,54 +146,6 @@ Paragraphs 3 and 4 may be merged when the month is quiet, and paragraph 2 may be
 {{facts}}`,
   },
 
-  /** The report agent — the client's two-page report: a letter in short pieces around the charts. */
-  pdf_report: {
-    id: 'pdf_report',
-    title: 'Write the client\'s two-page report (Portuguese)',
-    language_out: 'pt-BR',
-    system: SYSTEM_GUARDRAIL,
-    template: `# Task: write the client's two-page report
-
-The report goes to the client, by name. It is not a factsheet for the advisor: the client wants to know what is happening in the world in general and which events matter, how their portfolio performed, what could improve the result and what could make it worse. The figures, the charts and the tables are printed by the renderer from FACTS; you write the short texts around them, in plain language for someone who is not a finance professional.
-
-## Output
-
-Return STRICT JSON with this exact shape and nothing else — the reply starts with { and ends with }, with no prose before or after and no markdown fence:
-
-{
-  "greeting": "e.g. 'Prezado Albert,' using FACTS.client.first_name",
-  "opening": "1 to 2 sentences, personal and direct, saying what this report covers for this month",
-  "world": "3 to 4 sentences on what is happening in the world in general, from FACTS.world (the day's headline, summary and briefing). Plain words, no jargon, no list of index levels — the events below carry the specifics.",
-  "events": [ { "title": "3 to 6 words, no final period", "text": "1 to 2 sentences: what happened and why it matters to this client" } ],
-  "performance_comment": "2 to 3 sentences on the month. The loss before the gain: name the largest negative contributor first, then the largest positive. Refer to figures the report prints in words rather than repeating every number.",
-  "assets_comment": "1 to 2 sentences reading the risk-and-return chart of the client's own assets over twelve months, from FACTS.assets_12m: which asset paid best for the risk it took and which paid least, and how the references compare.",
-  "improve": [ { "title": "3 to 5 words, no final period", "text": "1 to 2 sentences on what could improve the result, phrased as something to discuss" } ],
-  "worsen": [ { "title": "3 to 5 words, no final period", "text": "1 to 2 sentences on what could make the result worse and why" } ],
-  "allocation_comment": "1 sentence on how the portfolio stands against the policy, from FACTS.allocation",
-  "closing": "1 to 2 sentences. Reference the next meeting date if FACTS.next_meeting is present. Offer availability.",
-  "sign_off": "e.g. 'Um abraço,'"
-}
-
-"events" has exactly one entry per item of FACTS.world.events, in the same order. "improve" has exactly one entry per item of FACTS.improve_points and "worsen" one per item of FACTS.worsen_points, in the same order, each rewritten for the client from that item's text.
-
-## Language and register
-
-- Brazilian Portuguese. Formal but warm, the register of a private-banking letter. Address the client by first name.
-- Short sentences. No bullet points inside a field; the renderer adds structure.
-- Brazilian number format: 1.234,56. Currency as R$ or US$, never a bare $. The true minus sign − for negatives.
-
-## Hard constraints
-
-- Every figure must come from FACTS. Never compute, round or estimate one.
-- Never present a point as a decision or an order. Use "vale discutirmos", "sugiro avaliarmos".
-- Never mention an asset the client does not hold unless FACTS names it.
-- The report is limited to two pages and the renderer drops text that overflows: keep to the sentence counts.
-
-## FACTS
-
-{{facts}}`,
-  },
-
   /**
    * Daily agent 1 — the news scan. The only prompt allowed to state a market
    * fact that is not in FACTS, and only because every item must carry the URL

@@ -25,7 +25,8 @@ import { useKv } from '../../src/adapters/cache.js';
  * several lines further down, which is a long way from the cause.
  */
 const TABLES = [
-  'sessions', 'audit_log', 'graph_runs', 'data_sources', 'pdf_reports', 'overview_runs', 'reports', 'recommendations',
+  'sessions', 'audit_log', 'letter_runs', 'bulk_reports', 'client_refresh_runs', 'policy_documents',
+  'graph_runs', 'data_sources', 'overview_runs', 'reports', 'recommendations',
   'tradingview_signals', 'world_overviews', 'market_triggers', 'market_events',
   'market_observations', 'monthly_returns', 'cash_flows', 'positions', 'portfolio_snapshots',
   'meetings', 'investment_policies', 'assets', 'clients', 'advisors', 'users',

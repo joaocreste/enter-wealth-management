@@ -328,7 +328,32 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
     range: a.range,
     range_label: a.range ? `${fmtWeight(a.range.min, { locale: L, decimals: 0 })}–${fmtWeight(a.range.max, { locale: L, decimals: 0 })}` : '—',
     inside_band: a.range ? a.weight >= a.range.min && a.weight <= a.range.max : true,
+    opening_weight: a.opening_weight ?? null,
   }));
+
+  /**
+   * Where each class stands against the policy, on the five-step scale a client
+   * sees in every XP positioning chart, and which way its weight moved over the
+   * month the letter covers.
+   *
+   * The step is read from the policy itself, not from an opinion: the permitted
+   * range is the scale, the target is its centre, and a class outside its band
+   * sits at the end of the scale. So the chart cannot disagree with the table in
+   * the annex — the same two numbers decide both.
+   */
+  const stance = allocation.map((a) => {
+    const open = a.opening_weight;
+    const delta = open == null ? null : a.weight - open;
+    return {
+      label: a.asset_class,
+      step: stanceStep(a.weight, a.target, a.range),
+      weight_label: a.weight_label,
+      target_label: a.target_label,
+      // A tenth of a percentage point either way is the portfolio breathing,
+      // not a decision; it reads as unchanged.
+      change: delta == null ? null : delta > 0.001 ? 'up' : delta < -0.001 ? 'down' : 'flat',
+    };
+  });
 
   // ── events the client actually has exposure to ────────────────────────────
   const impact = (report.portfolio_impact || [])
@@ -395,6 +420,7 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
         : `A further ${omitted} positions were reviewed and remain within policy with no change proposed. The full list is in your portal.`)
       : null,
     allocation,
+    stance,
     impact,
     metrics: report.portfolio_metrics,
     policy_version: report.approved_portfolio?.policy_version ?? null,
@@ -413,6 +439,32 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
     provenance: report.provenance || {},
     generated_at: report.generated_at,
   };
+}
+
+/**
+ * Which of the five steps a class sits on: −2 and +2 are outside the permitted
+ * range, −1 and +1 are inside it but away from the target, 0 is at the target.
+ *
+ * The two halves of the band are measured separately because a policy rarely
+ * makes them symmetrical: a class with a target of 10 % and a range of 5–20 %
+ * has twice the room above the target that it has below it, and reading both
+ * sides off the same width would call the same drift neutral going up and
+ * overweight going down.
+ *
+ * Without a target or a range there is nothing to be over or under, and the
+ * class sits at the centre rather than being placed by a number nobody agreed.
+ */
+export function stanceStep(weight, target, range) {
+  if (weight == null || target == null || !range || range.min == null || range.max == null) return 0;
+  const d = weight - target;
+  const room = d >= 0 ? range.max - target : target - range.min;
+  if (!(room > 0)) return d > 0 ? 2 : d < 0 ? -2 : 0;
+  const r = d / room;
+  if (r >= 1) return 2;
+  if (r <= -1) return -2;
+  if (r >= 1 / 3) return 1;
+  if (r <= -1 / 3) return -1;
+  return 0;
 }
 
 function mapContributor(L) {

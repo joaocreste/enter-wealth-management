@@ -13,8 +13,8 @@
  * copper footer bar (§04, §06, §08).
  */
 import { color, semantic, type, inkOn, LOGO_SYMBOL_PATH, LOGO_SYMBOL_VIEWBOX, LOGO_SYMBOL_ASPECT } from '../core/brand.js';
-import { escapeHtml, percent, pp, money, weight as fmtWeight } from '../core/format.js';
-import { svgBars, svgAllocation, svgBands, CHART_CSS } from './charts.js';
+import { escapeHtml, percent, pp, money, weight as fmtWeight, MINUS } from '../core/format.js';
+import { svgBars, svgAllocation, svgBands, svgStance, CHART_CSS } from './charts.js';
 
 const e = escapeHtml;
 const INK = color.ink[950];
@@ -111,6 +111,11 @@ b,strong{font-weight:500}
 .dateline .place-date{font-size:12px;font-weight:300;color:${INK2};white-space:nowrap}
 .letter-title{font-size:${isEmail ? 20 : 23}px;font-weight:700;line-height:1.25;color:${COPPER2};margin:0 0 20px;max-width:26ch}
 .reading.greeting{margin-bottom:1.1em}
+/* The positioning chart sits inside the letter, so it keeps the letter's
+   rhythm rather than the annex's: air above and below, and its title in the
+   copper of an article title rather than the ink of a data label. */
+.stance{margin:26px 0 24px;max-width:72ch}
+.stance .chart-title{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${COPPER2};margin-bottom:12px}
 /* The annex begins below a rule, so a reader can see where the letter ends. */
 .annex{margin-top:40px;border-top:1px solid ${RULE};padding-top:20px}
 .annex-head{display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:16px}
@@ -214,9 +219,27 @@ function dateline(model) {
 
 function letterBody(model) {
   const l = model.letter || {};
+  const paras = (l.paragraphs || []).map((x) => `<p class="reading">${e(x)}</p>`);
+  // The positioning chart goes where it goes in the PDF: before the closing
+  // paragraph, so the client reads what to discuss, sees where each class
+  // actually stands, and only then reads how the letter signs off.
+  const chart = stanceFigure(model);
+  if (chart) paras.splice(Math.max(0, paras.length - 1), 0, chart);
   return `${l.title ? `<h1 class="letter-title">${e(l.title)}</h1>` : ''}
 <p class="reading greeting">${e(l.greeting || '')}</p>
-${(l.paragraphs || []).map((x) => `<p class="reading">${e(x)}</p>`).join('\n')}`;
+${paras.join('\n')}`;
+}
+
+function stanceFigure(model) {
+  const rows = model.stance || [];
+  if (!rows.length) return '';
+  const L = model.locale;
+  return `<div class="stance">${svgStance(rows, {
+    title: L === 'pt-BR' ? 'Sua carteira contra a sua política' : 'Your portfolio against your policy',
+    caption: L === 'pt-BR'
+      ? `Cada classe contra a faixa combinada na sua política: ${MINUS}${MINUS} e ++ estão fora dela, ${MINUS} e + estão dentro dela mas longe do alvo, = está no alvo. Mud. é a direção que o peso da classe tomou ao longo do mês.`
+      : `Each class against the range agreed in your policy: ${MINUS}${MINUS} and ++ are outside it, ${MINUS} and + are inside it but away from target, = is at target. Chg. is the direction the class weight took over the month.`,
+  })}</div>`;
 }
 
 function signature(model) {

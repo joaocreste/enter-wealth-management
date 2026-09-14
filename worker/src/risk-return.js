@@ -1,8 +1,7 @@
 /**
  * Trailing-twelve-month return and volatility of every mapped asset, with the
- * market references, for the risk/return chart of the signals page and the
- * scatter of the client report. Shared here so the report agent does not
- * import the router.
+ * market references, for the risk/return chart of the signals page. Kept out of
+ * the route file so a caller does not have to import the router.
  */
 import { all, json, nowIso } from './db.js';
 import * as P from './pipeline.js';

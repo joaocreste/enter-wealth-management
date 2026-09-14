@@ -19,6 +19,8 @@ import { svgPathToPdf } from './svgpath.js';
 import { color, semantic, inkOn, LOGO_SYMBOL_PATH, LOGO_SYMBOL_ASPECT } from '../../core/brand.js';
 import { money, percent, pp, weight as fmtWeight, dateLong, MINUS } from '../../core/format.js';
 
+const POSITION = color.position;
+
 const INK = color.ink[950];
 const INK2 = color.ink[600];
 const INK3 = color.ink[400];
@@ -46,7 +48,14 @@ const RAIL = 54;
 const X = M.left + RAIL;
 const W = A4.width - X - M.right;
 const FULL = A4.width - M.left - M.right;
-/** Page one is set in a reading measure, not the full width of the annex. */
+/**
+ * Page one is set in a reading measure, not the full width of the annex. A
+ * letter is read straight through, and 421 pt of Roboto Light at 10.2 is about
+ * as wide as a line can be before the eye starts losing its place on the way
+ * back. The annex is scanned, not read, so it takes the full width — the two
+ * pages are different measures because they are different kinds of document,
+ * and that is the point of the break between them.
+ */
 const LX = 62;
 const LW = 421;
 
@@ -115,11 +124,20 @@ function tracked(doc, str, x, y, { font = 'light', size = 8, color: c = INK, tra
  * The letter's only concession to space is its type, and it has four settings.
  * A paragraph the advisor wrote is what the client opened the envelope for.
  */
-const LETTER_LADDER = 4;
+const LETTER_LADDER = 6;
 function letterBudget(t) {
   return {
-    bodySize: [SZ.body, 9.9, 9.5, 9.1][t] ?? 9.1,
-    bodyLead: [SZ.bodyLead, 15.6, 14.8, 14.0][t] ?? 14.0,
+    bodySize: [SZ.body, 9.9, 9.5, 9.1, 9.1, 9.1][t] ?? 9.1,
+    bodyLead: [SZ.bodyLead, 15.6, 14.8, 14.0, 14.0, 14.0][t] ?? 14.0,
+    // The positioning chart tightens with the type, and gives up its caption
+    // before it gives up a row: a row is a class the client owns, the caption
+    // only says how to read the scale.
+    stanceRow: [15.5, 14.5, 13.5, 12.5, 11.5, 11.5][t] ?? 11.5,
+    stanceCaption: t < 4,
+    // The last rung, and only the last: the chart says something no paragraph
+    // says, so it goes after the type has run out of room and before anything
+    // the advisor wrote is at risk.
+    showStance: t < 5,
     type: t,
   };
 }
@@ -299,6 +317,23 @@ function buildLetterBlocks(doc, model, b) {
     });
   }
 
+  // ── where the carteira stands against the policy ────────────────────────
+  // Between the last thing the letter argues and the way it closes: the client
+  // has just read what moved and what to discuss, and this is the one picture
+  // that says where each class actually sits. It is spliced into the flow
+  // rather than appended, so the text continues underneath it.
+  if (b.showStance && (model.stance || []).length) {
+    const rows = model.stance;
+    const stance = {
+      key: 'stance', height: stanceHeight(doc, model, rows, b), gap: 16,
+      draw: (y) => drawStance(doc, model, rows, LX, y, LW, b),
+    };
+    // Before the closing paragraph; at the end when the letter is too short to
+    // have one to spare.
+    const last = blocks.map((x) => x.key).lastIndexOf(`p${(letter.paragraphs || []).length - 1}`);
+    if (last > 0) blocks.splice(last, 0, stance); else blocks.push(stance);
+  }
+
   // ── the signature ───────────────────────────────────────────────────────
   blocks.push({
     height: 58, gap: 0,
@@ -452,6 +487,134 @@ function buildAnnexBlocks(doc, model, b) {
   }
 
   return blocks;
+}
+
+// ── the positioning chart ──────────────────────────────────────────────────
+/**
+ * Where each class of the carteira sits against the policy, on the five-step
+ * scale the house uses everywhere: two steps under, neutral, two steps over,
+ * with the direction it moved since the last approved portrait beside it.
+ *
+ * The step is not an opinion — it is read off the client's own permitted range
+ * (src/render/letter-model.js), so this chart and the allocation table in the
+ * annex can never disagree. The colours are the brand's position palette (§07),
+ * which exists for precisely this picture.
+ */
+const STANCE_MARKS = [`${MINUS}${MINUS}`, MINUS, '=', '+', '++'];
+
+/** The geometry, computed once so the measurer and the drawing cannot drift apart. */
+function stanceGrid(x, w) {
+  const ruleX = x + w * 0.505;
+  const scaleX0 = ruleX + 12;
+  const scaleX1 = x + w;
+  const gap = (scaleX1 - scaleX0) / STANCE_MARKS.length;
+  return {
+    labelX: x,
+    mudCx: x + w * 0.465,
+    ruleX,
+    scaleX0,
+    scaleX1,
+    at: (i) => scaleX0 + gap * (i + 0.5),
+  };
+}
+
+const STANCE_HEAD = 30;   // two header rows, from the top of the block to the first row
+const STANCE_TAIL = 13;   // air under the last row, before the caption or the next block
+
+function stanceCaptionText(L) {
+  return L === 'pt-BR'
+    ? `Cada classe contra a faixa combinada na sua política: ${MINUS}${MINUS} e ++ estão fora dela, ${MINUS} e + estão dentro dela mas longe do alvo, = está no alvo. Mud. é a direção que o peso da classe tomou ao longo do mês.`
+    : `Each class against the range agreed in your policy: ${MINUS}${MINUS} and ++ are outside it, ${MINUS} and + are inside it but away from target, = is at target. Chg. is the direction the class weight took over the month.`;
+}
+
+function stanceHeight(doc, model, rows, b) {
+  const cap = b.stanceCaption
+    ? doc.paragraphHeight(stanceCaptionText(model.locale), CAPTION) + 6
+    : 0;
+  return 14 + STANCE_HEAD + rows.length * b.stanceRow + STANCE_TAIL + cap;
+}
+
+const CAPTION = { font: 'light', size: 6.8, leading: 10, maxWidth: LW };
+
+function drawStance(doc, model, rows, x, y, w, b) {
+  const L = model.locale;
+  const g = stanceGrid(x, w);
+  const rowH = b.stanceRow;
+
+  doc.text(
+    (L === 'pt-BR' ? 'Sua carteira contra a sua política' : 'Your portfolio against your policy').toUpperCase(),
+    x, y, { font: 'sans7', size: SZ.h2, color: COPPER2, charSpacing: 0.25 },
+  );
+  let cy = y - 14;
+
+  // ── the two header rows: the three regions, then the five marks ─────────
+  const mid = (a, c) => (a + c) / 2;
+  // tracked() draws from a left edge, so a centred tracked cap has to account
+  // for the letter spacing itself: measure() does not know about Tc.
+  const headCap = (label, cx) => {
+    const caps = String(label).toUpperCase();
+    const size = 6.4;
+    const wide = doc.measure('sans5', caps, size) + size * TRACK * (caps.length - 1);
+    tracked(doc, caps, cx - wide / 2, cy, { font: 'sans5', size, color: INK2 });
+  };
+  headCap('Underweight', mid(g.at(0), g.at(1)));
+  headCap(L === 'pt-BR' ? 'Neutro' : 'Neutral', g.at(2));
+  headCap('Overweight', mid(g.at(3), g.at(4)));
+  doc.textCenter(L === 'pt-BR' ? 'Mud.' : 'Chg.', g.mudCx, cy, { font: 'light', size: 7, color: INK2 });
+  cy -= 13;
+
+  for (const [i, mark] of STANCE_MARKS.entries()) {
+    doc.textCenter(mark, g.at(i), cy, { font: 'sans5', size: 8.4, color: INK2 });
+  }
+  cy -= 7;
+
+  // ── the rows ────────────────────────────────────────────────────────────
+  const top = cy;
+  for (const r of rows) {
+    cy -= rowH;
+    const mid_ = cy + rowH * 0.34;
+    // The cap is 6.6 pt tall, so a baseline 2.3 below the rule puts the name
+    // optically on it rather than floating above it.
+    doc.text(String(r.label).toUpperCase(), g.labelX, mid_ - 2.3, { font: 'sans7', size: 6.6, color: INK, charSpacing: 6.6 * 0.06 });
+    drawChange(doc, r.change, g.mudCx, mid_);
+    doc.line(g.scaleX0, mid_, g.scaleX1, mid_, { color: RULE, width: 2 });
+    const step = Math.max(-2, Math.min(2, r.step ?? 0));
+    dot(doc, g.at(step + 2), mid_, 4.1, step < 0 ? POSITION.underweight : step > 0 ? POSITION.overweight : POSITION.neutral);
+  }
+  // The rule that separates the names from the scale, the length of the rows.
+  doc.line(g.ruleX, top, g.ruleX, cy - 1, { color: INK, width: 1 });
+  cy -= STANCE_TAIL;
+
+  if (b.stanceCaption) {
+    cy = doc.paragraph(stanceCaptionText(L), x, cy, { ...CAPTION, maxWidth: w, color: INK3 });
+    cy -= 6;
+  }
+  return cy;
+}
+
+/** ▲ up, ▼ down, — unchanged; nothing at all when there is no earlier portrait to compare with. */
+function drawChange(doc, change, cx, cy) {
+  if (!change) return;
+  if (change === 'flat') { doc.line(cx - 4.4, cy, cx + 4.4, cy, { color: POSITION.unchanged, width: 2.2 }); return; }
+  const up = change === 'up';
+  const s = 4.2;
+  const h = 6.6;
+  const d = up
+    ? `${(cx - s).toFixed(2)} ${(cy - h / 2).toFixed(2)} m ${(cx + s).toFixed(2)} ${(cy - h / 2).toFixed(2)} l ${cx.toFixed(2)} ${(cy + h / 2).toFixed(2)} l h`
+    : `${(cx - s).toFixed(2)} ${(cy + h / 2).toFixed(2)} m ${(cx + s).toFixed(2)} ${(cy + h / 2).toFixed(2)} l ${cx.toFixed(2)} ${(cy - h / 2).toFixed(2)} l h`;
+  doc.path(d, { fill: up ? POSITION.up : POSITION.down, stroke: null });
+}
+
+/** A filled circle, in four Béziers. */
+function dot(doc, cx, cy, r, fill) {
+  const k = r * 0.5523;
+  const n = (v) => v.toFixed(2);
+  const d = `${n(cx - r)} ${n(cy)} m `
+    + `${n(cx - r)} ${n(cy + k)} ${n(cx - k)} ${n(cy + r)} ${n(cx)} ${n(cy + r)} c `
+    + `${n(cx + k)} ${n(cy + r)} ${n(cx + r)} ${n(cy + k)} ${n(cx + r)} ${n(cy)} c `
+    + `${n(cx + r)} ${n(cy - k)} ${n(cx + k)} ${n(cy - r)} ${n(cx)} ${n(cy - r)} c `
+    + `${n(cx - k)} ${n(cy - r)} ${n(cx - r)} ${n(cy - k)} ${n(cx - r)} ${n(cy)} c h`;
+  doc.path(d, { fill, stroke: null });
 }
 
 /** §06 the article title: Roboto Bold, capitals, copper, with an optional note at the right. */

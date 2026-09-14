@@ -1,12 +1,13 @@
 /**
  * Bulk letters: the whole book, in one go.
  *
- * "Criar Cartas" on the day's panorama runs the report agent once per client
- * under the advisor, then puts the finished letters into one zip. Nothing new
- * is written here about a portfolio: each client still gets an ordinary
- * pdf_reports run, with its own four steps, its own log and its own audit line,
- * so a letter produced in bulk is indistinguishable from one the advisor asked
- * for from the client page — and can be reopened there afterwards.
+ * "Criar Cartas" on the day's panorama runs the monthly letter agent once per
+ * client under the advisor, then puts the finished letters into one zip.
+ * Nothing new is written here about a portfolio: each client still gets an
+ * ordinary letter_runs run, with its own four steps, its own log, its own audit
+ * line and its own row in `reports`, so a letter produced in bulk is
+ * indistinguishable from one the advisor asked for from the client page — and
+ * is reopened, approved and published there afterwards.
  *
  * The clients are written one at a time rather than in parallel. Each letter
  * calls the model and reads market data, and a Worker has a budget for both; a
@@ -24,7 +25,7 @@
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import { NonRetryableError } from 'cloudflare:workflows';
 import { all, first, run, id, json, nowIso, audit } from './db.js';
-import * as R from './report-agent.js';
+import * as L from './letter-agent.js';
 import { signArtefact } from './links.js';
 import { buildZip, zipSafeName } from '../../src/render/zip.js';
 import { previousMonth } from '../../src/core/format.js';
@@ -42,7 +43,7 @@ const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 export function bulkAgents(clients) {
   const steps = clients.map((c, i) => ({
     step: i + 1, key: c.client_id, title: c.name,
-    what: 'carteira e política, performance do mês, a carta e a diagramação em duas páginas',
+    what: 'carteira e política, a rentabilidade do mês, a carta e a diagramação em duas páginas',
   }));
   steps.push({
     step: clients.length + 1, key: 'zip', title: 'Arquivo zip',
@@ -198,24 +199,24 @@ async function writeOneLetter(env, runId, index) {
   try {
     await report(index + 1, `Carta ${position} — ${entry.name}: na fila`);
     const row = await first(db, 'SELECT * FROM bulk_reports WHERE id = ?', runId);
-    const subId = await R.createReportRun(env, { clientId: entry.client_id, advisorId: row.advisor_id, actorId: row.actor_id });
+    const subId = await L.createLetterRun(env, { clientId: entry.client_id, advisorId: row.advisor_id, actorId: row.actor_id, month: row.reporting_month });
     entry.run_id = subId;
     entry.status = 'running';
     await saveRoster();
 
     let done = false;
-    const job = R.runReportPipeline(env, subId).finally(() => { done = true; });
+    const job = L.runLetterPipeline(env, subId).finally(() => { done = true; });
     const mirror = (async () => {
       while (!done) {
         await sleep(2500);
         if (done) break;
-        const sub = await first(db, 'SELECT message FROM pdf_reports WHERE id = ?', subId);
-        if (sub?.message) await report(index + 1, `Carta ${position} — ${entry.name}: ${String(sub.message).replace(/^Relatório · /, '').toLowerCase()}`, { quiet: true });
+        const sub = await first(db, 'SELECT message FROM letter_runs WHERE id = ?', subId);
+        if (sub?.message) await report(index + 1, `Carta ${position} — ${entry.name}: ${String(sub.message).replace(/^Carta · /, '').toLowerCase()}`, { quiet: true });
       }
     })();
     try { await job; } finally { done = true; await mirror.catch(() => {}); }
 
-    const sub = await first(db, 'SELECT * FROM pdf_reports WHERE id = ?', subId);
+    const sub = await first(db, 'SELECT * FROM letter_runs WHERE id = ?', subId);
     entry.status = sub?.status === 'completed' ? 'completed' : 'failed';
     entry.error = sub?.status === 'completed' ? null : (sub?.error || 'a carta não foi produzida');
     entry.page_count = sub?.page_count ?? null;
@@ -268,19 +269,20 @@ async function archive(env, runId) {
 
 /**
  * The letters as zip entries, in the order the roster names them. A run whose
- * R2 object is gone re-renders from the model each report stored, so an old zip
- * can still be rebuilt from the record.
+ * R2 object is gone re-renders from the canonical report each letter stored, so
+ * an old zip can still be rebuilt from the record.
  */
 async function collectLetters(env, clients, month) {
   const files = [];
   const used = new Set();
   for (const entry of clients) {
     if (entry.status !== 'completed' || !entry.run_id) continue;
-    const row = await first(env.DB, 'SELECT * FROM pdf_reports WHERE id = ?', entry.run_id);
-    if (!row) continue;
-    const bytes = await R.pdfBytes(env, row);
+    const sub = await first(env.DB, 'SELECT report_id, reporting_month FROM letter_runs WHERE id = ?', entry.run_id);
+    if (!sub?.report_id) continue;
+    const row = await first(env.DB, 'SELECT * FROM reports WHERE id = ?', sub.report_id);
+    const bytes = await L.letterBytes(env, row);
     if (!bytes) continue;
-    let name = `carta-${zipSafeName(entry.name, entry.client_id)}-${row.reporting_month || month || 'carteira'}.pdf`;
+    let name = `carta-${zipSafeName(entry.name, entry.client_id)}-${sub.reporting_month || month || 'carteira'}.pdf`;
     // Two clients who share a name would otherwise overwrite each other in the archive.
     if (used.has(name)) name = name.replace(/\.pdf$/, `-${zipSafeName(entry.client_id)}.pdf`);
     used.add(name);

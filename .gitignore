@@ -5,6 +5,11 @@ node_modules/
 *.log
 .DS_Store
 
+# Word and PowerPoint write a lock file beside every open document. They are
+# empty owner stubs that vanish when the document closes; committing one just
+# records who had the file open on some afternoon.
+~$*
+
 # Third-party material from the working session. Kept locally, deliberately not
 # published: brand-guidelines.html is XP's brand system, extracted from XP
 # Advisory's own reports, and Input/ holds XP's case files including XP

@@ -368,6 +368,14 @@ disagree: the same two numbers decide both. It is drawn twice from one geometry
 the portal — and it is the last thing the two-page ladder gives up, after the
 type has run out of room and before anything the advisor wrote is at risk.
 
+In the annex, the allocation table draws its permitted range instead of writing
+it: the band between the two extremes, the extremes named quietly at its ends,
+and a line where the class stands today. Every band lands on the same two points
+so the column reads as one scale, and a class that has drifted outside its range
+is drawn outside the band rather than clamped onto its edge — `rangeBarGeometry`
+in `src/render/charts.js`, used by the SVG and by the PDF so the two cannot
+drift apart.
+
 The stages themselves live in `worker/src/letter-pipeline.js`, not in the agent:
 the Rivet graph calls the same functions through `/api/pipeline/*`, one step at
 a time, so the prompts stay visible and editable inside the graph. Two drivers,

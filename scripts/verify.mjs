@@ -19,6 +19,7 @@ import { deterministicLetter } from '../worker/src/llm.js';
 import { buildLetterModel, sanitiseLetter, strayNumbers, houseView, stanceStep, ACTION_PT } from '../src/render/letter-model.js';
 import { renderLetterPdf, contributorBars } from '../src/render/pdf/letter.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
+import { rangeBarGeometry } from '../src/render/charts.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
 import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, efficientFrontier } from '../src/core/risk.js';
 import { parseRss, clusterHeadlines, sourceFor, distinctStories, isServicePiece, PROVIDER as VALOR } from '../src/adapters/valor.js';
@@ -759,6 +760,40 @@ await ta('the pdf is a letter on page one and the annex on page two', async () =
   ok(model.letter.paragraphs.length >= 4, 'the model lost the paragraphs');
   eq(model.recommendations[0].suitability_label, 'Fora da política');
   ok(model.dateline.place_date.startsWith('São Paulo,'), model.dateline.place_date);
+});
+
+console.log('\n  The permitted range, as a bar');
+t('every band lands on the same two points, so the column reads as one scale', () => {
+  const g = (min, max, weight) => rangeBarGeometry({ min, max, weight }, { width: 200, padLabel: 26 });
+  const a = g(0.30, 0.55, 0.326);
+  const b = g(0.02, 0.12, 0.075);
+  close(a.bandX0, b.bandX0, 0.01);
+  close(a.bandX1, b.bandX1, 0.01);
+  // and the mark sits where the weight sits inside it
+  const midBand = g(0.30, 0.55, 0.425);
+  close(midBand.markX, (midBand.bandX0 + midBand.bandX1) / 2, 0.01);
+  ok(g(0.30, 0.55, 0.30).markX <= g(0.30, 0.55, 0.31).markX, 'the mark runs backwards');
+});
+
+t('a class that has drifted out of its band is drawn outside it, not clamped onto the edge', () => {
+  const over = rangeBarGeometry({ min: 0.30, max: 0.55, weight: 0.70 }, { width: 200, padLabel: 26 });
+  eq(over.inside, false);
+  ok(over.markX > over.bandX1, 'a weight above the ceiling was drawn inside the band');
+  const under = rangeBarGeometry({ min: 0.30, max: 0.55, weight: 0.10 }, { width: 200, padLabel: 26 });
+  eq(under.inside, false);
+  ok(under.markX < under.bandX0, 'a weight below the floor was drawn inside the band');
+  // The mark never leaves the bar: a class at four times its ceiling still has to
+  // be somewhere a reader can see.
+  for (const w of [0, 0.4, 1]) {
+    const g = rangeBarGeometry({ min: 0.02, max: 0.12, weight: w }, { width: 200, padLabel: 26 });
+    ok(g.markX >= 0 && g.markX <= 200, `a weight of ${w} fell off the bar at ${g.markX}`);
+  }
+});
+
+t('a band with no width is a point, not a division by zero', () => {
+  const g = rangeBarGeometry({ min: 0.10, max: 0.10, weight: 0.10 }, { width: 200, padLabel: 26 });
+  ok(Number.isFinite(g.bandX0) && Number.isFinite(g.markX), 'the geometry went to NaN');
+  eq(g.inside, true);
 });
 
 console.log('\n  The positioning chart — the policy decides the step, not an opinion');

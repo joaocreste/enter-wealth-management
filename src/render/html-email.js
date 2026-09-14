@@ -14,7 +14,7 @@
  */
 import { color, semantic, type, inkOn, LOGO_SYMBOL_PATH, LOGO_SYMBOL_VIEWBOX, LOGO_SYMBOL_ASPECT } from '../core/brand.js';
 import { escapeHtml, percent, pp, money, weight as fmtWeight, MINUS } from '../core/format.js';
-import { svgBars, svgAllocation, svgBands, svgStance, CHART_CSS } from './charts.js';
+import { svgBars, svgAllocation, svgBands, svgStance, svgRangeBar, CHART_CSS } from './charts.js';
 
 const e = escapeHtml;
 const INK = color.ink[950];
@@ -141,6 +141,10 @@ table.data tr:last-child td{border-bottom:1px solid ${RULE}}
 table.data .num{text-align:right;font-weight:400;color:${INK};white-space:nowrap}
 table.data .name{font-weight:500;color:${INK}}
 table.data .sub{display:block;font-size:10.5px;color:${INK3};font-weight:300;margin-top:2px}
+table.data.alloc td{padding-top:11px;padding-bottom:11px}
+/* The bar's own "30%" must not sit next to the target's "40%" as if the two
+   were one figure: the gap is what tells them apart. */
+table.data.alloc td.band{padding-left:34px;padding-right:0;vertical-align:middle}
 
 .chip{display:inline-block;padding:2px 9px;font-size:10.5px;font-weight:400;line-height:1.5;border-radius:999px;background:${color.ink[50]};color:${color.ink[900]}}
 .chip.add{color:${semantic.light.gainText};background:${semantic.light.gainFill}}
@@ -339,15 +343,22 @@ function portfolioBody(model, isEmail) {
   const heads = L === 'pt-BR'
     ? ['Classe de ativo', 'Valor', 'Peso', 'Alvo', 'Faixa permitida']
     : ['Asset class', 'Value', 'Weight', 'Target', 'Permitted range'];
+  // The range is a bar rather than "30%–55%": the two numbers say what is
+  // allowed, the bar says where inside it the class actually is, which is the
+  // question the column exists to answer.
   const rows = (model.allocation || []).map((a) => `<tr>
 <td class="name">${e(a.asset_class)}</td>
 <td class="num">${e(a.value_label)}</td>
 <td class="num" style="color:${a.inside_band ? INK : semantic.light.caution}">${e(a.weight_label)}</td>
 <td class="num" style="font-weight:300;color:${INK3}">${e(a.target_label)}</td>
-<td class="num" style="font-weight:300;color:${a.inside_band ? INK3 : semantic.light.caution}">${e(a.range_label)}${a.inside_band ? '' : ' !'}</td>
+<td class="band">${svgRangeBar(a, { locale: L }) || `<span class="num" style="font-weight:300;color:${INK3}">${e(a.range_label)}</span>`}</td>
 </tr>`).join('');
+  // Explicit widths: without them the browser gives the class names half the
+  // table and pushes every figure to the right edge, away from the name it
+  // belongs to.
+  const cols = ['32%', '16%', '10%', '7%', '35%'].map((c) => `<col style="width:${c}">`).join('');
   return `${bar}
-<table class="data"><thead><tr>${heads.map((h) => `<th${h === heads[0] ? '' : ' style="text-align:right"'}>${e(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+<table class="data alloc"><colgroup>${cols}</colgroup><thead><tr>${heads.map((h, i) => `<th${i === 0 ? '' : i === heads.length - 1 ? ' style="text-align:center"' : ' style="text-align:right"'}>${e(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function sources(model) {

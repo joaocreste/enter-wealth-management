@@ -263,6 +263,46 @@ ${caption ? `<figcaption class="chart-caption">${esc(caption)}</figcaption>` : '
 </figure>`;
 }
 
+/**
+ * One row's permitted range, as a bar: the band between its two extremes, the
+ * extremes labelled quietly at its ends, and a line where the class actually
+ * sits today.
+ *
+ * The track is wider than the band by design. A class that has drifted outside
+ * its range has to land somewhere a reader can see, and the honest place is
+ * past the end of the band rather than clamped onto it — so the track spans
+ * whichever is wider, the band or the band plus where the weight went, and the
+ * marker turns to the caution colour when it lands outside.
+ */
+export function rangeBarGeometry({ min, max, weight }, { width, padLabel }) {
+  const lo = Math.min(min, weight);
+  const hi = Math.max(max, weight);
+  const pad = Math.max((hi - lo) * 0.12, (max - min) * 0.12) || 0.01;
+  const from = lo - pad;
+  const span = (hi + pad) - from || 1;
+  const x0 = padLabel;
+  const plot = Math.max(1, width - padLabel * 2);
+  const at = (v) => x0 + ((v - from) / span) * plot;
+  return { at, bandX0: at(min), bandX1: at(max), markX: at(weight), inside: weight >= min && weight <= max };
+}
+
+export function svgRangeBar(row, { width = 200, height = 20, locale = 'pt-BR' } = {}) {
+  if (!row || !row.range || row.range.min == null || row.range.max == null) return '';
+  const { min, max } = row.range;
+  const weight = row.weight ?? min;
+  const padLabel = 26;
+  const g = rangeBarGeometry({ min, max, weight }, { width, padLabel });
+  const mid = height / 2;
+  const lab = (v) => esc(fmtWeight(v, { locale, decimals: 0 }));
+  const markColor = g.inside ? color.ink[900] : semantic.light.caution;
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" aria-label="${esc(`${lab(min)} a ${lab(max)}, hoje em ${fmtWeight(weight, { locale, decimals: 1 })}`)}" style="display:block;overflow:visible" preserveAspectRatio="none">
+<text x="${padLabel - 5}" y="${(mid + 3).toFixed(1)}" text-anchor="end" font-size="8.5" font-weight="300" fill="${color.ink[300]}" font-family="${type.sans}">${lab(min)}</text>
+<text x="${width - padLabel + 5}" y="${(mid + 3).toFixed(1)}" text-anchor="start" font-size="8.5" font-weight="300" fill="${color.ink[300]}" font-family="${type.sans}">${lab(max)}</text>
+<rect x="${g.bandX0.toFixed(1)}" y="${(mid - 3).toFixed(1)}" width="${Math.max(1, g.bandX1 - g.bandX0).toFixed(1)}" height="6" fill="${color.ink[50]}"/>
+<rect x="${(g.markX - 1).toFixed(1)}" y="${(mid - 7).toFixed(1)}" width="2" height="14" fill="${markColor}"/>
+</svg>`;
+}
+
 /** Cumulative line: portfolio in slate, benchmark in copper, dotted (§09). */
 export function svgCumulative(series, { width = 520, height = 150, title = null, caption = null, locale = 'pt-BR' } = {}) {
   const port = series.portfolio || [];

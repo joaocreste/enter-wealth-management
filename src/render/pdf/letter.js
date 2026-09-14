@@ -18,6 +18,7 @@ import { PdfDocument, A4 } from './writer.js';
 import { svgPathToPdf } from './svgpath.js';
 import { color, semantic, inkOn, LOGO_SYMBOL_PATH, LOGO_SYMBOL_ASPECT } from '../../core/brand.js';
 import { money, percent, pp, weight as fmtWeight, dateLong, MINUS } from '../../core/format.js';
+import { rangeBarGeometry } from '../charts.js';
 
 const POSITION = color.position;
 
@@ -840,31 +841,53 @@ function drawAllocationBar(doc, model, x, y, w) {
   return y - h - 4;
 }
 
+/**
+ * The allocation table. The figures sit close to the name they belong to rather
+ * than spread to the right edge, and the permitted range is drawn instead of
+ * written: the band between its two extremes, the extremes named quietly at its
+ * ends, and a line where the class actually stands today.
+ */
 function drawAllocationTable(doc, model, rows, x, y, w) {
   const L = model.locale;
   const heads = L === 'pt-BR'
     ? ['Classe de ativo', 'Valor', 'Peso', 'Alvo', 'Faixa permitida']
     : ['Asset class', 'Value', 'Weight', 'Target', 'Permitted range'];
-  const xs = [x, x + w * 0.42, x + w * 0.62, x + w * 0.75, x + w * 0.86];
-  const rights = [null, xs[1] + w * 0.16, xs[2] + w * 0.11, xs[3] + w * 0.09, x + w - 4];
+  const rights = [null, x + w * 0.37, x + w * 0.485, x + w * 0.565];
+  const bandX = x + w * 0.655;
+  const bandW = x + w - bandX - 4;
 
   let cy = drawHeaderBand(doc, x, y, w, [
-    { label: heads[0], x: xs[0] + 4 },
+    { label: heads[0], x: x + 4 },
     { label: heads[1], x: rights[1], align: 'right' },
     { label: heads[2], x: rights[2], align: 'right' },
     { label: heads[3], x: rights[3], align: 'right' },
-    { label: heads[4], x: rights[4], align: 'right' },
+    { label: heads[4], x: bandX + 4 },
   ]);
   cy -= 4;
   for (const r of rows) {
-    doc.text(r.asset_class, xs[0] + 4, cy, { font: 'sans', size: SZ.data, color: INK });
+    doc.text(r.asset_class, x + 4, cy, { font: 'sans', size: SZ.data, color: INK });
     doc.textRight(r.value_label, rights[1], cy, { font: 'light', size: SZ.data, color: INK });
     doc.textRight(r.weight_label, rights[2], cy, { font: 'sans5', size: SZ.data, color: r.inside_band ? INK : CAUTION });
     doc.textRight(r.target_label, rights[3], cy, { font: 'light', size: SZ.data, color: INK3 });
-    doc.textRight(r.inside_band ? r.range_label : `${r.range_label} !`, rights[4], cy, { font: 'light', size: SZ.data, color: r.inside_band ? INK3 : CAUTION });
+    drawRangeBar(doc, r, bandX, cy + 3, bandW, L);
     cy -= 4;
     doc.line(x, cy, x + w, cy, { color: RULE2, width: 0.5 });
     cy -= 11;
   }
   return cy + 5;
+}
+
+/** One row's range: the two extremes, quietly labelled, and where the class is between them. */
+function drawRangeBar(doc, r, x, mid, w, L) {
+  if (!r.range || r.range.min == null || r.range.max == null) {
+    doc.text(r.range_label || '—', x, mid - 3, { font: 'light', size: SZ.data, color: INK3 });
+    return;
+  }
+  const padLabel = 22;
+  const g = rangeBarGeometry({ min: r.range.min, max: r.range.max, weight: r.weight ?? r.range.min }, { width: w, padLabel });
+  const lab = (v) => fmtWeight(v, { locale: L, decimals: 0 });
+  doc.textRight(lab(r.range.min), x + padLabel - 5, mid - 2.4, { font: 'light', size: 6.8, color: INK3 });
+  doc.text(lab(r.range.max), x + w - padLabel + 5, mid - 2.4, { font: 'light', size: 6.8, color: INK3 });
+  doc.rect(x + g.bandX0, mid - 2.2, Math.max(1, g.bandX1 - g.bandX0), 4.4, { fill: color.ink[50] });
+  doc.rect(x + g.markX - 0.8, mid - 5.2, 1.6, 10.4, { fill: g.inside ? color.ink[900] : CAUTION });
 }

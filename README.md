@@ -142,6 +142,24 @@ owns and each carrying a comment node explaining what it guarantees:
 Stages are chained through an explicit `gate` input. Without it Rivet would run all
 nine at once, because they share only the connection settings.
 
+**The canvas is computed, not typed.** Every node used to carry an x and a y chosen by
+hand, one stage at a time, and they drifted: the three nodes that build one HTTP request
+sat 110 pt apart while Rivet drew them 150 pt tall, so in all ten stages the headers node
+was buried under the endpoint node. `layoutGraph` in `rivet/build-graph.mjs` now derives
+the placement from the connections — a node sits one column right of everything that
+feeds it, and as late as its consumers allow, so a request group lands beside its own
+call. Order within a column is swept towards the middle of each node's neighbours, both
+directions, and the arrangement with the fewest crossings is the one drawn. Comments move
+to a rail down the left, out of the flow. A stage that grows a node lays itself out
+instead of needing its neighbours nudged by hand.
+
+`npm run verify` checks the built project for nodes nothing wires and for nodes drawn on
+top of each other. Both stage 02's and stage 08's validation gates were once created,
+connected and then never added to their graph — Rivet silently drops the connections of a
+node it does not have, so the gate that stops a bad figure reaching a client was absent
+from the canvas and both stages' outputs hung from nothing. It read as a layout problem,
+which is why it survived. The check is there so it cannot.
+
 ---
 
 ## The parts that matter

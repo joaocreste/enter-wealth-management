@@ -197,7 +197,7 @@ return {
     },
   });
   connect(step.result, step.resultPort, gate, 'result');
-  n.push(seqGate);
+  n.push(gate);
 
   const out = make(graphOutputNode, { title: 'market_data', x: 1600, y: 300, data: { id: 'market_data', dataType: 'object' } });
   connect(gate, 'market', out, 'value');
@@ -693,7 +693,7 @@ return {
     },
   });
   connect(step.result, step.resultPort, gate, 'result');
-  n.push(seqGate);
+  n.push(gate);
 
   const out = make(graphOutputNode, { title: 'canonical_report', x: 1620, y: 310, data: { id: 'canonical_report', dataType: 'object' } });
   connect(gate, 'report', out, 'value');
@@ -849,6 +849,15 @@ function graphMain(subgraphIds) {
     + 'Run it with:  npm run run:report -- --client cli_albert\n'
     + 'or open this project in Rivet Desktop and press Run with the inputs below.', 20, 20, 820, 160));
 
+  n.push(note(
+    'THIS GRAPH IS ONE OF TWO DRIVERS\n\n'
+    + 'The stages below call /api/pipeline/*, and those endpoints are thin wrappers over\n'
+    + 'worker/src/letter-pipeline.js. The portal drives the same functions itself, from the\n'
+    + '\u201Ccriar carta mensal\u201D button on the client page (worker/src/letter-agent.js), so an advisor\n'
+    + 'can write a letter without Rivet and without a terminal.\n\n'
+    + 'Both end in one row of `reports` for that client and that month. Rivet is the surface where\n'
+    + 'the prompts stay visible and editable; the agent is the surface an advisor actually uses.', 20, 200, 820, 150));
+
   const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 230, width: 320, data: { id: 'api_base', dataType: 'string', defaultValue: 'http://127.0.0.1:8788' } });
   const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 310, width: 320, data: { id: 'api_token', dataType: 'string' } });
   const clientId = make(graphInputNode, { title: 'client_id', x: 20, y: 390, width: 320, data: { id: 'client_id', dataType: 'string', defaultValue: 'cli_albert' } });
@@ -906,6 +915,191 @@ function graphMain(subgraphIds) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Layout
+// ═══════════════════════════════════════════════════════════════════════════
+/**
+ * The canvas is computed, not typed.
+ *
+ * Every node above is created with an x and a y, and those numbers were chosen
+ * by hand one stage at a time. They drifted: three nodes of a pipeline step sat
+ * 110 pt apart while Rivet drew them 150 pt tall, so the headers node was buried
+ * under the endpoint node in all ten stages, and the stages that grew a branch
+ * ended up with wires crossing the whole canvas.
+ *
+ * So the hand-written coordinates are kept only as a hint for vertical order,
+ * and the actual placement is derived from the connections: a node sits one
+ * column to the right of everything that feeds it, and the order within a
+ * column is pulled towards the middle of its own inputs. That is the standard
+ * layered-graph layout, and it means a stage that grows a node lays itself out
+ * instead of needing its neighbours nudged by hand.
+ */
+const LANE = {
+  x0: 40,          // the flow starts right of the note rail
+  y0: 40,
+  hGap: 110,       // between columns
+  vGap: 56,        // between nodes in a column
+  railW: 520,      // the note rail down the left
+  railGap: 70,
+};
+
+/**
+ * How tall Rivet actually draws each kind of node. Rivet sizes a node by its
+ * content and does not write the height back to the file, so these are measured
+ * from the canvas and rounded up: a column with too much air reads as calm, one
+ * with too little reads as the bug this replaces.
+ */
+const NODE_H = {
+  graphInput: 92, graphOutput: 92, ifElse: 132, extractJson: 152,
+  subGraph: 168, object: 196, text: 212, httpCall: 244, prompt: 268, chat: 268, code: 300,
+};
+const heightOf = (n) => n.visualData.height ?? NODE_H[n.type] ?? 200;
+
+function layoutGraph(g) {
+  const notes = g.nodes.filter((n) => n.type === 'comment');
+  const flow = g.nodes.filter((n) => n.type !== 'comment');
+  if (!flow.length) return g;
+
+  const byId = new Map(flow.map((n) => [n.id, n]));
+  const edges = g.connections.filter((c) => byId.has(c.outputNodeId) && byId.has(c.inputNodeId));
+  const preds = new Map(flow.map((n) => [n.id, new Set()]));
+  const succs = new Map(flow.map((n) => [n.id, new Set()]));
+  for (const c of edges) {
+    if (c.outputNodeId === c.inputNodeId) continue;
+    preds.get(c.inputNodeId).add(c.outputNodeId);
+    succs.get(c.outputNodeId).add(c.inputNodeId);
+  }
+
+  // ── columns: one to the right of the furthest thing that feeds you ──────
+  // Longest path, computed by relaxing until it settles. A cycle cannot make
+  // this run away because a node is only raised while something feeding it is
+  // strictly higher, and the pass count is bounded by the node count.
+  const col = new Map(flow.map((n) => [n.id, 0]));
+  for (let pass = 0; pass < flow.length; pass += 1) {
+    let moved = false;
+    for (const n of flow) {
+      const want = Math.max(0, ...[...preds.get(n.id)].map((p) => col.get(p) + 1));
+      if (want > col.get(n.id)) { col.set(n.id, want); moved = true; }
+    }
+    if (!moved) break;
+  }
+  // Longest-path alone puts every node as far left as its inputs allow, which
+  // strands the three little nodes that build one HTTP request in the same
+  // column as each other and a long way from the call they belong to — they
+  // depend only on the graph inputs, so they all land in column 1. Pulling each
+  // node as late as its consumers allow puts the request beside its call.
+  // Graph inputs stay put: they are the graph's own edge and belong on it.
+  for (let pass = 0; pass < flow.length; pass += 1) {
+    let moved = false;
+    for (const n of flow) {
+      if (n.type === 'graphInput' || !succs.get(n.id).size) continue;
+      const latest = Math.min(...[...succs.get(n.id)].map((x) => col.get(x))) - 1;
+      const earliest = Math.max(0, ...[...preds.get(n.id)].map((x) => col.get(x) + 1));
+      const want = Math.max(earliest, latest);
+      if (want !== col.get(n.id) && want >= earliest) { col.set(n.id, want); moved = true; }
+    }
+    if (!moved) break;
+  }
+
+  // A node that feeds nothing is an ending: push the graph outputs to the last
+  // column so they line up, rather than floating wherever their input landed.
+  const lastCol = Math.max(...col.values());
+  for (const n of flow) if (n.type === 'graphOutput') col.set(n.id, lastCol);
+
+  const columns = [];
+  for (const n of flow) (columns[col.get(n.id)] ||= []).push(n);
+
+  // ── order within a column: towards the middle of your own inputs ────────
+  // The hand-written y is the tie-break, so the vertical order an author chose
+  // for a row of graph inputs survives.
+  const originalY = new Map(flow.map((n) => [n.id, n.visualData.y ?? 0]));
+  const rank = new Map();
+  for (const c of columns) {
+    if (!c) continue;
+    c.sort((a, b) => originalY.get(a.id) - originalY.get(b.id));
+    c.forEach((n, i) => rank.set(n.id, i));
+  }
+  // Sweeping forward alone only ever pulls a node towards what feeds it, so the
+  // three little nodes that build one HTTP request end up wherever their shared
+  // graph inputs put them rather than beside the call they belong to. Sweeping
+  // back down the graph as well pulls each node towards what it feeds, which is
+  // what actually untangles a fan-in.
+  const barycentre = (n, side) => {
+    const ns = [...side.get(n.id)].filter((x) => rank.has(x));
+    return ns.length ? ns.reduce((a, x) => a + rank.get(x), 0) / ns.length : rank.get(n.id);
+  };
+  const reorder = (i, side) => {
+    const c = columns[i];
+    if (!c) return;
+    const b = new Map(c.map((n) => [n.id, barycentre(n, side)]));
+    c.sort((x, y) => (b.get(x.id) - b.get(y.id)) || (originalY.get(x.id) - originalY.get(y.id)));
+    c.forEach((n, k) => rank.set(n.id, k));
+  };
+  /**
+   * How many pairs of wires cross, counted between each pair of neighbouring
+   * columns: two edges cross when one starts above the other and ends below it.
+   */
+  const crossings = () => {
+    let total = 0;
+    for (const c of edges) {
+      for (const d of edges) {
+        if (c === d) continue;
+        if (col.get(c.outputNodeId) !== col.get(d.outputNodeId)) continue;
+        if (col.get(c.inputNodeId) !== col.get(d.inputNodeId)) continue;
+        const a1 = rank.get(c.outputNodeId); const b1 = rank.get(c.inputNodeId);
+        const a2 = rank.get(d.outputNodeId); const b2 = rank.get(d.inputNodeId);
+        if (a1 < a2 && b1 > b2) total += 1;
+      }
+    }
+    return total;
+  };
+
+  // A barycentre sweep is not monotonic — it can untangle one column by tangling
+  // the next, and left to run it oscillates between two states. So every sweep
+  // is scored and the best arrangement seen is the one that gets drawn.
+  let best = new Map(rank);
+  let bestScore = crossings();
+  for (let sweep = 0; sweep < 12 && bestScore > 0; sweep += 1) {
+    for (let i = 1; i < columns.length; i += 1) reorder(i, preds);
+    for (let i = columns.length - 2; i >= 0; i -= 1) reorder(i, succs);
+    const score = crossings();
+    if (score < bestScore) { bestScore = score; best = new Map(rank); }
+  }
+  for (const c of columns) {
+    if (!c) continue;
+    c.sort((a, b) => best.get(a.id) - best.get(b.id));
+    c.forEach((n, k) => rank.set(n.id, k));
+  }
+
+  // ── place ───────────────────────────────────────────────────────────────
+  const railX = LANE.x0;
+  const flowX0 = notes.length ? railX + LANE.railW + LANE.railGap : LANE.x0;
+  let x = flowX0;
+  const heights = columns.map((c) => (c || []).reduce((a, n) => a + heightOf(n) + LANE.vGap, -LANE.vGap));
+  const tallest = Math.max(0, ...heights);
+  for (const [i, c] of columns.entries()) {
+    if (!c) continue;
+    const w = Math.max(...c.map((n) => n.visualData.width ?? 300));
+    // Columns are centred against the tallest one, so the flow reads as a band
+    // across the canvas rather than everything hanging from the top edge.
+    let y = LANE.y0 + (tallest - heights[i]) / 2;
+    for (const n of c) {
+      n.visualData.x = x;
+      n.visualData.y = Math.round(y);
+      y += heightOf(n) + LANE.vGap;
+    }
+    x += w + LANE.hGap;
+  }
+
+  // ── the notes: a rail down the left, out of the flow entirely ───────────
+  let ny = LANE.y0;
+  for (const n of notes) {
+    n.visualData.x = railX;
+    n.visualData.y = ny;
+    n.visualData.width = LANE.railW;
+    ny += (n.visualData.height ?? 120) + 40;
+  }
+  return g;
+}
 
 const subgraphs = {
   ingest: graphIngest(),
@@ -934,7 +1128,7 @@ const project = {
       + `Prompt version ${PROMPT_VERSION}. Generated by rivet/build-graph.mjs — edit the prompts in `
       + 'src/llm/prompts.js and re-run `npm run build:graph` rather than editing prompt text here.',
   },
-  graphs: Object.fromEntries([main, ...Object.values(subgraphs)].map((g) => [g.metadata.id, g])),
+  graphs: Object.fromEntries([main, ...Object.values(subgraphs)].map(layoutGraph).map((g) => [g.metadata.id, g])),
   plugins: [{ id: 'anthropic', name: 'Anthropic', type: 'built-in' }],
 };
 

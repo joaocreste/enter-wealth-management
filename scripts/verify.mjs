@@ -851,5 +851,61 @@ await ta('the chart holds its place on page one, and gives it up before a paragr
   eq(heavy.letter.paragraphs.length, 6, 'a paragraph the advisor wrote was dropped for the chart');
 });
 
+console.log('\n  The Rivet canvas — a node nobody wired is a stage nobody runs');
+await ta('every node on the canvas is connected, and no output hangs with nothing feeding it', async () => {
+  // The validation gates of stages 02 and 08 were created, connected and then
+  // never added to their graph — one word wrong in a push. Rivet drops the
+  // connections of a node it does not have, so both stages shipped with their
+  // outputs dangling and the gate that stops a bad figure simply absent. It
+  // looked like a layout problem on the canvas, which is why nobody caught it.
+  const { loadProjectFromString } = await import('@ironclad/rivet-node');
+  const { readFile } = await import('node:fs/promises');
+  const project = await loadProjectFromString(await readFile('rivet/enter_wealth_advisor.rivet-project', 'utf8'));
+  const graphs = Object.values(project.graphs);
+  ok(graphs.length >= 11, `${graphs.length} graphs`);
+
+  const loose = [];
+  for (const g of graphs) {
+    const into = new Set(g.connections.map((c) => c.inputNodeId));
+    const outOf = new Set(g.connections.map((c) => c.outputNodeId));
+    for (const n of g.nodes) {
+      if (n.type === 'comment') continue;
+      // `gate` is wired by the orchestrator, not inside the stage it sequences.
+      if (n.type === 'graphInput' && n.data?.id === 'gate') continue;
+      const wired = n.type === 'graphOutput' ? into.has(n.id)
+        : n.type === 'graphInput' ? outOf.has(n.id)
+          : into.has(n.id) || outOf.has(n.id);
+      if (!wired) loose.push(`${g.metadata.name} → ${n.type} "${n.title}"`);
+    }
+  }
+  eq(loose.length, 0, `unwired: ${loose.join('; ')}`);
+});
+
+await ta('no two nodes are drawn on top of each other', async () => {
+  // Approximate heights, measured from the Rivet canvas: the file does not
+  // carry them because Rivet sizes a node by its content. Rounded down, so a
+  // failure here is a real collision rather than a rounding argument.
+  const H = { graphInput: 82, graphOutput: 82, ifElse: 110, extractJson: 120, subGraph: 130, object: 150, text: 150, httpCall: 210, prompt: 220, chat: 220, code: 260 };
+  const { loadProjectFromString } = await import('@ironclad/rivet-node');
+  const { readFile } = await import('node:fs/promises');
+  const project = await loadProjectFromString(await readFile('rivet/enter_wealth_advisor.rivet-project', 'utf8'));
+  const hits = [];
+  for (const g of Object.values(project.graphs)) {
+    const boxes = g.nodes.filter((n) => n.type !== 'comment').map((n) => ({
+      t: n.title, x: n.visualData.x, y: n.visualData.y,
+      w: n.visualData.width ?? 300, h: H[n.type] ?? 160,
+    }));
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i]; const b = boxes[j];
+        const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        if (ox > 1 && oy > 1) hits.push(`${g.metadata.name}: "${a.t}" × "${b.t}"`);
+      }
+    }
+  }
+  eq(hits.length, 0, `${hits.length} overlapping: ${hits.slice(0, 3).join('; ')}`);
+});
+
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

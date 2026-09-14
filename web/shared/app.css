@@ -595,7 +595,6 @@ figure svg text{font-family:var(--sans);font-variant-numeric:tabular-nums;font-w
 .alloc-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:12px}
 .alloc-key{font-size:12px;color:var(--ink-600);display:inline-flex;align-items:center;gap:7px}
 .alloc-key i{width:10px;height:10px;display:inline-block;flex:none}
-.alloc-key b{color:var(--ink-950);font-weight:500}
 
 /* ─── the letter: the Carta's text page (§04, §06) ───────────────────── */
 /* The prose keeps a reading measure; the annex table is data and takes the card. */

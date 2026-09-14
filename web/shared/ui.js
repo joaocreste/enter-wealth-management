@@ -8,7 +8,7 @@
  */
 import { money, percent, pp, weight, num, dateLong, shortDate, monthLabel, arrow, toneOf, MINUS } from './vendor/format.js';
 import { API_BASE, SITE_BASE, advisorUrl, clientUrl, loginUrl, apiUrl } from './config.js';
-import { LOGO_SYMBOL_PATH, LOGO_SYMBOL_VIEWBOX, LOGO_SYMBOL_ASPECT, inkOn } from './vendor/brand.js';
+import { LOGO_SYMBOL_PATH, LOGO_SYMBOL_VIEWBOX, LOGO_SYMBOL_ASPECT } from './vendor/brand.js';
 
 export { money, percent, pp, weight, num, dateLong, shortDate, monthLabel, arrow, toneOf, MINUS };
 export { API_BASE, SITE_BASE, advisorUrl, clientUrl, loginUrl, apiUrl };
@@ -433,7 +433,13 @@ export function barChart(items, { title = null, caption = null, width = 560, row
   return h('figure', {}, title && h('figcaption.chart-title', { text: title }), svg, caption && h('figcaption.chart-caption', { text: caption }));
 }
 
-/** Stacked allocation bar in the fixed categorical order. Never a doughnut. */
+/**
+ * Stacked allocation bar in the fixed categorical order. Never a doughnut.
+ * The bar carries the proportion and the legend the names; the figure itself
+ * is written once, in the Peso column of the table beside it. Printing it in
+ * the segment and again in the legend only gives the reader the same number
+ * three times, in three roundings, to reconcile. Hover still reads it out.
+ */
 export function allocationBar(items, { title = null, caption = null, width = 560, height = 36, locale = 'pt-BR' } = {}) {
   const total = items.reduce((a, i) => a + i.weight, 0) || 1;
   const cats = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cssVar(`--cat-${i}`) || '#2A3B43');
@@ -445,12 +451,11 @@ export function allocationBar(items, { title = null, caption = null, width = 560
     r.append(svgEl('title', {}));
     r.firstChild.textContent = `${it.label} · ${weight(it.weight, { locale, decimals: 1 })}`;
     svg.append(r);
-    if (w > 44) svg.append(text({ x: (x + w / 2).toFixed(1), y: height / 2 + 4, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 400, fill: inkOn(it.color || cats[i % cats.length]) }, weight(it.weight, { locale, decimals: 1 })));
     x += w;
   });
   const legend = h('div.alloc-legend', {}, items.map((it, i) => h('span.alloc-key', {},
     h('i', { style: { background: it.color || cats[i % cats.length] } }),
-    `${it.label} `, h('b', { text: weight(it.weight, { locale, decimals: 1 }) }))));
+    it.label)));
   return h('figure', {}, title && h('figcaption.chart-title', { text: title }), svg, legend, caption && h('figcaption.chart-caption', { text: caption }));
 }
 

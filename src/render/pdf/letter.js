@@ -16,7 +16,7 @@
  */
 import { PdfDocument, A4 } from './writer.js';
 import { svgPathToPdf } from './svgpath.js';
-import { color, semantic, inkOn, LOGO_SYMBOL_PATH, LOGO_SYMBOL_ASPECT } from '../../core/brand.js';
+import { color, semantic, LOGO_SYMBOL_PATH, LOGO_SYMBOL_ASPECT } from '../../core/brand.js';
 import { money, percent, pp, weight as fmtWeight, dateLong, MINUS } from '../../core/format.js';
 import { rangeBarGeometry } from '../charts.js';
 
@@ -826,6 +826,12 @@ function drawRecommendationTable(doc, model, recs, x, y, w, b = { showRationale:
   return cy + 4;
 }
 
+/**
+ * The composition, as proportion alone. The weight of each class is written in
+ * the Peso column of the table right under the bar, in the same order and the
+ * same colours; printing it inside the segment as well only sets two roundings
+ * of one number a centimetre apart.
+ */
 function drawAllocationBar(doc, model, x, y, w) {
   const items = model.charts?.allocation?.items || [];
   if (!items.length) return y;
@@ -835,7 +841,6 @@ function drawAllocationBar(doc, model, x, y, w) {
   for (const it of items) {
     const bw = (it.weight / total) * w;
     doc.rect(cx, y - h, bw, h, { fill: it.color });
-    if (bw > 38) doc.textCenter(fmtWeight(it.weight, { locale: model.locale, decimals: 1 }), cx + bw / 2, y - h + 6, { font: 'sans', size: 7.2, color: inkOn(it.color) });
     cx += bw;
   }
   return y - h - 4;

@@ -13,7 +13,7 @@
  *      comparison line is copper, dotted — never green
  *  §09 no gradients, no 3D, no doughnuts, no colour-only encoding
  */
-import { color, semantic, type, inkOn } from '../core/brand.js';
+import { color, semantic, type } from '../core/brand.js';
 import { percent, pp, weight as fmtWeight, MINUS, escapeHtml } from '../core/format.js';
 
 const GAIN = semantic.light.gainGraphic;
@@ -135,7 +135,13 @@ ${caption ? `<figcaption class="chart-caption">${esc(caption)}</figcaption>` : '
 </figure>`;
 }
 
-/** Stacked allocation bar with a direct label list. Never a doughnut (§09). */
+/**
+ * Stacked allocation bar with a direct label list. Never a doughnut (§09).
+ * The bar carries the proportion and the label list the names; the figure is
+ * written once, in the Peso column of the table under it. Printed in the
+ * segment and again beside the name it is the same number three times, in
+ * two roundings, for the reader to reconcile.
+ */
 export function svgAllocation(data, { width = 520, height = 34, title = null, caption = null, locale = 'pt-BR' } = {}) {
   const items = data.items || [];
   const total = items.reduce((a, i) => a + i.weight, 0) || 1;
@@ -143,16 +149,11 @@ export function svgAllocation(data, { width = 520, height = 34, title = null, ca
   const segs = items.map((it) => {
     const w = (it.weight / total) * width;
     const rect = `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${height}" fill="${it.color}"/>`;
-    // Same precision as the allocation table beside it: a bar reading 33% next
-    // to a row reading 32,6% is a contradiction the reader has to resolve.
-    const label = w > 46
-      ? `<text x="${(x + w / 2).toFixed(1)}" y="${height / 2 + 4}" text-anchor="middle" font-size="10.5" font-weight="400" fill="${inkOn(it.color)}" font-family="${type.sans}">${esc(fmtWeight(it.weight, { locale, decimals: 1 }))}</text>`
-      : '';
     x += w;
-    return rect + label;
+    return rect;
   }).join('');
 
-  const legend = items.map((it) => `<span class="alloc-key"><i style="background:${it.color}"></i>${esc(it.label)} <b>${esc(fmtWeight(it.weight, { locale, decimals: 1 }))}</b></span>`).join('');
+  const legend = items.map((it) => `<span class="alloc-key"><i style="background:${it.color}"></i>${esc(it.label)}</span>`).join('');
 
   return `<figure class="chart" style="margin:0">
 ${title ? `<figcaption class="chart-title">${esc(title)}</figcaption>` : ''}
@@ -340,5 +341,4 @@ export const CHART_CSS = `
 .alloc-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px}
 .alloc-key{font-family:${type.sans};font-size:10.5px;font-weight:300;color:${color.ink[600]};display:inline-flex;align-items:center;gap:5px}
 .alloc-key i{width:9px;height:9px;display:inline-block}
-.alloc-key b{color:${color.ink[950]};font-weight:500}
 `;

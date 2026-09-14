@@ -86,11 +86,18 @@ console.log(`  ${'─'.repeat(64)}\n`);
 const started = Date.now();
 const stageTimes = new Map();
 
+// A stage that finds something it cannot let through throws, which fails the
+// run inside that stage — the stages after it never start. That is the point of
+// the gates, so it is a reported outcome here and not a stack trace.
+let stopped = null;
+
+// No node in this project uses the bundled Anthropic plugin: the narrative
+// stage posts to /api/llm/complete so the key stays in Cloudflare and the model
+// is whichever the Worker is configured for. Nothing to configure here.
 const outputs = await runGraphInFile(PROJECT, {
   graph: graphName,
   inputs,
   openAiKey: process.env.OPENAI_API_KEY || '',
-  pluginSettings: { anthropic: { anthropicApiKey: process.env.ANTHROPIC_API_KEY || '' } },
   onUserEvent: {},
   externalFunctions: {},
   onNodeStart: ({ node }) => {
@@ -101,8 +108,18 @@ const outputs = await runGraphInFile(PROJECT, {
     if (s) console.log(`  ✓ ${s.title.padEnd(38)} ${String(Date.now() - s.at).padStart(6)} ms`);
   },
   onNodeError: ({ node, error }) => {
-    console.error(`  ✗ ${node.title}: ${error?.message || error}`);
+    const message = error?.message || String(error);
+    stopped ??= { title: node.title, message };
+    console.error(`  ✗ ${node.title.padEnd(38)} ${message}`);
   },
+}).catch((err) => {
+  const cause = err?.cause?.message || err?.message || String(err);
+  const stage = [...stageTimes.values()].pop();
+  console.error(`\n  ${'─'.repeat(64)}`);
+  console.error(`  the run stopped${stage ? ` in ${stage.title}` : ''} after ${((Date.now() - started) / 1000).toFixed(1)} s`);
+  console.error(`  ${stopped?.message || cause}`);
+  console.error('\n  Nothing downstream of that stage ran, and no letter was rendered.\n');
+  process.exit(1);
 });
 
 console.log(`\n  ${'─'.repeat(64)}`);

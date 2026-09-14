@@ -881,6 +881,34 @@ await ta('every node on the canvas is connected, and no output hangs with nothin
   eq(loose.length, 0, `unwired: ${loose.join('; ')}`);
 });
 
+await ta('every stage output the orchestrator declares is read somewhere', async () => {
+  // Six boolean outputs — blocked, reconciles, signal_conflicts, needs_review,
+  // ready, within_two_pages — were computed by a "validation gate" in each
+  // stage, published on a port, and read by nothing. A gate whose verdict
+  // nobody reads is a comment. The hard ones throw inside their stage now and
+  // the advisory ones reach `00`; this is what stops the next one being added
+  // back as decoration.
+  const { loadProjectFromString } = await import('@ironclad/rivet-node');
+  const { readFile } = await import('node:fs/promises');
+  const project = await loadProjectFromString(await readFile('rivet/enter_wealth_advisor.rivet-project', 'utf8'));
+  const graphs = Object.values(project.graphs);
+  const main = graphs.find((g) => g.metadata.name.startsWith('00'));
+  ok(main, 'no orchestrator graph');
+
+  const byId = new Map(graphs.map((g) => [g.metadata.id, g]));
+  const read = new Set(main.connections.map((c) => `${c.outputNodeId}:${c.outputId}`));
+  const unread = [];
+  for (const node of main.nodes) {
+    if (node.type !== 'subGraph') continue;
+    const stage = byId.get(node.data.graphId);
+    if (!stage) continue;
+    for (const o of stage.nodes.filter((x) => x.type === 'graphOutput')) {
+      if (!read.has(`${node.id}:${o.data.id}`)) unread.push(`${stage.metadata.name} → ${o.data.id}`);
+    }
+  }
+  eq(unread.length, 0, `outputs nothing reads: ${unread.join('; ')}`);
+});
+
 await ta('no two nodes are drawn on top of each other', async () => {
   // Approximate heights, measured from the Rivet canvas: the file does not
   // carry them because Rivet sizes a node by its content. Rounded down, so a
@@ -895,6 +923,12 @@ await ta('no two nodes are drawn on top of each other', async () => {
       t: n.title, x: n.visualData.x, y: n.visualData.y,
       w: n.visualData.width ?? 300, h: H[n.type] ?? 160,
     }));
+    // Every comparison against NaN is false, so a graph laid out at y = NaN —
+    // which is what one empty column in the layout produced — passed this test
+    // with all twenty-two of its nodes stacked on the same point.
+    for (const b of boxes) {
+      if (!Number.isFinite(b.x) || !Number.isFinite(b.y)) hits.push(`${g.metadata.name}: "${b.t}" has no position`);
+    }
     for (let i = 0; i < boxes.length; i += 1) {
       for (let j = i + 1; j < boxes.length; j += 1) {
         const a = boxes[i]; const b = boxes[j];

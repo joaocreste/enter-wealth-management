@@ -14,8 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   serializeProject, graphInputNode, graphOutputNode, textNode, objectNode,
-  httpCallNode, codeNode, subGraphNode, commentNode, extractJsonNode,
-  ifElseNode, promptNode,
+  httpCallNode, codeNode, subGraphNode, commentNode, ifElseNode,
 } from '@ironclad/rivet-node';
 import { PROMPTS, PROMPT_VERSION, SYSTEM_GUARDRAIL } from '../src/llm/prompts.js';
 
@@ -69,286 +68,185 @@ function note(text, x, y, width = COMMENT_W, height = 92) {
 // ── shared building blocks ─────────────────────────────────────────────────
 
 /**
+ * The two ports every stage needs to reach the API, and the one that decides
+ * when it is allowed to.
+ *
+ * `headers` arrives as an object rather than being rebuilt from a token on each
+ * canvas. Rivet's HTTP node takes an object straight on that port, the headers
+ * are identical for all fourteen calls in the project, and the service token is
+ * a connection setting the orchestrator owns — so it is assembled once, in `00`,
+ * and passed down. That is thirteen nodes and eleven copies of the token that
+ * are no longer drawn.
+ *
+ * `gate` carries the previous stage's result and is deliberately unused inside
+ * the stage. Rivet runs a node as soon as its inputs are ready, and the stages
+ * share only the connection settings, so without it the whole pipeline would
+ * fire at once. The orchestrator wires stage N's output into stage N+1's gate.
+ */
+function connectionPorts(y = 100, { gate = true } = {}) {
+  const apiBase = make(graphInputNode, { title: 'api_base', y, data: { id: 'api_base', dataType: 'string' } });
+  const headers = make(graphInputNode, { title: 'service headers', y: y + 80, data: { id: 'headers', dataType: 'object' } });
+  const nodes = [apiBase, headers];
+  const seqGate = gate
+    ? make(graphInputNode, { title: 'gate — runs after the stage before it', y: y + 400, data: { id: 'gate', dataType: 'any' } })
+    : null;
+  if (seqGate) nodes.push(seqGate);
+  return { apiBase, headers, gate: seqGate, nodes };
+}
+
+/**
  * One deterministic pipeline step.
  *
- * A Text node builds the URL, an Object node builds the headers and a second
- * Text node builds the request body, because Rivet's HTTP node interpolates
- * only from connected inputs. The parsed JSON comes straight off the node's
- * `json` port. Financial arithmetic never happens in the graph.
+ * A Text node builds the URL and a second builds the request body, because
+ * Rivet's HTTP node interpolates nothing of its own — every field it needs
+ * arrives on a port. Both are Text rather than Code so the endpoint and the
+ * payload are legible on the canvas. The parsed JSON comes straight off the
+ * node's `json` port. Financial arithmetic never happens in the graph.
  */
-function pipelineStep({ step, x, y, bodyTemplate, title, method = 'POST', urlSuffix = '' }) {
+function pipelineStep({ step, y, bodyTemplate, title, method = 'POST', urlSuffix = '' }) {
   const url = make(textNode, {
-    title: `${title} — endpoint`,
-    x, y, width: 300,
+    title: `${title} — endpoint`, y, width: 300,
     data: { text: `{{api_base}}/api/pipeline/${step}${urlSuffix}` },
   });
-  const headers = make(objectNode, {
-    title: 'Service headers',
-    x, y: y + 110, width: 300,
-    data: { jsonTemplate: '{\n  "content-type": "application/json",\n  "x-service-token": "{{api_token}}"\n}' },
-  });
   const body = make(textNode, {
-    title: `${title} — request body`,
-    x, y: y + 240, width: 300,
+    title: `${title} — request body`, y: y + 240, width: 300,
     data: { text: bodyTemplate },
   });
   const call = make(httpCallNode, {
-    title: `${method} /api/pipeline/${step}`,
-    x: x + 360, y: y + 90, width: 320,
+    title: `${method} /api/pipeline/${step}`, y: y + 90, width: 320,
     data: { method, url: '', headers: '', body: '', errorOnNon200: true, useUrlInput: true, useHeadersInput: true, useBodyInput: true },
   });
   connect(url, 'output', call, 'url');
-  connect(headers, 'output', call, 'headers');
   connect(body, 'output', call, 'req_body');
-  return { url, headers, body, call, result: call, resultPort: 'json', nodes: [url, headers, body, call] };
+  return { url, body, call, result: call, resultPort: 'json', nodes: [url, body, call] };
 }
 
-/** Wires api_base / api_token into a step's URL and header nodes. */
-function wireStep(step, { apiBase, apiToken }) {
+/** Wires the connection ports into a step's URL and its call. */
+function wireStep(step, { apiBase, headers }) {
   connect(apiBase, 'data', step.url, 'api_base');
-  connect(apiToken, 'data', step.headers, 'api_token');
+  connect(headers, 'data', step.call, 'headers');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 01 · Ingest
+// 01–06 · The deterministic stages
 // ═══════════════════════════════════════════════════════════════════════════
-function graphIngest() {
-  const n = [];
-  n.push(note(
-    'STAGE 01 — DATA INGESTION\n\n'
-    + 'Loads the client, the approved Investment Policy version, the approved portfolio snapshot,\n'
-    + 'its positions and the month\'s external cash flows.\n\n'
-    + 'Nothing here is inferred. The snapshot is the advisor-approved record and is never\n'
-    + 'modified by a market move (§4, layer 3).', 20, 20, 720, 130));
-
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 190, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 270, data: { id: 'api_token', dataType: 'string' } });
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 350, data: { id: 'run_id', dataType: 'string' } });
-  const clientId = make(graphInputNode, { title: 'client_id', x: 20, y: 430, data: { id: 'client_id', dataType: 'string' } });
-  const month = make(graphInputNode, { title: 'month', x: 20, y: 510, data: { id: 'month', dataType: 'string' } });
-  n.push(apiBase, apiToken, runId, clientId, month);
-
-  const step = pipelineStep({
-    step: 'context', title: 'Load client, policy and snapshot', x: 420, y: 240,
-    bodyTemplate: '{\n  "run_id": "{{run_id}}",\n  "client_id": "{{client_id}}",\n  "month": "{{month}}"\n}',
-  });
-  wireStep(step, { apiBase, apiToken });
-  connect(runId, 'data', step.body, 'run_id');
-  connect(clientId, 'data', step.body, 'client_id');
-  connect(month, 'data', step.body, 'month');
-  n.push(...step.nodes);
-
-  const out = make(graphOutputNode, { title: 'context', x: 1460, y: 260, data: { id: 'context', dataType: 'object' } });
-  connect(step.result, step.resultPort, out, 'value');
-  n.push(out);
-  return graph('g_ingest', '01 · Ingest client, policy and snapshot', 'Loads the approved client record, policy version, portfolio snapshot and the month\'s cash flows.', n);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 02 · Market data
-// ═══════════════════════════════════════════════════════════════════════════
-function graphMarketData() {
-  const n = [];
-  n.push(note(
-    'STAGE 02 — MARKET DATA AND VALIDATION\n\n'
-    + 'Prices every position at both ends of the reporting month through the provider chain:\n'
-    + '  · listed instruments  → Yahoo Finance, falling back to the TradingView last close\n'
-    + '  · fund quotas         → the custodian statement (no public feed exists)\n'
-    + '  · contractual paper   → accrued from the Banco Central index plus the contract spread\n'
-    + '  · FX                  → PTAX from the Banco Central\n\n'
-    + 'A position that cannot be valued is reported as DATA UNAVAILABLE with the providers tried.\n'
-    + 'It is never estimated, and it contributes exactly zero to the return (§30).', 20, 20, 780, 176));
-
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 240, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 320, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 400, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
-
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 480, data: { id: 'gate', dataType: 'any' } });
-  n.push(seqGate);
-  const step = pipelineStep({
-    step: 'market-data', title: 'Fetch and validate prices', x: 420, y: 300,
-    bodyTemplate: '{\n  "run_id": "{{run_id}}"\n}',
-  });
-  wireStep(step, { apiBase, apiToken });
-  connect(runId, 'data', step.body, 'run_id');
-  n.push(...step.nodes);
-
-  const gate = make(codeNode, {
-    title: 'Validation gate', x: 1120, y: 300, width: 420,
-    data: {
-      inputNames: ['result'],
-      outputNames: ['market', 'blocked'],
-      allowConsole: true,
+/**
+ * Six stages that differ in four things: the endpoint they call, what they
+ * send, what they return, and what they refuse to let past. They were six
+ * near-identical functions of fifty lines each; they are a table and one
+ * builder now, so a seventh stage is a row rather than another fifty lines to
+ * keep in step with the other six.
+ *
+ * A stage's `check` is a real gate. Where the check is a hard one it throws,
+ * which fails the run inside the stage that found the problem — before the
+ * stage after it starts, which is the only place a gate can do any good. Where
+ * it is advisory it returns a list, the orchestrator collects it, and the
+ * finished report carries it.
+ */
+const STAGES = [
+  {
+    id: 'g_ingest', name: '01 · Ingest client, policy and snapshot',
+    description: 'Loads the approved client record, policy version, portfolio snapshot and the month\'s cash flows.',
+    note: 'STAGE 01 — DATA INGESTION\n\n'
+      + 'Loads the client, the approved Investment Policy version, the approved portfolio snapshot,\n'
+      + 'its positions and the month\'s external cash flows.\n\n'
+      + 'Nothing here is inferred. The snapshot is the advisor-approved record and is never\n'
+      + 'modified by a market move (§4, layer 3).',
+    noteSize: [720, 130],
+    gate: false,
+    step: 'context', stepTitle: 'Load client, policy and snapshot',
+    inputs: [['client_id', 'string'], ['month', 'string']],
+    body: '{\n  "run_id": "{{run_id}}",\n  "client_id": "{{client_id}}",\n  "month": "{{month}}"\n}',
+    out: { id: 'context', dataType: 'object' },
+  },
+  {
+    id: 'g_market', name: '02 · Fetch and validate market data',
+    description: 'Prices every position through the approved provider chain and records the source of each figure.',
+    note: 'STAGE 02 — MARKET DATA AND VALIDATION\n\n'
+      + 'Prices every position at both ends of the reporting month through the provider chain:\n'
+      + '  · listed instruments  → Yahoo Finance, falling back to the TradingView last close\n'
+      + '  · fund quotas         → the custodian statement (no public feed exists)\n'
+      + '  · contractual paper   → accrued from the Banco Central index plus the contract spread\n'
+      + '  · FX                  → PTAX from the Banco Central\n\n'
+      + 'A position that cannot be valued is reported as DATA UNAVAILABLE with the providers tried.\n'
+      + 'It is never estimated, and it contributes exactly zero to the return (§30).',
+    noteSize: [780, 176],
+    step: 'market-data', stepTitle: 'Fetch and validate prices',
+    body: '{\n  "run_id": "{{run_id}}"\n}',
+    out: { id: 'market_data', dataType: 'object' },
+    check: {
+      title: 'Validation gate — stops the run', payload: 'market', width: 440,
       code: `// Stops the run before a client ever sees a figure that failed validation.
 // An unavailable position is acceptable and is disclosed in the letter; a
-// failed price sanity check is not.
+// failed price sanity check is not, so this throws rather than reporting a
+// verdict nothing downstream is obliged to read.
 const r = inputs.result.value;
 const failed = (r.review || []).filter((v) => v.status === 'fail');
-return {
-  market: { type: 'object', value: r },
-  blocked: { type: 'boolean', value: failed.length > 0 },
-};`,
-    },
-  });
-  connect(step.result, step.resultPort, gate, 'result');
-  n.push(gate);
-
-  const out = make(graphOutputNode, { title: 'market_data', x: 1600, y: 300, data: { id: 'market_data', dataType: 'object' } });
-  connect(gate, 'market', out, 'value');
-  const outBlocked = make(graphOutputNode, { title: 'blocked', x: 1600, y: 400, data: { id: 'blocked', dataType: 'boolean' } });
-  connect(gate, 'blocked', outBlocked, 'value');
-  n.push(out, outBlocked);
-  return graph('g_market', '02 · Fetch and validate market data', 'Prices every position through the approved provider chain and records the source of each figure.', n);
+if (failed.length) {
+  throw new Error(\`stage 02: \${failed.length} position(s) failed price validation — \${failed.map((f) => f.symbol || f.position_id).join(', ')}\`);
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 03 · Profitability
-// ═══════════════════════════════════════════════════════════════════════════
-function graphProfitability() {
-  const n = [];
-  n.push(note(
-    'STAGE 03 — PROFITABILITY, ATTRIBUTION AND BENCHMARK\n\n'
-    + 'Deterministic. No language model touches any figure produced by this stage (§32).\n\n'
-    + 'Method selection: true time-weighted return where a daily valuation exists for the whole\n'
-    + 'book, Modified Dietz when only month-end valuations exist, simple return when there were\n'
-    + 'no flows. Whichever is used is recorded and printed in the client letter.\n\n'
-    + 'The benchmark is the client\'s own policy allocation, priced with real series, not a\n'
-    + 'convenient index chosen after the fact.', 20, 20, 780, 176));
-
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 240, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 320, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 400, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
-
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 480, data: { id: 'gate', dataType: 'any' } });
-  n.push(seqGate);
-  const step = pipelineStep({
-    step: 'profitability', title: 'Return, attribution, benchmark, metrics', x: 420, y: 300,
-    bodyTemplate: '{\n  "run_id": "{{run_id}}"\n}',
-  });
-  wireStep(step, { apiBase, apiToken });
-  connect(runId, 'data', step.body, 'run_id');
-  n.push(...step.nodes);
-
-  const check = make(codeNode, {
-    title: 'Attribution reconciliation check', x: 1120, y: 300, width: 430,
-    data: {
-      inputNames: ['result'],
-      outputNames: ['performance', 'reconciles'],
-      allowConsole: true,
+return { market: { type: 'object', value: r } };`,
+    },
+  },
+  {
+    id: 'g_profit', name: '03 · Calculate profitability and attribution',
+    description: 'Monthly return with a cash-flow-correct method, attribution by class and position, FX decomposition, policy benchmark and historical metrics.',
+    note: 'STAGE 03 — PROFITABILITY, ATTRIBUTION AND BENCHMARK\n\n'
+      + 'Deterministic. No language model touches any figure produced by this stage (§32).\n\n'
+      + 'Method selection: true time-weighted return where a daily valuation exists for the whole\n'
+      + 'book, Modified Dietz when only month-end valuations exist, simple return when there were\n'
+      + 'no flows. Whichever is used is recorded and printed in the client letter.\n\n'
+      + 'The benchmark is the client\'s own policy allocation, priced with real series, not a\n'
+      + 'convenient index chosen after the fact.',
+    noteSize: [780, 176],
+    step: 'profitability', stepTitle: 'Return, attribution, benchmark, metrics',
+    body: '{\n  "run_id": "{{run_id}}"\n}',
+    out: { id: 'performance', dataType: 'object' },
+    check: {
+      title: 'Attribution reconciliation — stops the run', payload: 'performance', width: 440,
       code: `// The sum of every contribution line, including the cash residual, must equal
 // the reported portfolio return. A silent gap between "sum of the parts" and
-// "the number on page one" is the fastest way to lose an advisor's trust.
+// "the number on page one" is the fastest way to lose an advisor's trust, so
+// it stops the run here rather than reaching a letter.
 const r = inputs.result.value;
-if (r.reconciles !== true) console.log('ATTRIBUTION DOES NOT RECONCILE', r.monthly_return);
-return {
-  performance: { type: 'object', value: r },
-  reconciles: { type: 'boolean', value: r.reconciles === true },
-};`,
+if (r.reconciles !== true) {
+  throw new Error(\`stage 03: attribution does not reconcile with the reported return \${r.monthly_return}\`);
+}
+return { performance: { type: 'object', value: r } };`,
     },
-  });
-  connect(step.result, step.resultPort, check, 'result');
-  n.push(check);
-
-  const out = make(graphOutputNode, { title: 'performance', x: 1610, y: 300, data: { id: 'performance', dataType: 'object' } });
-  connect(check, 'performance', out, 'value');
-  const outOk = make(graphOutputNode, { title: 'reconciles', x: 1610, y: 400, data: { id: 'reconciles', dataType: 'boolean' } });
-  connect(check, 'reconciles', outOk, 'value');
-  n.push(out, outOk);
-  return graph('g_profit', '03 · Calculate profitability and attribution', 'Monthly return with a cash-flow-correct method, attribution by class and position, FX decomposition, policy benchmark and historical metrics.', n);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 04 · Market intelligence
-// ═══════════════════════════════════════════════════════════════════════════
-function graphMarketIntel() {
-  const n = [];
-  n.push(note(
-    'STAGE 04 — MARKET INDICATORS, EVENTS AND PORTFOLIO IMPACT\n\n'
-    + 'Retrieves the monitored indicator set, evaluates the configurable thresholds, merges the\n'
-    + 'curated macro events with events generated from significant indicator moves, and maps\n'
-    + 'each one onto this client\'s actual exposures.\n\n'
-    + 'Every statement carries the source id of the observation it rests on (§9).', 20, 20, 780, 150));
-
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 220, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 300, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 380, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
-
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 460, data: { id: 'gate', dataType: 'any' } });
-  n.push(seqGate);
-  const step = pipelineStep({
-    step: 'market-intel', title: 'Indicators, triggers, events, impact', x: 420, y: 280,
-    bodyTemplate: '{\n  "run_id": "{{run_id}}"\n}',
-  });
-  wireStep(step, { apiBase, apiToken });
-  connect(runId, 'data', step.body, 'run_id');
-  n.push(...step.nodes);
-
-  const out = make(graphOutputNode, { title: 'market_intel', x: 1460, y: 280, data: { id: 'market_intel', dataType: 'object' } });
-  connect(step.result, step.resultPort, out, 'value');
-  n.push(out);
-  return graph('g_intel', '04 · Market indicators, events and impact', 'Retrieves indicators, fires configurable thresholds and maps events onto the client\'s exposures.', n);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 05 · Signals
-// ═══════════════════════════════════════════════════════════════════════════
-function graphSignals() {
-  const n = [];
-  n.push(note(
-    'STAGE 05 — TRADINGVIEW SIGNALS, TWO INDEPENDENT FAMILIES\n\n'
-    + '  1. TECHNICAL  — moving-average and oscillator rating, daily and weekly, with a timestamp\n'
-    + '  2. ANALYST    — sell-side consensus, the analyst count and the target price\n\n'
-    + 'They are captured and stored separately and are never collapsed into one "market view".\n'
-    + 'Where a security has no analyst coverage the record says\n'
-    + '"No analyst consensus available" — the technical rating is NEVER used to infer it (§16, §30).', 20, 20, 800, 160));
-
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 230, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 310, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 390, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
-
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 470, data: { id: 'gate', dataType: 'any' } });
-  n.push(seqGate);
-  const step = pipelineStep({
-    step: 'signals', title: 'Capture both signal families', x: 420, y: 290,
-    bodyTemplate: '{\n  "run_id": "{{run_id}}"\n}',
-  });
-  wireStep(step, { apiBase, apiToken });
-  connect(runId, 'data', step.body, 'run_id');
-  n.push(...step.nodes);
-
-  const split = make(codeNode, {
-    title: 'Separate the two families', x: 1120, y: 290, width: 430,
-    data: {
-      inputNames: ['result'],
-      outputNames: ['signals', 'conflicts'],
-      allowConsole: true,
+  },
+  {
+    id: 'g_intel', name: '04 · Market indicators, events and impact',
+    description: 'Retrieves indicators, fires configurable thresholds and maps events onto the client\'s exposures.',
+    note: 'STAGE 04 — MARKET INDICATORS, EVENTS AND PORTFOLIO IMPACT\n\n'
+      + 'Retrieves the monitored indicator set, evaluates the configurable thresholds, merges the\n'
+      + 'curated macro events with events generated from significant indicator moves, and maps\n'
+      + 'each one onto this client\'s actual exposures.\n\n'
+      + 'Every statement carries the source id of the observation it rests on (§9).',
+    noteSize: [780, 150],
+    step: 'market-intel', stepTitle: 'Indicators, triggers, events, impact',
+    body: '{\n  "run_id": "{{run_id}}"\n}',
+    out: { id: 'market_intel', dataType: 'object' },
+  },
+  {
+    id: 'g_signals', name: '05 · TradingView technical and analyst signals',
+    description: 'Captures the two signal families independently and flags where they disagree.',
+    note: 'STAGE 05 — TRADINGVIEW SIGNALS, TWO INDEPENDENT FAMILIES\n\n'
+      + '  1. TECHNICAL  — moving-average and oscillator rating, daily and weekly, with a timestamp\n'
+      + '  2. ANALYST    — sell-side consensus, the analyst count and the target price\n\n'
+      + 'They are captured and stored separately and are never collapsed into one "market view".\n'
+      + 'Where a security has no analyst coverage the record says\n'
+      + '"No analyst consensus available" — the technical rating is NEVER used to infer it (§16, §30).',
+    noteSize: [800, 160],
+    step: 'signals', stepTitle: 'Capture both signal families',
+    body: '{\n  "run_id": "{{run_id}}"\n}',
+    out: { id: 'signals', dataType: 'object' },
+    check: {
+      title: 'Separate the two families', payload: 'signals', width: 440,
       code: `// A technical Sell alongside an analyst Strong Buy is a real disagreement and
 // is exactly what the advisor should be talking about. It is surfaced, never
-// averaged away.
+// averaged away — advisory, so it travels to the orchestrator rather than
+// stopping anything.
 const r = inputs.result.value;
 const score = { 'Strong Buy': 2, Buy: 1, Neutral: 0, Sell: -1, 'Strong Sell': -2 };
 const conflicts = (r.rows || []).filter((row) => {
@@ -359,64 +257,31 @@ return {
   signals: { type: 'object', value: r },
   conflicts: { type: 'object[]', value: conflicts.map((c) => ({ type: 'object', value: c })) },
 };`,
+      also: [{ port: 'conflicts', id: 'signal_conflicts', dataType: 'object[]' }],
     },
-  });
-  connect(step.result, step.resultPort, split, 'result');
-  n.push(split);
-
-  const out = make(graphOutputNode, { title: 'signals', x: 1610, y: 290, data: { id: 'signals', dataType: 'object' } });
-  connect(split, 'signals', out, 'value');
-  const outC = make(graphOutputNode, { title: 'signal_conflicts', x: 1610, y: 390, data: { id: 'signal_conflicts', dataType: 'object[]' } });
-  connect(split, 'conflicts', outC, 'value');
-  n.push(out, outC);
-  return graph('g_signals', '05 · TradingView technical and analyst signals', 'Captures the two signal families independently and flags where they disagree.', n);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 06 · Recommendations and suitability
-// ═══════════════════════════════════════════════════════════════════════════
-function graphRecommendations() {
-  const n = [];
-  n.push(note(
-    'STAGE 06 — RECOMMENDATIONS AND THE SUITABILITY GUARDRAIL\n\n'
-    + 'Two passes with different vocabularies, deliberately kept apart:\n\n'
-    + '  buildRecommendations  → what the market is saying, given the two signal families,\n'
-    + '                          the client weight, the policy band, concentration and the\n'
-    + '                          advisor world view\n'
-    + '  runSuitability        → what this client may actually do about it\n\n'
-    + 'The guardrail can only make a recommendation more conservative. It never turns a HOLD\n'
-    + 'into an ADD. The product prints both lines:\n'
-    + '     MARKET SIGNAL:             BUY\n'
-    + '     CLIENT-SUITABILITY RESULT: DO NOT ADD / DISCUSS ONLY   (§18)', 20, 20, 800, 216));
-
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 290, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 370, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 450, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
-
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 530, data: { id: 'gate', dataType: 'any' } });
-  n.push(seqGate);
-  const step = pipelineStep({
-    step: 'recommendations', title: 'Propose and check', x: 420, y: 350,
-    bodyTemplate: '{\n  "run_id": "{{run_id}}"\n}',
-  });
-  wireStep(step, { apiBase, apiToken });
-  connect(runId, 'data', step.body, 'run_id');
-  n.push(...step.nodes);
-
-  const summary = make(codeNode, {
-    title: 'Advisor review queue', x: 1120, y: 350, width: 440,
-    data: {
-      inputNames: ['result'],
-      outputNames: ['recommendations', 'needs_review'],
-      allowConsole: true,
+  },
+  {
+    id: 'g_recs', name: '06 · Recommendations and suitability',
+    description: 'Synthesises a Buy/Hold/Reduce/Sell proposal per asset and runs it through the client policy guardrail.',
+    note: 'STAGE 06 — RECOMMENDATIONS AND THE SUITABILITY GUARDRAIL\n\n'
+      + 'Two passes with different vocabularies, deliberately kept apart:\n\n'
+      + '  buildRecommendations  → what the market is saying, given the two signal families,\n'
+      + '                          the client weight, the policy band, concentration and the\n'
+      + '                          advisor world view\n'
+      + '  runSuitability        → what this client may actually do about it\n\n'
+      + 'The guardrail can only make a recommendation more conservative. It never turns a HOLD\n'
+      + 'into an ADD. The product prints both lines:\n'
+      + '     MARKET SIGNAL:             BUY\n'
+      + '     CLIENT-SUITABILITY RESULT: DO NOT ADD / DISCUSS ONLY   (§18)',
+    noteSize: [800, 216],
+    step: 'recommendations', stepTitle: 'Propose and check',
+    body: '{\n  "run_id": "{{run_id}}"\n}',
+    out: { id: 'recommendations', dataType: 'object' },
+    check: {
+      title: 'Advisor review queue', payload: 'recommendations', width: 440, console: true,
       code: `// Everything the guardrail touched, or where the two signal families disagree,
-// goes to the top of the advisor's review queue. Nothing is auto-approved.
+// goes to the top of the advisor's review queue. Nothing is auto-approved, so
+// this is a list for the orchestrator to carry, not a reason to stop.
 const r = inputs.result.value;
 const rows = r.rows || [];
 const needsReview = rows.filter((x) => x.conflict || x.suitability !== 'PASS' || x.final !== x.proposed);
@@ -425,22 +290,57 @@ return {
   recommendations: { type: 'object', value: r },
   needs_review: { type: 'object[]', value: needsReview.map((x) => ({ type: 'object', value: x })) },
 };`,
+      also: [{ port: 'needs_review', id: 'needs_review', dataType: 'object[]' }],
     },
-  });
-  connect(step.result, step.resultPort, summary, 'result');
-  n.push(summary);
+  },
+];
 
-  const out = make(graphOutputNode, { title: 'recommendations', x: 1620, y: 350, data: { id: 'recommendations', dataType: 'object' } });
-  connect(summary, 'recommendations', out, 'value');
-  const outR = make(graphOutputNode, { title: 'needs_review', x: 1620, y: 450, data: { id: 'needs_review', dataType: 'object[]' } });
-  connect(summary, 'needs_review', outR, 'value');
-  n.push(out, outR);
-  return graph('g_recs', '06 · Recommendations and suitability', 'Synthesises a Buy/Hold/Reduce/Sell proposal per asset and runs it through the client policy guardrail.', n);
+function stageGraph(s) {
+  const n = [note(s.note, 20, 20, s.noteSize[0], s.noteSize[1])];
+
+  const ports = connectionPorts(240, { gate: s.gate !== false });
+  const runId = make(graphInputNode, { title: 'run_id', y: 160, data: { id: 'run_id', dataType: 'string' } });
+  const extra = (s.inputs || []).map(([id, dataType], i) => make(graphInputNode, {
+    title: id, y: 320 + i * 40, data: { id, dataType },
+  }));
+  n.push(runId, ...ports.nodes, ...extra);
+
+  const step = pipelineStep({ step: s.step, title: s.stepTitle, y: 300, bodyTemplate: s.body });
+  wireStep(step, ports);
+  connect(runId, 'data', step.body, 'run_id');
+  for (const e of extra) connect(e, 'data', step.body, e.data.id);
+  n.push(...step.nodes);
+
+  let source = step.result;
+  let port = step.resultPort;
+  if (s.check) {
+    const also = s.check.also || [];
+    const check = make(codeNode, {
+      title: s.check.title, y: 300, width: s.check.width ?? 430,
+      data: {
+        inputNames: ['result'],
+        outputNames: [s.check.payload, ...also.map((a) => a.port)],
+        allowConsole: true,
+        code: s.check.code,
+      },
+    });
+    connect(source, port, check, 'result');
+    n.push(check);
+    source = check;
+    port = s.check.payload;
+    for (const [i, a] of also.entries()) {
+      const o = make(graphOutputNode, { title: a.id, y: 400 + i * 100, data: { id: a.id, dataType: a.dataType } });
+      connect(check, a.port, o, 'value');
+      n.push(o);
+    }
+  }
+
+  const out = make(graphOutputNode, { title: s.out.id, y: 300, data: s.out });
+  connect(source, port, out, 'value');
+  n.push(out);
+
+  return graph(s.id, s.name, s.description, n);
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 07 · Narrative — the language model stage
-// ═══════════════════════════════════════════════════════════════════════════
 function graphNarrative() {
   const n = [];
   n.push(note(
@@ -460,33 +360,37 @@ function graphNarrative() {
     + 'and gives one place where the provider fallback lives. The prompts stay here.',
     20, 20, 900, 300));
 
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 360, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 440, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 520, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
+  const runId = make(graphInputNode, { title: 'run_id', y: 360, data: { id: 'run_id', dataType: 'string' } });
+  const ports = connectionPorts(440);
+  const { apiBase, headers } = ports;
+  n.push(runId, ...ports.nodes);
 
   // ── the FACTS the model may write about, and nothing else ───────────────
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 680, data: { id: 'gate', dataType: 'any' } });
-  n.push(seqGate);
   const factsStep = pipelineStep({
-    step: 'narrative-facts', title: 'FACTS for the letter', x: 420, y: 360,
+    step: 'narrative-facts', title: 'FACTS for the letter', y: 360,
     bodyTemplate: '{\n  "run_id": "{{run_id}}",\n  "prompt": "client_letter"\n}',
   });
-  wireStep(factsStep, { apiBase, apiToken });
+  wireStep(factsStep, ports);
   connect(runId, 'data', factsStep.body, 'run_id');
   n.push(...factsStep.nodes);
 
+  // The letter prompt addresses the advisor and the client by name, so the two
+  // names come off the FACTS beside the JSON. The API path substitutes them in
+  // src/llm/prompts.js; on the canvas they are Rivet interpolation ports, and
+  // with nothing connected the model was being sent the literal
+  // "You are {{advisor_name}}, writing to {{client_first_name}}".
   const factsText = make(codeNode, {
-    title: 'FACTS as text', x: 1120, y: 450, width: 300,
+    title: 'FACTS as text, and the two names the letter uses', y: 450, width: 380,
     data: {
       inputNames: ['facts'],
-      outputNames: ['facts_json'],
-      code: "return { facts_json: { type: 'string', value: inputs.facts.value.facts_json } };",
+      outputNames: ['facts_json', 'advisor_name', 'client_first_name'],
+      code: `const f = inputs.facts.value;
+const facts = JSON.parse(f.facts_json || '{}');
+return {
+  facts_json: { type: 'string', value: f.facts_json },
+  advisor_name: { type: 'string', value: facts.advisor?.name || 'o assessor' },
+  client_first_name: { type: 'string', value: facts.client?.first_name || (facts.client?.name || '').split(' ')[0] || 'o cliente' },
+};`,
     },
   });
   connect(factsStep.result, factsStep.resultPort, factsText, 'facts');
@@ -502,6 +406,8 @@ function graphNarrative() {
     data: { text: PROMPTS.client_letter.template.replace('{{facts}}', '{{facts_json}}') },
   });
   connect(factsText, 'facts_json', letterPrompt, 'facts_json');
+  connect(factsText, 'advisor_name', letterPrompt, 'advisor_name');
+  connect(factsText, 'client_first_name', letterPrompt, 'client_first_name');
   n.push(systemPrompt, letterPrompt);
 
   const buildCall = make(codeNode, {
@@ -523,18 +429,16 @@ return {
   connect(letterPrompt, 'output', buildCall, 'user');
   n.push(buildCall);
 
-  const llmUrl = make(textNode, { title: 'Model gateway endpoint', x: 1700, y: 940, width: 380, data: { text: '{{api_base}}/api/llm/complete' } });
-  const llmHeaders = make(objectNode, { title: 'Service headers', x: 1700, y: 1050, width: 380, data: { jsonTemplate: '{\n  "content-type": "application/json",\n  "x-service-token": "{{api_token}}"\n}' } });
+  const llmUrl = make(textNode, { title: 'Model gateway endpoint', y: 940, width: 380, data: { text: '{{api_base}}/api/llm/complete' } });
   connect(apiBase, 'data', llmUrl, 'api_base');
-  connect(apiToken, 'data', llmHeaders, 'api_token');
   const llmCall = make(httpCallNode, {
-    title: 'POST /api/llm/complete', x: 2140, y: 850, width: 320,
+    title: 'POST /api/llm/complete', y: 850, width: 320,
     data: { method: 'POST', url: '', headers: '', body: '', errorOnNon200: true, useUrlInput: true, useHeadersInput: true, useBodyInput: true },
   });
   connect(llmUrl, 'output', llmCall, 'url');
-  connect(llmHeaders, 'output', llmCall, 'headers');
+  connect(headers, 'data', llmCall, 'headers');
   connect(buildCall, 'body', llmCall, 'req_body');
-  n.push(llmUrl, llmHeaders, llmCall);
+  n.push(llmUrl, llmCall);
 
   const parseLetter = make(codeNode, {
     title: 'Parse the letter and check it against FACTS', x: 2520, y: 850, width: 460,
@@ -593,18 +497,16 @@ return {
   connect(parseLetter, 'model', storeBody, 'model');
   n.push(storeBody);
 
-  const storeUrl = make(textNode, { title: 'Narrative endpoint', x: 3040, y: 1030, width: 380, data: { text: '{{api_base}}/api/pipeline/narrative' } });
-  const storeHeaders = make(objectNode, { title: 'Service headers', x: 3040, y: 1140, width: 380, data: { jsonTemplate: '{\n  "content-type": "application/json",\n  "x-service-token": "{{api_token}}"\n}' } });
+  const storeUrl = make(textNode, { title: 'Narrative endpoint', y: 1030, width: 380, data: { text: '{{api_base}}/api/pipeline/narrative' } });
   connect(apiBase, 'data', storeUrl, 'api_base');
-  connect(apiToken, 'data', storeHeaders, 'api_token');
   const storeCall = make(httpCallNode, {
-    title: 'POST /api/pipeline/narrative (model letter)', x: 3480, y: 940, width: 340,
+    title: 'POST /api/pipeline/narrative (model letter)', y: 940, width: 340,
     data: { method: 'POST', url: '', headers: '', body: '', errorOnNon200: true, useUrlInput: true, useHeadersInput: true, useBodyInput: true },
   });
   connect(storeUrl, 'output', storeCall, 'url');
-  connect(storeHeaders, 'output', storeCall, 'headers');
+  connect(headers, 'data', storeCall, 'headers');
   connect(storeBody, 'body', storeCall, 'req_body');
-  n.push(storeUrl, storeHeaders, storeCall);
+  n.push(storeUrl, storeCall);
 
   // ── deterministic branch ────────────────────────────────────────────────
   n.push(note(
@@ -616,10 +518,10 @@ return {
     420, 1320, 760, 120));
 
   const detStep = pipelineStep({
-    step: 'narrative', title: 'Deterministic narrative', x: 420, y: 1460,
+    step: 'narrative', title: 'Deterministic narrative', y: 1460,
     bodyTemplate: '{\n  "run_id": "{{run_id}}",\n  "mode": "deterministic"\n}',
   });
-  wireStep(detStep, { apiBase, apiToken });
+  wireStep(detStep, ports);
   connect(runId, 'data', detStep.body, 'run_id');
   n.push(...detStep.nodes);
 
@@ -651,43 +553,37 @@ function graphAssemble() {
     + '  · attribution sums to the reported return\n'
     + '  · nothing reaches a client that the advisor has not approved (§23)', 20, 20, 800, 180));
 
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 250, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 330, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 410, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
-
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 490, data: { id: 'gate', dataType: 'any' } });
+  const runId = make(graphInputNode, { title: 'run_id', y: 250, data: { id: 'run_id', dataType: 'string' } });
+  const ports = connectionPorts(330);
   // A published client letter is immutable. Reissuing one is a deliberate act,
   // so it is an input on the canvas rather than a flag buried in a request body.
-  const reissue = make(graphInputNode, { title: 'reissue a published letter', x: 20, y: 570, width: 300, data: { id: 'reissue', dataType: 'boolean' } });
-  n.push(seqGate, reissue);
+  const reissue = make(graphInputNode, { title: 'reissue a published letter', y: 570, width: 300, data: { id: 'reissue', dataType: 'boolean' } });
+  n.push(runId, ...ports.nodes, reissue);
+
   const step = pipelineStep({
-    step: 'assemble', title: 'Assemble and validate', x: 420, y: 310,
+    step: 'assemble', title: 'Assemble and validate', y: 310,
     bodyTemplate: '{\n  "run_id": "{{run_id}}",\n  "force": {{reissue}}\n}',
   });
-  wireStep(step, { apiBase, apiToken });
+  wireStep(step, ports);
   connect(runId, 'data', step.body, 'run_id');
   connect(reissue, 'data', step.body, 'reissue');
   n.push(...step.nodes);
 
   const gate = make(codeNode, {
-    title: 'Publication gate', x: 1120, y: 310, width: 440,
+    title: 'Publication gate — stops the run', y: 310, width: 460,
     data: {
       inputNames: ['result'],
-      outputNames: ['report', 'ready', 'pending_approval'],
+      outputNames: ['report', 'pending_approval'],
       allowConsole: true,
       code: `// "pending advisor approval" is not an error, it is the design: the advisor
-// gate at stage 09 is the whole point. A blocking error is anything else.
+// gate at stage 09 is the whole point, so it travels on as a count for the
+// orchestrator to report. A blocking error is anything else, and there is no
+// letter to be had from a report that carries one.
 const r = inputs.result.value;
-if ((r.blocking_errors || []).length) console.log('BLOCKING:', r.blocking_errors.join(' | '));
+const blocking = r.blocking_errors || [];
+if (blocking.length) throw new Error(\`stage 08: \${blocking.length} blocking error(s) — \${blocking.join(' | ')}\`);
 return {
   report: { type: 'object', value: r },
-  ready: { type: 'boolean', value: (r.blocking_errors || []).length === 0 },
   pending_approval: { type: 'number', value: r.pending_advisor_approval || 0 },
 };`,
     },
@@ -695,11 +591,11 @@ return {
   connect(step.result, step.resultPort, gate, 'result');
   n.push(gate);
 
-  const out = make(graphOutputNode, { title: 'canonical_report', x: 1620, y: 310, data: { id: 'canonical_report', dataType: 'object' } });
+  const out = make(graphOutputNode, { title: 'canonical_report', y: 310, data: { id: 'canonical_report', dataType: 'object' } });
   connect(gate, 'report', out, 'value');
-  const outReady = make(graphOutputNode, { title: 'ready', x: 1620, y: 410, data: { id: 'ready', dataType: 'boolean' } });
-  connect(gate, 'ready', outReady, 'value');
-  n.push(out, outReady);
+  const outPending = make(graphOutputNode, { title: 'pending_approval', y: 410, data: { id: 'pending_approval', dataType: 'number' } });
+  connect(gate, 'pending_approval', outPending, 'value');
+  n.push(out, outPending);
   return graph('g_assemble', '08 · Assemble the canonical report', 'Builds and validates the single payload that every output format renders from.', n);
 }
 
@@ -719,60 +615,49 @@ function graphRenderPersist() {
     + 'Then the report, its canonical JSON and every source record are persisted to D1 and R2,\n'
     + 'which is what makes a published report reproducible (§31).', 20, 20, 820, 210));
 
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 290, data: { id: 'run_id', dataType: 'string' } });
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 370, data: { id: 'api_base', dataType: 'string' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 450, data: { id: 'api_token', dataType: 'string' } });
-  n.push(runId, apiBase, apiToken);
+  const runId = make(graphInputNode, { title: 'run_id', y: 290, data: { id: 'run_id', dataType: 'string' } });
+  const ports = connectionPorts(370);
+  n.push(runId, ...ports.nodes);
 
-
-  // Sequencing gate. Rivet runs a node as soon as its inputs are ready, and
-  // these stages share only the connection settings, so without an explicit
-  // dependency the whole pipeline would fire at once. The orchestrator wires
-  // stage N's output into stage N+1's gate.
-  const seqGate = make(graphInputNode, { title: 'gate (sequencing)', x: 20, y: 530, data: { id: 'gate', dataType: 'any' } });
-  n.push(seqGate);
   const render = pipelineStep({
-    step: 'render', title: 'Render HTML, PDF and portal', x: 420, y: 350,
+    step: 'render', title: 'Render HTML, PDF and portal', y: 350,
     bodyTemplate: '{\n  "run_id": "{{run_id}}",\n  "approved_only": true\n}',
   });
-  wireStep(render, { apiBase, apiToken });
+  wireStep(render, ports);
   connect(runId, 'data', render.body, 'run_id');
   n.push(...render.nodes);
 
   const pageCheck = make(codeNode, {
-    title: 'Two-page constraint', x: 1120, y: 350, width: 420,
+    title: 'Two-page constraint — stops the run', y: 350, width: 440,
     data: {
       inputNames: ['result'],
-      outputNames: ['render', 'within_limit'],
+      outputNames: ['render'],
       allowConsole: true,
       code: `// The two-page limit is a hard constraint. The renderer drops optional blocks
-// in a fixed order until it fits; this reports which level it needed.
+// in a fixed order until it fits, so a third page means the reduction ladder
+// ran out rather than that the letter is long — nothing is persisted from it.
 const r = inputs.result.value;
 console.log(\`\${r.page_count} page(s), layout reduction level \${r.layout_reduction_level}\`);
-return {
-  render: { type: 'object', value: r },
-  within_limit: { type: 'boolean', value: r.page_count <= 2 },
-};`,
+if (r.page_count > 2) throw new Error(\`stage 09: rendered \${r.page_count} pages at reduction level \${r.layout_reduction_level}\`);
+return { render: { type: 'object', value: r } };`,
     },
   });
   connect(render.result, render.resultPort, pageCheck, 'result');
   n.push(pageCheck);
 
   const persist = pipelineStep({
-    step: 'persist', title: 'Persist to D1 and R2', x: 1620, y: 350,
+    step: 'persist', title: 'Persist to D1 and R2', y: 350,
     bodyTemplate: '{\n  "run_id": "{{run_id}}",\n  "status": "pending_approval"\n}',
   });
-  wireStep(persist, { apiBase, apiToken });
+  wireStep(persist, ports);
   connect(runId, 'data', persist.body, 'run_id');
   // sequencing: persist only runs once the page-count check has produced a value
   connect(pageCheck, 'render', persist.body, 'render');
   n.push(...persist.nodes);
 
-  const out = make(graphOutputNode, { title: 'report', x: 2620, y: 350, data: { id: 'report', dataType: 'object' } });
+  const out = make(graphOutputNode, { title: 'report', y: 350, data: { id: 'report', dataType: 'object' } });
   connect(persist.result, persist.resultPort, out, 'value');
-  const outLimit = make(graphOutputNode, { title: 'within_two_pages', x: 2620, y: 450, data: { id: 'within_two_pages', dataType: 'boolean' } });
-  connect(pageCheck, 'within_limit', outLimit, 'value');
-  n.push(out, outLimit);
+  n.push(out);
 
   return graph('g_render', '09 · Render and persist', 'Renders the email, the two-page PDF and the portal view from one payload, then stores everything for audit.', n);
 }
@@ -794,10 +679,15 @@ function graphWorldOverview() {
   const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 320, data: { id: 'api_token', dataType: 'string' } });
   n.push(apiBase, apiToken);
 
-  const url = make(textNode, { title: 'Overview endpoint', x: 420, y: 220, width: 320, data: { text: '{{api_base}}/api/advisor/overview?refresh=1' } });
-  const headers = make(objectNode, { title: 'Service headers', x: 420, y: 330, width: 320, data: { jsonTemplate: '{\n  "x-service-token": "{{api_token}}"\n}' } });
+  // `?refresh=1` was on this URL and the handler never read it — the morning run
+  // is started by the endpoint itself when there is no completed one, and the
+  // portal polls for it.
+  const url = make(textNode, { title: 'Overview endpoint', y: 220, width: 320, data: { text: '{{api_base}}/api/advisor/overview' } });
+  // This graph is a separate entry point, run on its own rather than by `00`,
+  // so it builds its own headers instead of being handed them.
+  const headers = make(objectNode, { title: 'Service headers', y: 330, width: 320, data: { jsonTemplate: '{\n  "x-service-token": "{{api_token}}"\n}' } });
   const call = make(httpCallNode, {
-    title: 'GET /api/advisor/overview', x: 800, y: 260, width: 320,
+    title: 'GET /api/advisor/overview', y: 260, width: 320,
     data: { method: 'GET', url: '', headers: '', body: '', errorOnNon200: true, useUrlInput: true, useHeadersInput: true },
   });
   connect(apiBase, 'data', url, 'api_base');
@@ -807,12 +697,19 @@ function graphWorldOverview() {
   n.push(url, headers, call);
 
   const summarise = make(codeNode, {
-    title: 'What matters today', x: 1160, y: 260, width: 460,
+    title: 'What matters today', y: 260, width: 460,
     data: {
       inputNames: ['overview'],
       outputNames: ['briefing', 'what_matters', 'fired_triggers'],
       allowConsole: true,
-      code: `const o = inputs.overview.value;
+      code: `// The endpoint answers with the last completed run, and starts one when
+// there is none rather than making the caller wait for it. Reading the fields
+// of a run that has not finished gave three empty outputs and no hint why, so
+// the unfinished case says so.
+const o = inputs.overview.value;
+if (o.pending || !o.world_view) {
+  throw new Error(\`the morning run has not finished (run \${o.run?.id || 'unknown'}, status \${o.run?.status || 'unknown'}) — it was started by this call; run this graph again in a moment\`);
+}
 const fired = (o.triggers || []).filter((t) => t.status === 'BREACHED');
 console.log(\`\${(o.indicators || []).filter((i) => !i.unavailable).length} indicators retrieved, \${fired.length} threshold(s) breached\`);
 return {
@@ -858,34 +755,46 @@ function graphMain(subgraphIds) {
     + 'Both end in one row of `reports` for that client and that month. Rivet is the surface where\n'
     + 'the prompts stay visible and editable; the agent is the surface an advisor actually uses.', 20, 200, 820, 150));
 
-  const apiBase = make(graphInputNode, { title: 'api_base', x: 20, y: 230, width: 320, data: { id: 'api_base', dataType: 'string', defaultValue: 'http://127.0.0.1:8788' } });
-  const apiToken = make(graphInputNode, { title: 'api_token', x: 20, y: 310, width: 320, data: { id: 'api_token', dataType: 'string' } });
-  const clientId = make(graphInputNode, { title: 'client_id', x: 20, y: 390, width: 320, data: { id: 'client_id', dataType: 'string', defaultValue: 'cli_albert' } });
-  const month = make(graphInputNode, { title: 'month', x: 20, y: 470, width: 320, data: { id: 'month', dataType: 'string' } });
-  const runId = make(graphInputNode, { title: 'run_id', x: 20, y: 550, width: 320, data: { id: 'run_id', dataType: 'string' } });
-  const reissue = make(graphInputNode, { title: 'reissue', x: 20, y: 630, width: 320, data: { id: 'reissue', dataType: 'boolean', defaultValue: false } });
+  const apiBase = make(graphInputNode, { title: 'api_base', y: 230, width: 320, data: { id: 'api_base', dataType: 'string', defaultValue: 'http://127.0.0.1:8788' } });
+  const apiToken = make(graphInputNode, { title: 'api_token', y: 310, width: 320, data: { id: 'api_token', dataType: 'string' } });
+  const clientId = make(graphInputNode, { title: 'client_id', y: 390, width: 320, data: { id: 'client_id', dataType: 'string', defaultValue: 'cli_albert' } });
+  const month = make(graphInputNode, { title: 'month', y: 470, width: 320, data: { id: 'month', dataType: 'string' } });
+  const runId = make(graphInputNode, { title: 'run_id', y: 550, width: 320, data: { id: 'run_id', dataType: 'string' } });
+  const reissue = make(graphInputNode, { title: 'reissue', y: 630, width: 320, data: { id: 'reissue', dataType: 'boolean', defaultValue: false } });
   n.push(apiBase, apiToken, clientId, month, runId, reissue);
 
+  // The service token becomes a headers object once, here, and every stage
+  // takes that object on a port. Thirteen identical copies of these three lines
+  // used to be drawn, one beside each call in the project.
+  const headers = make(objectNode, {
+    title: 'Service headers — built once, passed to every stage', y: 700, width: 380,
+    data: { jsonTemplate: '{\n  "content-type": "application/json",\n  "x-service-token": "{{api_token}}"\n}' },
+  });
+  connect(apiToken, 'data', headers, 'api_token');
+  n.push(headers);
+
   const stages = [
-    { id: subgraphIds.ingest, title: '01 · Ingest', inputs: ['api_base', 'api_token', 'run_id', 'client_id', 'month'], out: 'context' },
-    { id: subgraphIds.market, title: '02 · Market data', inputs: ['api_base', 'api_token', 'run_id'], out: 'market_data' },
-    { id: subgraphIds.profit, title: '03 · Profitability', inputs: ['api_base', 'api_token', 'run_id'], out: 'performance' },
-    { id: subgraphIds.intel, title: '04 · Market intelligence', inputs: ['api_base', 'api_token', 'run_id'], out: 'market_intel' },
-    { id: subgraphIds.signals, title: '05 · TradingView signals', inputs: ['api_base', 'api_token', 'run_id'], out: 'signals' },
-    { id: subgraphIds.recs, title: '06 · Recommendations + suitability', inputs: ['api_base', 'api_token', 'run_id'], out: 'recommendations' },
-    { id: subgraphIds.narrative, title: '07 · Narrative', inputs: ['api_base', 'api_token', 'run_id'], out: 'narrative' },
-    { id: subgraphIds.assemble, title: '08 · Canonical report', inputs: ['api_base', 'api_token', 'run_id', 'reissue'], out: 'canonical_report' },
-    { id: subgraphIds.render, title: '09 · Render + persist', inputs: ['api_base', 'api_token', 'run_id'], out: 'report' },
+    { id: subgraphIds.ingest, title: '01 · Ingest', inputs: ['run_id', 'client_id', 'month'], out: 'context' },
+    { id: subgraphIds.market, title: '02 · Market data', inputs: ['run_id'], out: 'market_data' },
+    { id: subgraphIds.profit, title: '03 · Profitability', inputs: ['run_id'], out: 'performance' },
+    { id: subgraphIds.intel, title: '04 · Market intelligence', inputs: ['run_id'], out: 'market_intel' },
+    { id: subgraphIds.signals, title: '05 · TradingView signals', inputs: ['run_id'], out: 'signals', carries: ['signal_conflicts'] },
+    { id: subgraphIds.recs, title: '06 · Recommendations + suitability', inputs: ['run_id'], out: 'recommendations', carries: ['needs_review'] },
+    { id: subgraphIds.narrative, title: '07 · Narrative', inputs: ['run_id'], out: 'narrative' },
+    { id: subgraphIds.assemble, title: '08 · Canonical report', inputs: ['run_id', 'reissue'], out: 'canonical_report', carries: ['pending_approval'] },
+    { id: subgraphIds.render, title: '09 · Render + persist', inputs: ['run_id'], out: 'report' },
   ];
 
-  const inputByName = { api_base: apiBase, api_token: apiToken, run_id: runId, client_id: clientId, month, reissue };
+  const inputByName = { run_id: runId, client_id: clientId, month, reissue };
 
-  let x = 460;
   let y = 240;
   const created = [];
+  const carried = [];
   let previous = null;
   for (const st of stages) {
-    const sg = make(subGraphNode, { title: st.title, x, y, width: 320, data: { graphId: st.id, useAsGraphPartialOutput: true } });
+    const sg = make(subGraphNode, { title: st.title, y, width: 320, data: { graphId: st.id, useAsGraphPartialOutput: true } });
+    connect(apiBase, 'data', sg, 'api_base');
+    connect(headers, 'output', sg, 'headers');
     for (const inp of st.inputs) {
       const src = inputByName[inp];
       if (src) connect(src, 'data', sg, inp);
@@ -894,22 +803,52 @@ function graphMain(subgraphIds) {
     // pipeline would run at once. Each stage waits on the one before it.
     if (previous) connect(previous.node, previous.out, sg, 'gate');
     previous = { node: sg, out: st.out };
+    for (const c of st.carries || []) carried.push({ node: sg, port: c });
     created.push(sg);
     n.push(sg);
     y += 130;
-    if (y > 900) { y = 240; x += 420; }
   }
 
-  const out = make(graphOutputNode, { title: 'report', x: x + 420, y: 300, width: 320, data: { id: 'report', dataType: 'object' } });
+  const out = make(graphOutputNode, { title: 'report', y: 300, width: 320, data: { id: 'report', dataType: 'object' } });
   connect(created[created.length - 1], 'report', out, 'value');
   n.push(out);
+
+  // ── the advisory verdicts, collected ────────────────────────────────────
+  // A stage that finds something it cannot let through throws, and the run
+  // stops inside that stage, before the next one starts. What reaches here is
+  // the other kind: the things an advisor has to look at rather than things
+  // that make the report wrong. They used to be computed and dropped — six
+  // boolean outputs no node read — which is how a "validation gate" ends up
+  // being a comment rather than a gate.
+  const checks = make(codeNode, {
+    title: 'Run checks — what the advisor has to look at', y: 560, width: 460,
+    data: {
+      inputNames: carried.map((c) => c.port),
+      outputNames: ['checks'],
+      allowConsole: true,
+      code: `const conflicts = inputs.signal_conflicts?.value || [];
+const review = inputs.needs_review?.value || [];
+const pending = inputs.pending_approval?.value || 0;
+const summary = {
+  signal_conflicts: conflicts.length,
+  need_advisor_decision: review.length,
+  pending_advisor_approval: pending,
+};
+console.log(\`\${summary.signal_conflicts} signal conflict(s), \${summary.need_advisor_decision} proposal(s) needing a decision, \${summary.pending_advisor_approval} pending approval\`);
+return { checks: { type: 'object', value: summary } };`,
+    },
+  });
+  for (const c of carried) connect(c.node, c.port, checks, c.port);
+  const outChecks = make(graphOutputNode, { title: 'checks', y: 560, width: 320, data: { id: 'checks', dataType: 'object' } });
+  connect(checks, 'checks', outChecks, 'value');
+  n.push(checks, outChecks);
 
   n.push(note(
     'ADVISOR APPROVAL SITS BETWEEN STAGE 06 AND STAGE 09.\n\n'
     + 'In the demo the advisor decides in the portal (Recommendations tab) and stage 09 reads the\n'
     + 'decisions back from D1 before rendering. In production this is a wait-for-event node, so the\n'
     + 'graph run itself pauses at the gate rather than the runner re-entering it.',
-    x + 420, 480, 620, 120));
+    20, 480, 620, 120));
 
   return graph('g_main', '00 · Monthly client report', 'Orchestrator. Runs the nine stages that produce one client\'s monthly report.', n);
 }
@@ -1000,6 +939,28 @@ function layoutGraph(g) {
     if (!moved) break;
   }
 
+  // An orchestrator is a chain: stage N feeds stage N+1's gate, so longest-path
+  // gives each stage a column of its own and nine stages come out as a
+  // staircase five thousand points wide. A chain has nothing to lay out
+  // sideways — it reads as a ladder, top to bottom, in one column. So a run of
+  // nodes of the same type where each feeds only the next collapses back into
+  // the column of the first of them.
+  const chain = flow.filter((n) => n.type === 'subGraph');
+  if (chain.length > 2) {
+    const inChain = new Set(chain.map((n) => n.id));
+    const links = chain.filter((n) => [...succs.get(n.id)].some((x) => inChain.has(x))).length;
+    if (links >= chain.length - 1) {
+      const first = Math.min(...chain.map((n) => col.get(n.id)));
+      for (const n of chain) col.set(n.id, first);
+      // Everything the chain feeds moves to just after it, so the ladder is
+      // not straddled by the nodes that read from its rungs.
+      for (const n of flow) {
+        if (inChain.has(n.id) || n.type === 'graphInput') continue;
+        if ([...preds.get(n.id)].some((p) => inChain.has(p))) col.set(n.id, first + 1);
+      }
+    }
+  }
+
   // A node that feeds nothing is an ending: push the graph outputs to the last
   // column so they line up, rather than floating wherever their input landed.
   const lastCol = Math.max(...col.values());
@@ -1007,6 +968,16 @@ function layoutGraph(g) {
 
   const columns = [];
   for (const n of flow) (columns[col.get(n.id)] ||= []).push(n);
+
+  // Collapsing the chain empties the columns it used to occupy, and a sparse
+  // array spreads as `undefined`, so one hole put every node in the
+  // orchestrator at y = NaN — all twenty-two drawn on the same spot. Compact
+  // the columns and renumber, so nothing below ever sees a column that is not
+  // there.
+  const dense = columns.filter((c) => c && c.length);
+  columns.length = 0;
+  columns.push(...dense);
+  for (const [i, c] of columns.entries()) for (const n of c) col.set(n.id, i);
 
   // ── order within a column: towards the middle of your own inputs ────────
   // The hand-written y is the tie-break, so the vertical order an author chose
@@ -1023,8 +994,14 @@ function layoutGraph(g) {
   // graph inputs put them rather than beside the call they belong to. Sweeping
   // back down the graph as well pulls each node towards what it feeds, which is
   // what actually untangles a fan-in.
+  // Only neighbours in another column may pull a node up or down. A collapsed
+  // chain has all its edges inside its own column, and counting those made the
+  // nine stages sort themselves into 01, 02, 09, 03, 05, 04 — each rung pulled
+  // towards the rung it feeds, which is in the same column it is trying to
+  // order. Those edges carry no horizontal information, so they get no vote.
   const barycentre = (n, side) => {
-    const ns = [...side.get(n.id)].filter((x) => rank.has(x));
+    const here = col.get(n.id);
+    const ns = [...side.get(n.id)].filter((x) => rank.has(x) && col.get(x) !== here);
     return ns.length ? ns.reduce((a, x) => a + rank.get(x), 0) / ns.length : rank.get(n.id);
   };
   const reorder = (i, side) => {
@@ -1101,13 +1078,14 @@ function layoutGraph(g) {
   return g;
 }
 
+const built = Object.fromEntries(STAGES.map((s) => [s.id, stageGraph(s)]));
 const subgraphs = {
-  ingest: graphIngest(),
-  market: graphMarketData(),
-  profit: graphProfitability(),
-  intel: graphMarketIntel(),
-  signals: graphSignals(),
-  recs: graphRecommendations(),
+  ingest: built.g_ingest,
+  market: built.g_market,
+  profit: built.g_profit,
+  intel: built.g_intel,
+  signals: built.g_signals,
+  recs: built.g_recs,
   narrative: graphNarrative(),
   assemble: graphAssemble(),
   render: graphRenderPersist(),
@@ -1129,7 +1107,6 @@ const project = {
       + 'src/llm/prompts.js and re-run `npm run build:graph` rather than editing prompt text here.',
   },
   graphs: Object.fromEntries([main, ...Object.values(subgraphs)].map(layoutGraph).map((g) => [g.metadata.id, g])),
-  plugins: [{ id: 'anthropic', name: 'Anthropic', type: 'built-in' }],
 };
 
 const yaml = serializeProject(project);

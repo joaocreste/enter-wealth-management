@@ -8,7 +8,7 @@ data:
         id: g_assemble
         name: 08 · Assemble the canonical report
       nodes:
-        '[code_0030_ewa]:code "Publication gate"':
+        '[code_002n_ewa]:code "Publication gate — stops the run"':
           data:
             allowConsole: true
             allowFetch: false
@@ -19,30 +19,35 @@ data:
               // "pending advisor approval" is not an error, it is the design:
               the advisor
 
-              // gate at stage 09 is the whole point. A blocking error is
-              anything else.
+              // gate at stage 09 is the whole point, so it travels on as a
+              count for the
+
+              // orchestrator to report. A blocking error is anything else, and
+              there is no
+
+              // letter to be had from a report that carries one.
 
               const r = inputs.result.value;
 
-              if ((r.blocking_errors || []).length) console.log('BLOCKING:',
-              r.blocking_errors.join(' | '));
+              const blocking = r.blocking_errors || [];
+
+              if (blocking.length) throw new Error(`stage 08: ${blocking.length}
+              blocking error(s) — ${blocking.join(' | ')}`);
 
               return {
                 report: { type: 'object', value: r },
-                ready: { type: 'boolean', value: (r.blocking_errors || []).length === 0 },
                 pending_approval: { type: 'number', value: r.pending_advisor_approval || 0 },
               };
             inputNames:
               - result
             outputNames:
               - report
-              - ready
               - pending_approval
           outgoingConnections:
-            - ready->"ready" graphOutput_0032_ewa/value
-            - report->"canonical_report" graphOutput_0031_ewa/value
-          visualData: 1880/256/440/null//
-        '[comment_002q_ewa]:comment "STAGE 08 — CANONICAL REPORT ASSEMBLY AND VALIDATION"':
+            - pending_approval->"pending_approval" graphOutput_002p_ewa/value
+            - report->"canonical_report" graphOutput_002o_ewa/value
+          visualData: 1880/232/460/null//
+        '[comment_002e_ewa]:comment "STAGE 08 — CANONICAL REPORT ASSEMBLY AND VALIDATION"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -64,55 +69,55 @@ data:
                 · attribution sums to the reported return
                 · nothing reaches a client that the advisor has not approved (§23)
           visualData: 40/40/520/null//
-        '[graphInput_002r_ewa]:graphInput "run_id"':
+        '[graphInput_002f_ewa]:graphInput "run_id"':
           data:
             dataType: string
             id: run_id
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Assemble and validate — request body" text_002y_ewa/run_id
-          visualData: 630/360/300/null//
-        '[graphInput_002s_ewa]:graphInput "api_base"':
+            - data->"Assemble and validate — request body" text_002l_ewa/run_id
+          visualData: 630/336/300/null//
+        '[graphInput_002g_ewa]:graphInput "api_base"':
           data:
             dataType: string
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Assemble and validate — endpoint" text_002w_ewa/api_base
-          visualData: 630/64/300/null//
-        '[graphInput_002t_ewa]:graphInput "api_token"':
+            - data->"Assemble and validate — endpoint" text_002k_ewa/api_base
+          visualData: 630/40/300/null//
+        '[graphInput_002h_ewa]:graphInput "service headers"':
           data:
-            dataType: string
-            id: api_token
+            dataType: object
+            id: headers
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_002x_ewa/api_token
-          visualData: 630/212/300/null//
-        '[graphInput_002u_ewa]:graphInput "gate (sequencing)"':
+            - data->"POST /api/pipeline/assemble" httpCall_002m_ewa/headers
+          visualData: 630/188/300/null//
+        '[graphInput_002i_ewa]:graphInput "gate — runs after the stage before it"':
           data:
             dataType: any
             id: gate
             useDefaultValueInput: false
-          visualData: 630/656/300/null//
-        '[graphInput_002v_ewa]:graphInput "reissue a published letter"':
+          visualData: 630/632/300/null//
+        '[graphInput_002j_ewa]:graphInput "reissue a published letter"':
           data:
             dataType: boolean
             id: reissue
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Assemble and validate — request body" text_002y_ewa/reissue
-          visualData: 630/508/300/null//
-        '[graphOutput_0031_ewa]:graphOutput "canonical_report"':
+            - data->"Assemble and validate — request body" text_002l_ewa/reissue
+          visualData: 630/484/300/null//
+        '[graphOutput_002o_ewa]:graphOutput "canonical_report"':
           data:
             dataType: object
             id: canonical_report
-          visualData: 2430/286/300/null//
-        '[graphOutput_0032_ewa]:graphOutput "ready"':
+          visualData: 2450/262/300/null//
+        '[graphOutput_002p_ewa]:graphOutput "pending_approval"':
           data:
-            dataType: boolean
-            id: ready
-          visualData: 2430/434/300/null//
-        '[httpCall_002z_ewa]:httpCall "POST /api/pipeline/assemble"':
+            dataType: number
+            id: pending_approval
+          visualData: 2450/410/300/null//
+        '[httpCall_002m_ewa]:httpCall "POST /api/pipeline/assemble"':
           data:
             body: ""
             errorOnNon200: true
@@ -123,26 +128,16 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Publication gate" code_0030_ewa/result
-          visualData: 1450/284/320/null//
-        '[object_002x_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/assemble" httpCall_002z_ewa/headers
-          visualData: 1040/308/300/null//
-        '[text_002w_ewa]:text "Assemble and validate — endpoint"':
+            - json->"Publication gate — stops the run" code_002n_ewa/result
+          visualData: 1450/260/320/null//
+        '[text_002k_ewa]:text "Assemble and validate — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/assemble"
           outgoingConnections:
-            - output->"POST /api/pipeline/assemble" httpCall_002z_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_002y_ewa]:text "Assemble and validate — request body"':
+            - output->"POST /api/pipeline/assemble" httpCall_002m_ewa/url
+          visualData: 1040/142/300/null//
+        '[text_002l_ewa]:text "Assemble and validate — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -151,8 +146,8 @@ data:
                 "force": {{reissue}}
               }
           outgoingConnections:
-            - output->"POST /api/pipeline/assemble" httpCall_002z_ewa/req_body
-          visualData: 1040/560/300/null//
+            - output->"POST /api/pipeline/assemble" httpCall_002m_ewa/req_body
+          visualData: 1040/410/300/null//
     g_ingest:
       metadata:
         description: Loads the approved client record, policy version, portfolio
@@ -190,15 +185,15 @@ data:
           outgoingConnections:
             - data->"Load client, policy and snapshot — endpoint"
               text_0007_ewa/api_base
-          visualData: 630/64/300/null//
-        '[graphInput_0003_ewa]:graphInput "api_token"':
+          visualData: 630/40/300/null//
+        '[graphInput_0003_ewa]:graphInput "service headers"':
           data:
-            dataType: string
-            id: api_token
+            dataType: object
+            id: headers
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_0008_ewa/api_token
-          visualData: 630/212/300/null//
+            - data->"POST /api/pipeline/context" httpCall_0009_ewa/headers
+          visualData: 630/188/300/null//
         '[graphInput_0004_ewa]:graphInput "run_id"':
           data:
             dataType: string
@@ -206,8 +201,8 @@ data:
             useDefaultValueInput: false
           outgoingConnections:
             - data->"Load client, policy and snapshot — request body"
-              text_0009_ewa/run_id
-          visualData: 630/360/300/null//
+              text_0008_ewa/run_id
+          visualData: 630/336/300/null//
         '[graphInput_0005_ewa]:graphInput "client_id"':
           data:
             dataType: string
@@ -215,8 +210,8 @@ data:
             useDefaultValueInput: false
           outgoingConnections:
             - data->"Load client, policy and snapshot — request body"
-              text_0009_ewa/client_id
-          visualData: 630/508/300/null//
+              text_0008_ewa/client_id
+          visualData: 630/484/300/null//
         '[graphInput_0006_ewa]:graphInput "month"':
           data:
             dataType: string
@@ -224,14 +219,14 @@ data:
             useDefaultValueInput: false
           outgoingConnections:
             - data->"Load client, policy and snapshot — request body"
-              text_0009_ewa/month
-          visualData: 630/656/300/null//
-        '[graphOutput_000b_ewa]:graphOutput "context"':
+              text_0008_ewa/month
+          visualData: 630/632/300/null//
+        '[graphOutput_000a_ewa]:graphOutput "context"':
           data:
             dataType: object
             id: context
-          visualData: 1880/360/300/null//
-        '[httpCall_000a_ewa]:httpCall "POST /api/pipeline/context"':
+          visualData: 1880/336/300/null//
+        '[httpCall_0009_ewa]:httpCall "POST /api/pipeline/context"':
           data:
             body: ""
             errorOnNon200: true
@@ -242,26 +237,16 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"context" graphOutput_000b_ewa/value
-          visualData: 1450/284/320/null//
-        '[object_0008_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/context" httpCall_000a_ewa/headers
-          visualData: 1040/308/300/null//
+            - json->"context" graphOutput_000a_ewa/value
+          visualData: 1450/260/320/null//
         '[text_0007_ewa]:text "Load client, policy and snapshot — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/context"
           outgoingConnections:
-            - output->"POST /api/pipeline/context" httpCall_000a_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_0009_ewa]:text "Load client, policy and snapshot — request body"':
+            - output->"POST /api/pipeline/context" httpCall_0009_ewa/url
+          visualData: 1040/142/300/null//
+        '[text_0008_ewa]:text "Load client, policy and snapshot — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -271,8 +256,8 @@ data:
                 "month": "{{month}}"
               }
           outgoingConnections:
-            - output->"POST /api/pipeline/context" httpCall_000a_ewa/req_body
-          visualData: 1040/560/300/null//
+            - output->"POST /api/pipeline/context" httpCall_0009_ewa/req_body
+          visualData: 1040/410/300/null//
     g_intel:
       metadata:
         description: Retrieves indicators, fires configurable thresholds and maps events
@@ -280,7 +265,7 @@ data:
         id: g_intel
         name: 04 · Market indicators, events and impact
       nodes:
-        '[comment_0010_ewa]:comment "STAGE 04 — MARKET INDICATORS, EVENTS AND PORTFOLIO IMPACT"':
+        '[comment_000v_ewa]:comment "STAGE 04 — MARKET INDICATORS, EVENTS AND PORTFOLIO IMPACT"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -303,44 +288,44 @@ data:
               Every statement carries the source id of the observation it rests
               on (§9).
           visualData: 40/40/520/null//
-        '[graphInput_0011_ewa]:graphInput "run_id"':
-          data:
-            dataType: string
-            id: run_id
-            useDefaultValueInput: false
-          outgoingConnections:
-            - data->"Indicators, triggers, events, impact — request body"
-              text_0017_ewa/run_id
-          visualData: 630/434/300/null//
-        '[graphInput_0012_ewa]:graphInput "api_base"':
+        '[graphInput_000w_ewa]:graphInput "api_base"':
           data:
             dataType: string
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
             - data->"Indicators, triggers, events, impact — endpoint"
-              text_0015_ewa/api_base
-          visualData: 630/138/300/null//
-        '[graphInput_0013_ewa]:graphInput "api_token"':
+              text_0010_ewa/api_base
+          visualData: 630/40/300/null//
+        '[graphInput_000x_ewa]:graphInput "service headers"':
           data:
-            dataType: string
-            id: api_token
+            dataType: object
+            id: headers
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_0016_ewa/api_token
-          visualData: 630/286/300/null//
-        '[graphInput_0014_ewa]:graphInput "gate (sequencing)"':
+            - data->"POST /api/pipeline/market-intel" httpCall_0012_ewa/headers
+          visualData: 630/188/300/null//
+        '[graphInput_000y_ewa]:graphInput "gate — runs after the stage before it"':
           data:
             dataType: any
             id: gate
             useDefaultValueInput: false
-          visualData: 630/582/300/null//
-        '[graphOutput_0019_ewa]:graphOutput "market_intel"':
+          visualData: 630/484/300/null//
+        '[graphInput_000z_ewa]:graphInput "run_id"':
+          data:
+            dataType: string
+            id: run_id
+            useDefaultValueInput: false
+          outgoingConnections:
+            - data->"Indicators, triggers, events, impact — request body"
+              text_0011_ewa/run_id
+          visualData: 630/336/300/null//
+        '[graphOutput_0013_ewa]:graphOutput "market_intel"':
           data:
             dataType: object
             id: market_intel
-          visualData: 1880/360/300/null//
-        '[httpCall_0018_ewa]:httpCall "POST /api/pipeline/market-intel"':
+          visualData: 1880/262/300/null//
+        '[httpCall_0012_ewa]:httpCall "POST /api/pipeline/market-intel"':
           data:
             body: ""
             errorOnNon200: true
@@ -351,26 +336,16 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"market_intel" graphOutput_0019_ewa/value
-          visualData: 1450/284/320/null//
-        '[object_0016_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/market-intel" httpCall_0018_ewa/headers
-          visualData: 1040/308/300/null//
-        '[text_0015_ewa]:text "Indicators, triggers, events, impact — endpoint"':
+            - json->"market_intel" graphOutput_0013_ewa/value
+          visualData: 1450/186/320/null//
+        '[text_0010_ewa]:text "Indicators, triggers, events, impact — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/market-intel"
           outgoingConnections:
-            - output->"POST /api/pipeline/market-intel" httpCall_0018_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_0017_ewa]:text "Indicators, triggers, events, impact — request body"':
+            - output->"POST /api/pipeline/market-intel" httpCall_0012_ewa/url
+          visualData: 1040/68/300/null//
+        '[text_0011_ewa]:text "Indicators, triggers, events, impact — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -379,8 +354,8 @@ data:
               }
           outgoingConnections:
             - output->"POST /api/pipeline/market-intel"
-              httpCall_0018_ewa/req_body
-          visualData: 1040/560/300/null//
+              httpCall_0012_ewa/req_body
+          visualData: 1040/336/300/null//
     g_main:
       metadata:
         description: Orchestrator. Runs the nine stages that produce one client's
@@ -388,7 +363,41 @@ data:
         id: g_main
         name: 00 · Monthly client report
       nodes:
-        '[comment_003t_ewa]:comment "XP ASSET MANAGEMENT — MONTHLY CLIENT REPORT"':
+        '[code_003w_ewa]:code "Run checks — what the advisor has to look at"':
+          data:
+            allowConsole: true
+            allowFetch: false
+            allowProcess: false
+            allowRequire: false
+            allowRivet: false
+            code: >-
+              const conflicts = inputs.signal_conflicts?.value || [];
+
+              const review = inputs.needs_review?.value || [];
+
+              const pending = inputs.pending_approval?.value || 0;
+
+              const summary = {
+                signal_conflicts: conflicts.length,
+                need_advisor_decision: review.length,
+                pending_advisor_approval: pending,
+              };
+
+              console.log(`${summary.signal_conflicts} signal conflict(s),
+              ${summary.need_advisor_decision} proposal(s) needing a decision,
+              ${summary.pending_advisor_approval} pending approval`);
+
+              return { checks: { type: 'object', value: summary } };
+            inputNames:
+              - signal_conflicts
+              - needs_review
+              - pending_approval
+            outputNames:
+              - checks
+          outgoingConnections:
+            - checks->"checks" graphOutput_003x_ewa/value
+          visualData: 1980/870/460/null//
+        '[comment_003d_ewa]:comment "XP ASSET MANAGEMENT — MONTHLY CLIENT REPORT"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -414,7 +423,7 @@ data:
               or open this project in Rivet Desktop and press Run with the
               inputs below.
           visualData: 40/40/520/null//
-        '[comment_003u_ewa]:comment "THIS GRAPH IS ONE OF TWO DRIVERS"':
+        '[comment_003e_ewa]:comment "THIS GRAPH IS ONE OF TWO DRIVERS"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -443,7 +452,7 @@ data:
               the prompts stay visible and editable; the agent is the surface an
               advisor actually uses.
           visualData: 40/240/520/null//
-        '[comment_004b_ewa]:comment "ADVISOR APPROVAL SITS BETWEEN STAGE 06 AND STAGE 09."':
+        '[comment_003y_ewa]:comment "ADVISOR APPROVAL SITS BETWEEN STAGE 06 AND STAGE 09."':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -463,161 +472,183 @@ data:
               graph run itself pauses at the gate rather than the runner
               re-entering it.
           visualData: 40/430/520/null//
-        '[graphInput_003v_ewa]:graphInput "api_base"':
+        '[graphInput_003f_ewa]:graphInput "api_base"':
           data:
             dataType: string
             defaultValue: http://127.0.0.1:8788
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"01 · Ingest" subGraph_0041_ewa/api_base
-            - data->"02 · Market data" subGraph_0042_ewa/api_base
-            - data->"03 · Profitability" subGraph_0043_ewa/api_base
-            - data->"04 · Market intelligence" subGraph_0044_ewa/api_base
-            - data->"05 · TradingView signals" subGraph_0045_ewa/api_base
+            - data->"01 · Ingest" subGraph_003m_ewa/api_base
+            - data->"02 · Market data" subGraph_003n_ewa/api_base
+            - data->"03 · Profitability" subGraph_003o_ewa/api_base
+            - data->"04 · Market intelligence" subGraph_003p_ewa/api_base
+            - data->"05 · TradingView signals" subGraph_003q_ewa/api_base
             - data->"06 · Recommendations + suitability"
-              subGraph_0046_ewa/api_base
-            - data->"07 · Narrative" subGraph_0047_ewa/api_base
-            - data->"08 · Canonical report" subGraph_0048_ewa/api_base
-            - data->"09 · Render + persist" subGraph_0049_ewa/api_base
-          visualData: 630/40/320/null//
-        '[graphInput_003w_ewa]:graphInput "api_token"':
+              subGraph_003r_ewa/api_base
+            - data->"07 · Narrative" subGraph_003s_ewa/api_base
+            - data->"08 · Canonical report" subGraph_003t_ewa/api_base
+            - data->"09 · Render + persist" subGraph_003u_ewa/api_base
+          visualData: 630/604/320/null//
+        '[graphInput_003g_ewa]:graphInput "api_token"':
           data:
             dataType: string
             id: api_token
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"01 · Ingest" subGraph_0041_ewa/api_token
-            - data->"02 · Market data" subGraph_0042_ewa/api_token
-            - data->"03 · Profitability" subGraph_0043_ewa/api_token
-            - data->"04 · Market intelligence" subGraph_0044_ewa/api_token
-            - data->"05 · TradingView signals" subGraph_0045_ewa/api_token
-            - data->"06 · Recommendations + suitability"
-              subGraph_0046_ewa/api_token
-            - data->"07 · Narrative" subGraph_0047_ewa/api_token
-            - data->"08 · Canonical report" subGraph_0048_ewa/api_token
-            - data->"09 · Render + persist" subGraph_0049_ewa/api_token
-          visualData: 630/188/320/null//
-        '[graphInput_003x_ewa]:graphInput "client_id"':
+            - data->"Service headers — built once, passed to every stage"
+              object_003l_ewa/api_token
+          visualData: 630/752/320/null//
+        '[graphInput_003h_ewa]:graphInput "client_id"':
           data:
             dataType: string
             defaultValue: cli_albert
             id: client_id
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"01 · Ingest" subGraph_0041_ewa/client_id
-          visualData: 630/336/320/null//
-        '[graphInput_003y_ewa]:graphInput "month"':
+            - data->"01 · Ingest" subGraph_003m_ewa/client_id
+          visualData: 630/900/320/null//
+        '[graphInput_003i_ewa]:graphInput "month"':
           data:
             dataType: string
             id: month
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"01 · Ingest" subGraph_0041_ewa/month
-          visualData: 630/484/320/null//
-        '[graphInput_003z_ewa]:graphInput "run_id"':
+            - data->"01 · Ingest" subGraph_003m_ewa/month
+          visualData: 630/1048/320/null//
+        '[graphInput_003j_ewa]:graphInput "run_id"':
           data:
             dataType: string
             id: run_id
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"01 · Ingest" subGraph_0041_ewa/run_id
-            - data->"02 · Market data" subGraph_0042_ewa/run_id
-            - data->"03 · Profitability" subGraph_0043_ewa/run_id
-            - data->"04 · Market intelligence" subGraph_0044_ewa/run_id
-            - data->"05 · TradingView signals" subGraph_0045_ewa/run_id
-            - data->"06 · Recommendations + suitability" subGraph_0046_ewa/run_id
-            - data->"07 · Narrative" subGraph_0047_ewa/run_id
-            - data->"08 · Canonical report" subGraph_0048_ewa/run_id
-            - data->"09 · Render + persist" subGraph_0049_ewa/run_id
-          visualData: 630/632/320/null//
-        '[graphInput_0040_ewa]:graphInput "reissue"':
+            - data->"01 · Ingest" subGraph_003m_ewa/run_id
+            - data->"02 · Market data" subGraph_003n_ewa/run_id
+            - data->"03 · Profitability" subGraph_003o_ewa/run_id
+            - data->"04 · Market intelligence" subGraph_003p_ewa/run_id
+            - data->"05 · TradingView signals" subGraph_003q_ewa/run_id
+            - data->"06 · Recommendations + suitability" subGraph_003r_ewa/run_id
+            - data->"07 · Narrative" subGraph_003s_ewa/run_id
+            - data->"08 · Canonical report" subGraph_003t_ewa/run_id
+            - data->"09 · Render + persist" subGraph_003u_ewa/run_id
+          visualData: 630/1196/320/null//
+        '[graphInput_003k_ewa]:graphInput "reissue"':
           data:
             dataType: boolean
             defaultValue: false
             id: reissue
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"08 · Canonical report" subGraph_0048_ewa/reissue
-          visualData: 630/780/320/null//
-        '[graphOutput_004a_ewa]:graphOutput "report"':
+            - data->"08 · Canonical report" subGraph_003t_ewa/reissue
+          visualData: 630/1344/320/null//
+        '[graphOutput_003v_ewa]:graphOutput "report"':
           data:
             dataType: object
             id: report
-          visualData: 4930/410/320/null//
-        '[subGraph_0041_ewa]:subGraph "01 · Ingest"':
+          visualData: 2550/900/320/null//
+        '[graphOutput_003x_ewa]:graphOutput "checks"':
+          data:
+            dataType: object
+            id: checks
+          visualData: 2550/1048/320/null//
+        '[object_003l_ewa]:object "Service headers — built once, passed to every stage"':
+          data:
+            jsonTemplate: |-
+              {
+                "content-type": "application/json",
+                "x-service-token": "{{api_token}}"
+              }
+          outgoingConnections:
+            - output->"01 · Ingest" subGraph_003m_ewa/headers
+            - output->"02 · Market data" subGraph_003n_ewa/headers
+            - output->"03 · Profitability" subGraph_003o_ewa/headers
+            - output->"04 · Market intelligence" subGraph_003p_ewa/headers
+            - output->"05 · TradingView signals" subGraph_003q_ewa/headers
+            - output->"06 · Recommendations + suitability"
+              subGraph_003r_ewa/headers
+            - output->"07 · Narrative" subGraph_003s_ewa/headers
+            - output->"08 · Canonical report" subGraph_003t_ewa/headers
+            - output->"09 · Render + persist" subGraph_003u_ewa/headers
+          visualData: 1060/922/380/null//
+        '[subGraph_003m_ewa]:subGraph "01 · Ingest"':
           data:
             graphId: g_ingest
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - context->"02 · Market data" subGraph_0042_ewa/gate
-          visualData: 1060/372/320/null//
-        '[subGraph_0042_ewa]:subGraph "02 · Market data"':
+            - context->"02 · Market data" subGraph_003n_ewa/gate
+          visualData: 1550/40/320/null//
+        '[subGraph_003n_ewa]:subGraph "02 · Market data"':
           data:
             graphId: g_market
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - market_data->"03 · Profitability" subGraph_0043_ewa/gate
-          visualData: 1490/372/320/null//
-        '[subGraph_0043_ewa]:subGraph "03 · Profitability"':
+            - market_data->"03 · Profitability" subGraph_003o_ewa/gate
+          visualData: 1550/264/320/null//
+        '[subGraph_003o_ewa]:subGraph "03 · Profitability"':
           data:
             graphId: g_profit
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - performance->"04 · Market intelligence" subGraph_0044_ewa/gate
-          visualData: 1920/372/320/null//
-        '[subGraph_0044_ewa]:subGraph "04 · Market intelligence"':
+            - performance->"04 · Market intelligence" subGraph_003p_ewa/gate
+          visualData: 1550/488/320/null//
+        '[subGraph_003p_ewa]:subGraph "04 · Market intelligence"':
           data:
             graphId: g_intel
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - market_intel->"05 · TradingView signals" subGraph_0045_ewa/gate
-          visualData: 2350/372/320/null//
-        '[subGraph_0045_ewa]:subGraph "05 · TradingView signals"':
+            - market_intel->"05 · TradingView signals" subGraph_003q_ewa/gate
+          visualData: 1550/712/320/null//
+        '[subGraph_003q_ewa]:subGraph "05 · TradingView signals"':
           data:
             graphId: g_signals
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
+            - signal_conflicts->"Run checks — what the advisor has to look at"
+              code_003w_ewa/signal_conflicts
             - signals->"06 · Recommendations + suitability"
-              subGraph_0046_ewa/gate
-          visualData: 2780/372/320/null//
-        '[subGraph_0046_ewa]:subGraph "06 · Recommendations + suitability"':
+              subGraph_003r_ewa/gate
+          visualData: 1550/936/320/null//
+        '[subGraph_003r_ewa]:subGraph "06 · Recommendations + suitability"':
           data:
             graphId: g_recs
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - recommendations->"07 · Narrative" subGraph_0047_ewa/gate
-          visualData: 3210/372/320/null//
-        '[subGraph_0047_ewa]:subGraph "07 · Narrative"':
+            - needs_review->"Run checks — what the advisor has to look at"
+              code_003w_ewa/needs_review
+            - recommendations->"07 · Narrative" subGraph_003s_ewa/gate
+          visualData: 1550/1160/320/null//
+        '[subGraph_003s_ewa]:subGraph "07 · Narrative"':
           data:
             graphId: g_narrative
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - narrative->"08 · Canonical report" subGraph_0048_ewa/gate
-          visualData: 3640/372/320/null//
-        '[subGraph_0048_ewa]:subGraph "08 · Canonical report"':
+            - narrative->"08 · Canonical report" subGraph_003t_ewa/gate
+          visualData: 1550/1384/320/null//
+        '[subGraph_003t_ewa]:subGraph "08 · Canonical report"':
           data:
             graphId: g_assemble
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - canonical_report->"09 · Render + persist" subGraph_0049_ewa/gate
-          visualData: 4070/372/320/null//
-        '[subGraph_0049_ewa]:subGraph "09 · Render + persist"':
+            - canonical_report->"09 · Render + persist" subGraph_003u_ewa/gate
+            - pending_approval->"Run checks — what the advisor has to look at"
+              code_003w_ewa/pending_approval
+          visualData: 1550/1608/320/null//
+        '[subGraph_003u_ewa]:subGraph "09 · Render + persist"':
           data:
             graphId: g_render
             useAsGraphPartialOutput: true
             useErrorOutput: false
           outgoingConnections:
-            - report->"report" graphOutput_004a_ewa/value
-          visualData: 4500/372/320/null//
+            - report->"report" graphOutput_003v_ewa/value
+          visualData: 1550/1832/320/null//
     g_market:
       metadata:
         description: Prices every position through the approved provider chain and
@@ -625,7 +656,7 @@ data:
         id: g_market
         name: 02 · Fetch and validate market data
       nodes:
-        '[code_000l_ewa]:code "Validation gate"':
+        '[code_000j_ewa]:code "Validation gate — stops the run"':
           data:
             allowConsole: true
             allowFetch: false
@@ -639,27 +670,29 @@ data:
               // An unavailable position is acceptable and is disclosed in the
               letter; a
 
-              // failed price sanity check is not.
+              // failed price sanity check is not, so this throws rather than
+              reporting a
+
+              // verdict nothing downstream is obliged to read.
 
               const r = inputs.result.value;
 
               const failed = (r.review || []).filter((v) => v.status ===
               'fail');
 
-              return {
-                market: { type: 'object', value: r },
-                blocked: { type: 'boolean', value: failed.length > 0 },
-              };
+              if (failed.length) {
+                throw new Error(`stage 02: ${failed.length} position(s) failed price validation — ${failed.map((f) => f.symbol || f.position_id).join(', ')}`);
+              }
+
+              return { market: { type: 'object', value: r } };
             inputNames:
               - result
             outputNames:
               - market
-              - blocked
           outgoingConnections:
-            - blocked->"blocked" graphOutput_000n_ewa/value
-            - market->"market_data" graphOutput_000m_ewa/value
-          visualData: 1880/256/420/null//
-        '[comment_000c_ewa]:comment "STAGE 02 — MARKET DATA AND VALIDATION"':
+            - market->"market_data" graphOutput_000k_ewa/value
+          visualData: 1880/158/440/null//
+        '[comment_000b_ewa]:comment "STAGE 02 — MARKET DATA AND VALIDATION"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -683,48 +716,43 @@ data:
               It is never estimated, and it contributes exactly zero to the
               return (§30).
           visualData: 40/40/520/null//
-        '[graphInput_000d_ewa]:graphInput "run_id"':
+        '[graphInput_000c_ewa]:graphInput "api_base"':
+          data:
+            dataType: string
+            id: api_base
+            useDefaultValueInput: false
+          outgoingConnections:
+            - data->"Fetch and validate prices — endpoint" text_000g_ewa/api_base
+          visualData: 630/40/300/null//
+        '[graphInput_000d_ewa]:graphInput "service headers"':
+          data:
+            dataType: object
+            id: headers
+            useDefaultValueInput: false
+          outgoingConnections:
+            - data->"POST /api/pipeline/market-data" httpCall_000i_ewa/headers
+          visualData: 630/188/300/null//
+        '[graphInput_000e_ewa]:graphInput "gate — runs after the stage before it"':
+          data:
+            dataType: any
+            id: gate
+            useDefaultValueInput: false
+          visualData: 630/484/300/null//
+        '[graphInput_000f_ewa]:graphInput "run_id"':
           data:
             dataType: string
             id: run_id
             useDefaultValueInput: false
           outgoingConnections:
             - data->"Fetch and validate prices — request body"
-              text_000j_ewa/run_id
-          visualData: 630/434/300/null//
-        '[graphInput_000e_ewa]:graphInput "api_base"':
-          data:
-            dataType: string
-            id: api_base
-            useDefaultValueInput: false
-          outgoingConnections:
-            - data->"Fetch and validate prices — endpoint" text_000h_ewa/api_base
-          visualData: 630/138/300/null//
-        '[graphInput_000f_ewa]:graphInput "api_token"':
-          data:
-            dataType: string
-            id: api_token
-            useDefaultValueInput: false
-          outgoingConnections:
-            - data->"Service headers" object_000i_ewa/api_token
-          visualData: 630/286/300/null//
-        '[graphInput_000g_ewa]:graphInput "gate (sequencing)"':
-          data:
-            dataType: any
-            id: gate
-            useDefaultValueInput: false
-          visualData: 630/582/300/null//
-        '[graphOutput_000m_ewa]:graphOutput "market_data"':
+              text_000h_ewa/run_id
+          visualData: 630/336/300/null//
+        '[graphOutput_000k_ewa]:graphOutput "market_data"':
           data:
             dataType: object
             id: market_data
-          visualData: 2410/286/300/null//
-        '[graphOutput_000n_ewa]:graphOutput "blocked"':
-          data:
-            dataType: boolean
-            id: blocked
-          visualData: 2410/434/300/null//
-        '[httpCall_000k_ewa]:httpCall "POST /api/pipeline/market-data"':
+          visualData: 2430/262/300/null//
+        '[httpCall_000i_ewa]:httpCall "POST /api/pipeline/market-data"':
           data:
             body: ""
             errorOnNon200: true
@@ -735,26 +763,16 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Validation gate" code_000l_ewa/result
-          visualData: 1450/284/320/null//
-        '[object_000i_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/market-data" httpCall_000k_ewa/headers
-          visualData: 1040/308/300/null//
-        '[text_000h_ewa]:text "Fetch and validate prices — endpoint"':
+            - json->"Validation gate — stops the run" code_000j_ewa/result
+          visualData: 1450/186/320/null//
+        '[text_000g_ewa]:text "Fetch and validate prices — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/market-data"
           outgoingConnections:
-            - output->"POST /api/pipeline/market-data" httpCall_000k_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_000j_ewa]:text "Fetch and validate prices — request body"':
+            - output->"POST /api/pipeline/market-data" httpCall_000i_ewa/url
+          visualData: 1040/68/300/null//
+        '[text_000h_ewa]:text "Fetch and validate prices — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -762,8 +780,8 @@ data:
                 "run_id": "{{run_id}}"
               }
           outgoingConnections:
-            - output->"POST /api/pipeline/market-data" httpCall_000k_ewa/req_body
-          visualData: 1040/560/300/null//
+            - output->"POST /api/pipeline/market-data" httpCall_000i_ewa/req_body
+          visualData: 1040/336/300/null//
     g_narrative:
       metadata:
         description: The only language-model stage. Writes the Portuguese client letter
@@ -771,24 +789,38 @@ data:
         id: g_narrative
         name: 07 · Narrative — advisor view and client letter
       nodes:
-        '[code_0027_ewa]:code "FACTS as text"':
+        '[code_001y_ewa]:code "FACTS as text, and the two names the letter uses"':
           data:
             allowConsole: false
             allowFetch: false
             allowProcess: false
             allowRequire: false
             allowRivet: false
-            code: "return { facts_json: { type: 'string', value:
-              inputs.facts.value.facts_json } };"
+            code: >-
+              const f = inputs.facts.value;
+
+              const facts = JSON.parse(f.facts_json || '{}');
+
+              return {
+                facts_json: { type: 'string', value: f.facts_json },
+                advisor_name: { type: 'string', value: facts.advisor?.name || 'o assessor' },
+                client_first_name: { type: 'string', value: facts.client?.first_name || (facts.client?.name || '').split(' ')[0] || 'o cliente' },
+              };
             inputNames:
               - facts
             outputNames:
               - facts_json
+              - advisor_name
+              - client_first_name
           outgoingConnections:
+            - advisor_name->"Prompt — monthly client letter (writes pt-BR)"
+              text_0020_ewa/advisor_name
+            - client_first_name->"Prompt — monthly client letter (writes pt-BR)"
+              text_0020_ewa/client_first_name
             - facts_json->"Prompt — monthly client letter (writes pt-BR)"
-              text_0029_ewa/facts_json
-          visualData: 1880/694/300/null//
-        '[code_002a_ewa]:code "Build the model request"':
+              text_0020_ewa/facts_json
+          visualData: 1880/442/380/null//
+        '[code_0021_ewa]:code "Build the model request"':
           data:
             allowConsole: false
             allowFetch: false
@@ -813,9 +845,9 @@ data:
             outputNames:
               - body
           outgoingConnections:
-            - body->"POST /api/llm/complete" httpCall_002d_ewa/req_body
-          visualData: 3020/434/380/null//
-        '[code_002e_ewa]:code "Parse the letter and check it against FACTS"':
+            - body->"POST /api/llm/complete" httpCall_0023_ewa/req_body
+          visualData: 3100/308/380/null//
+        '[code_0024_ewa]:code "Parse the letter and check it against FACTS"':
           data:
             allowConsole: true
             allowFetch: false
@@ -865,11 +897,11 @@ data:
               - model
               - ok
           outgoingConnections:
-            - letter_json->"Build the store request" code_002f_ewa/letter_json
-            - model->"Build the store request" code_002f_ewa/model
-            - ok->"Model letter accepted?" ifElse_002o_ewa/if
-          visualData: 3940/694/460/null//
-        '[code_002f_ewa]:code "Build the store request"':
+            - letter_json->"Build the store request" code_0025_ewa/letter_json
+            - model->"Build the store request" code_0025_ewa/model
+            - ok->"Model letter accepted?" ifElse_002c_ewa/if
+          visualData: 4020/442/460/null//
+        '[code_0025_ewa]:code "Build the store request"':
           data:
             allowConsole: false
             allowFetch: false
@@ -897,9 +929,9 @@ data:
               - body
           outgoingConnections:
             - body->"POST /api/pipeline/narrative (model letter)"
-              httpCall_002i_ewa/req_body
-          visualData: 4510/40/380/null//
-        '[comment_001y_ewa]:comment "STAGE 07 — NARRATIVE"':
+              httpCall_0027_ewa/req_body
+          visualData: 4590/40/380/null//
+        '[comment_001q_ewa]:comment "STAGE 07 — NARRATIVE"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -949,7 +981,7 @@ data:
               and gives one place where the provider fallback lives. The prompts
               stay here.
           visualData: 40/40/520/null//
-        '[comment_002j_ewa]:comment "DETERMINISTIC BRANCH"':
+        '[comment_0028_ewa]:comment "DETERMINISTIC BRANCH"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -971,50 +1003,52 @@ data:
 
               in the Audit tab.
           visualData: 40/380/520/null//
-        '[graphInput_001z_ewa]:graphInput "run_id"':
+        '[graphInput_001r_ewa]:graphInput "run_id"':
           data:
             dataType: string
             id: run_id
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Build the store request" code_002f_ewa/run_id
-            - data->"Deterministic narrative — request body" text_002m_ewa/run_id
-            - data->"FACTS for the letter — request body" text_0025_ewa/run_id
-          visualData: 630/872/300/null//
-        '[graphInput_0020_ewa]:graphInput "api_base"':
+            - data->"Build the store request" code_0025_ewa/run_id
+            - data->"Deterministic narrative — request body" text_002a_ewa/run_id
+            - data->"FACTS for the letter — request body" text_001w_ewa/run_id
+          visualData: 630/620/300/null//
+        '[graphInput_001s_ewa]:graphInput "api_base"':
           data:
             dataType: string
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Deterministic narrative — endpoint" text_002k_ewa/api_base
-            - data->"FACTS for the letter — endpoint" text_0023_ewa/api_base
-            - data->"Model gateway endpoint" text_002b_ewa/api_base
-            - data->"Narrative endpoint" text_002g_ewa/api_base
-          visualData: 630/576/300/null//
-        '[graphInput_0021_ewa]:graphInput "api_token"':
+            - data->"Deterministic narrative — endpoint" text_0029_ewa/api_base
+            - data->"FACTS for the letter — endpoint" text_001v_ewa/api_base
+            - data->"Model gateway endpoint" text_0022_ewa/api_base
+            - data->"Narrative endpoint" text_0026_ewa/api_base
+          visualData: 630/472/300/null//
+        '[graphInput_001t_ewa]:graphInput "service headers"':
           data:
-            dataType: string
-            id: api_token
+            dataType: object
+            id: headers
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_0024_ewa/api_token
-            - data->"Service headers" object_002c_ewa/api_token
-            - data->"Service headers" object_002h_ewa/api_token
-            - data->"Service headers" object_002l_ewa/api_token
-          visualData: 630/724/300/null//
-        '[graphInput_0022_ewa]:graphInput "gate (sequencing)"':
+            - data->"POST /api/llm/complete" httpCall_0023_ewa/headers
+            - data->"POST /api/pipeline/narrative (model letter)"
+              httpCall_0027_ewa/headers
+            - data->"POST /api/pipeline/narrative" httpCall_002b_ewa/headers
+            - data->"POST /api/pipeline/narrative-facts"
+              httpCall_001x_ewa/headers
+          visualData: 630/324/300/null//
+        '[graphInput_001u_ewa]:graphInput "gate — runs after the stage before it"':
           data:
             dataType: any
             id: gate
             useDefaultValueInput: false
-          visualData: 630/1020/300/null//
-        '[graphOutput_002p_ewa]:graphOutput "narrative"':
+          visualData: 630/768/300/null//
+        '[graphOutput_002d_ewa]:graphOutput "narrative"':
           data:
             dataType: object
             id: narrative
-          visualData: 5780/798/300/null//
-        '[httpCall_0026_ewa]:httpCall "POST /api/pipeline/narrative-facts"':
+          visualData: 5860/546/300/null//
+        '[httpCall_001x_ewa]:httpCall "POST /api/pipeline/narrative-facts"':
           data:
             body: ""
             errorOnNon200: true
@@ -1025,9 +1059,10 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"FACTS as text" code_0027_ewa/facts
-          visualData: 1450/722/320/null//
-        '[httpCall_002d_ewa]:httpCall "POST /api/llm/complete"':
+            - json->"FACTS as text, and the two names the letter uses"
+              code_001y_ewa/facts
+          visualData: 1450/470/320/null//
+        '[httpCall_0023_ewa]:httpCall "POST /api/llm/complete"':
           data:
             body: ""
             errorOnNon200: true
@@ -1039,9 +1074,9 @@ data:
             useUrlInput: true
           outgoingConnections:
             - json->"Parse the letter and check it against FACTS"
-              code_002e_ewa/response
-          visualData: 3510/722/320/null//
-        '[httpCall_002i_ewa]:httpCall "POST /api/pipeline/narrative (model letter)"':
+              code_0024_ewa/response
+          visualData: 3590/470/320/null//
+        '[httpCall_0027_ewa]:httpCall "POST /api/pipeline/narrative (model letter)"':
           data:
             body: ""
             errorOnNon200: true
@@ -1052,9 +1087,9 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Model letter accepted?" ifElse_002o_ewa/true
-          visualData: 5000/572/340/null//
-        '[httpCall_002n_ewa]:httpCall "POST /api/pipeline/narrative"':
+            - json->"Model letter accepted?" ifElse_002c_ewa/true
+          visualData: 5080/320/340/null//
+        '[httpCall_002b_ewa]:httpCall "POST /api/pipeline/narrative"':
           data:
             body: ""
             errorOnNon200: true
@@ -1065,64 +1100,22 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Model letter accepted?" ifElse_002o_ewa/false
-          visualData: 5000/872/320/null//
-        '[ifElse_002o_ewa]:ifElse "Model letter accepted?"':
+            - json->"Model letter accepted?" ifElse_002c_ewa/false
+          visualData: 5080/620/320/null//
+        '[ifElse_002c_ewa]:ifElse "Model letter accepted?"':
           data:
             unconnectedControlFlowExcluded: true
           outgoingConnections:
-            - output->"narrative" graphOutput_002p_ewa/value
-          visualData: 5450/778/220/null//
-        '[object_0024_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/narrative-facts"
-              httpCall_0026_ewa/headers
-          visualData: 1040/746/300/null//
-        '[object_002c_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/llm/complete" httpCall_002d_ewa/headers
-          visualData: 3020/1058/380/null//
-        '[object_002h_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/narrative (model letter)"
-              httpCall_002i_ewa/headers
-          visualData: 4510/664/380/null//
-        '[object_002l_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/narrative" httpCall_002n_ewa/headers
-          visualData: 4510/1184/300/null//
-        '[text_0023_ewa]:text "FACTS for the letter — endpoint"':
+            - output->"narrative" graphOutput_002d_ewa/value
+          visualData: 5530/526/220/null//
+        '[text_001v_ewa]:text "FACTS for the letter — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/narrative-facts"
           outgoingConnections:
-            - output->"POST /api/pipeline/narrative-facts" httpCall_0026_ewa/url
-          visualData: 1040/478/300/null//
-        '[text_0025_ewa]:text "FACTS for the letter — request body"':
+            - output->"POST /api/pipeline/narrative-facts" httpCall_001x_ewa/url
+          visualData: 1040/352/300/null//
+        '[text_001w_ewa]:text "FACTS for the letter — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -1132,9 +1125,9 @@ data:
               }
           outgoingConnections:
             - output->"POST /api/pipeline/narrative-facts"
-              httpCall_0026_ewa/req_body
-          visualData: 1040/998/300/null//
-        '[text_0028_ewa]:text "Prompt — system guardrail"':
+              httpCall_001x_ewa/req_body
+          visualData: 1040/620/300/null//
+        '[text_001z_ewa]:text "Prompt — system guardrail"':
           data:
             normalizeLineEndings: true
             text: >-
@@ -1175,9 +1168,9 @@ data:
               landscape, journey, unlock, leverage (as a verb), poised,
               well-positioned.
           outgoingConnections:
-            - output->"Build the model request" code_002a_ewa/system
-          visualData: 2290/604/560/null//
-        '[text_0029_ewa]:text "Prompt — monthly client letter (writes pt-BR)"':
+            - output->"Build the model request" code_0021_ewa/system
+          visualData: 2370/352/560/null//
+        '[text_0020_ewa]:text "Prompt — monthly client letter (writes pt-BR)"':
           data:
             normalizeLineEndings: true
             text: >-
@@ -1311,31 +1304,31 @@ data:
 
               {{facts_json}}
           outgoingConnections:
-            - output->"Build the model request" code_002a_ewa/user
-          visualData: 2290/872/620/null//
-        '[text_002b_ewa]:text "Model gateway endpoint"':
+            - output->"Build the model request" code_0021_ewa/user
+          visualData: 2370/620/620/null//
+        '[text_0022_ewa]:text "Model gateway endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/llm/complete"
           outgoingConnections:
-            - output->"POST /api/llm/complete" httpCall_002d_ewa/url
-          visualData: 3020/790/380/null//
-        '[text_002g_ewa]:text "Narrative endpoint"':
+            - output->"POST /api/llm/complete" httpCall_0023_ewa/url
+          visualData: 3100/664/380/null//
+        '[text_0026_ewa]:text "Narrative endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/narrative"
           outgoingConnections:
             - output->"POST /api/pipeline/narrative (model letter)"
-              httpCall_002i_ewa/url
-          visualData: 4510/396/380/null//
-        '[text_002k_ewa]:text "Deterministic narrative — endpoint"':
+              httpCall_0027_ewa/url
+          visualData: 4590/396/380/null//
+        '[text_0029_ewa]:text "Deterministic narrative — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/narrative"
           outgoingConnections:
-            - output->"POST /api/pipeline/narrative" httpCall_002n_ewa/url
-          visualData: 4510/916/300/null//
-        '[text_002m_ewa]:text "Deterministic narrative — request body"':
+            - output->"POST /api/pipeline/narrative" httpCall_002b_ewa/url
+          visualData: 4590/664/300/null//
+        '[text_002a_ewa]:text "Deterministic narrative — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -1344,8 +1337,8 @@ data:
                 "mode": "deterministic"
               }
           outgoingConnections:
-            - output->"POST /api/pipeline/narrative" httpCall_002n_ewa/req_body
-          visualData: 4510/1436/300/null//
+            - output->"POST /api/pipeline/narrative" httpCall_002b_ewa/req_body
+          visualData: 4590/932/300/null//
     g_overview:
       metadata:
         description: "The advisor's morning briefing: retrieved indicators, fired
@@ -1353,7 +1346,7 @@ data:
         id: g_overview
         name: 10 · Daily World Overview
       nodes:
-        '[code_003p_ewa]:code "What matters today"':
+        '[code_0039_ewa]:code "What matters today"':
           data:
             allowConsole: true
             allowFetch: false
@@ -1361,7 +1354,22 @@ data:
             allowRequire: false
             allowRivet: false
             code: >-
+              // The endpoint answers with the last completed run, and starts
+              one when
+
+              // there is none rather than making the caller wait for it.
+              Reading the fields
+
+              // of a run that has not finished gave three empty outputs and no
+              hint why, so
+
+              // the unfinished case says so.
+
               const o = inputs.overview.value;
+
+              if (o.pending || !o.world_view) {
+                throw new Error(`the morning run has not finished (run ${o.run?.id || 'unknown'}, status ${o.run?.status || 'unknown'}) — it was started by this call; run this graph again in a moment`);
+              }
 
               const fired = (o.triggers || []).filter((t) => t.status ===
               'BREACHED');
@@ -1382,11 +1390,11 @@ data:
               - what_matters
               - fired_triggers
           outgoingConnections:
-            - briefing->"briefing" graphOutput_003q_ewa/value
-            - fired_triggers->"fired_triggers" graphOutput_003s_ewa/value
-            - what_matters->"what_matters" graphOutput_003r_ewa/value
+            - briefing->"briefing" graphOutput_003a_ewa/value
+            - fired_triggers->"fired_triggers" graphOutput_003c_ewa/value
+            - what_matters->"what_matters" graphOutput_003b_ewa/value
           visualData: 1900/122/460/null//
-        '[comment_003j_ewa]:comment "DAILY WORLD OVERVIEW — a separate entry point, run once per advisor per "':
+        '[comment_0033_ewa]:comment "DAILY WORLD OVERVIEW — a separate entry point, run once per advisor per "':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -1412,38 +1420,38 @@ data:
 
               before it influences any client recommendation (§4 layer 2, §8).
           visualData: 40/40/520/null//
-        '[graphInput_003k_ewa]:graphInput "api_base"':
+        '[graphInput_0034_ewa]:graphInput "api_base"':
           data:
             dataType: string
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Overview endpoint" text_003m_ewa/api_base
+            - data->"Overview endpoint" text_0036_ewa/api_base
           visualData: 630/152/300/null//
-        '[graphInput_003l_ewa]:graphInput "api_token"':
+        '[graphInput_0035_ewa]:graphInput "api_token"':
           data:
             dataType: string
             id: api_token
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_003n_ewa/api_token
+            - data->"Service headers" object_0037_ewa/api_token
           visualData: 630/300/300/null//
-        '[graphOutput_003q_ewa]:graphOutput "briefing"':
+        '[graphOutput_003a_ewa]:graphOutput "briefing"':
           data:
             dataType: object
             id: briefing
           visualData: 2470/78/300/null//
-        '[graphOutput_003r_ewa]:graphOutput "what_matters"':
+        '[graphOutput_003b_ewa]:graphOutput "what_matters"':
           data:
             dataType: object[]
             id: what_matters
           visualData: 2470/226/300/null//
-        '[graphOutput_003s_ewa]:graphOutput "fired_triggers"':
+        '[graphOutput_003c_ewa]:graphOutput "fired_triggers"':
           data:
             dataType: object[]
             id: fired_triggers
           visualData: 2470/374/300/null//
-        '[httpCall_003o_ewa]:httpCall "GET /api/advisor/overview"':
+        '[httpCall_0038_ewa]:httpCall "GET /api/advisor/overview"':
           data:
             body: ""
             errorOnNon200: true
@@ -1453,23 +1461,23 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"What matters today" code_003p_ewa/overview
+            - json->"What matters today" code_0039_ewa/overview
           visualData: 1470/150/320/null//
-        '[object_003n_ewa]:object "Service headers"':
+        '[object_0037_ewa]:object "Service headers"':
           data:
             jsonTemplate: |-
               {
                 "x-service-token": "{{api_token}}"
               }
           outgoingConnections:
-            - output->"GET /api/advisor/overview" httpCall_003o_ewa/headers
+            - output->"GET /api/advisor/overview" httpCall_0038_ewa/headers
           visualData: 1040/308/320/null//
-        '[text_003m_ewa]:text "Overview endpoint"':
+        '[text_0036_ewa]:text "Overview endpoint"':
           data:
             normalizeLineEndings: true
-            text: "{{api_base}}/api/advisor/overview?refresh=1"
+            text: "{{api_base}}/api/advisor/overview"
           outgoingConnections:
-            - output->"GET /api/advisor/overview" httpCall_003o_ewa/url
+            - output->"GET /api/advisor/overview" httpCall_0038_ewa/url
           visualData: 1040/40/320/null//
     g_profit:
       metadata:
@@ -1479,7 +1487,7 @@ data:
         id: g_profit
         name: 03 · Calculate profitability and attribution
       nodes:
-        '[code_000x_ewa]:code "Attribution reconciliation check"':
+        '[code_000t_ewa]:code "Attribution reconciliation — stops the run"':
           data:
             allowConsole: true
             allowFetch: false
@@ -1494,27 +1502,25 @@ data:
               parts" and
 
               // "the number on page one" is the fastest way to lose an
-              advisor's trust.
+              advisor's trust, so
+
+              // it stops the run here rather than reaching a letter.
 
               const r = inputs.result.value;
 
-              if (r.reconciles !== true) console.log('ATTRIBUTION DOES NOT
-              RECONCILE', r.monthly_return);
+              if (r.reconciles !== true) {
+                throw new Error(`stage 03: attribution does not reconcile with the reported return ${r.monthly_return}`);
+              }
 
-              return {
-                performance: { type: 'object', value: r },
-                reconciles: { type: 'boolean', value: r.reconciles === true },
-              };
+              return { performance: { type: 'object', value: r } };
             inputNames:
               - result
             outputNames:
               - performance
-              - reconciles
           outgoingConnections:
-            - performance->"performance" graphOutput_000y_ewa/value
-            - reconciles->"reconciles" graphOutput_000z_ewa/value
-          visualData: 1880/256/430/null//
-        '[comment_000o_ewa]:comment "STAGE 03 — PROFITABILITY, ATTRIBUTION AND BENCHMARK"':
+            - performance->"performance" graphOutput_000u_ewa/value
+          visualData: 1880/158/440/null//
+        '[comment_000l_ewa]:comment "STAGE 03 — PROFITABILITY, ATTRIBUTION AND BENCHMARK"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -1544,6 +1550,29 @@ data:
 
               convenient index chosen after the fact.
           visualData: 40/40/520/null//
+        '[graphInput_000m_ewa]:graphInput "api_base"':
+          data:
+            dataType: string
+            id: api_base
+            useDefaultValueInput: false
+          outgoingConnections:
+            - data->"Return, attribution, benchmark, metrics — endpoint"
+              text_000q_ewa/api_base
+          visualData: 630/40/300/null//
+        '[graphInput_000n_ewa]:graphInput "service headers"':
+          data:
+            dataType: object
+            id: headers
+            useDefaultValueInput: false
+          outgoingConnections:
+            - data->"POST /api/pipeline/profitability" httpCall_000s_ewa/headers
+          visualData: 630/188/300/null//
+        '[graphInput_000o_ewa]:graphInput "gate — runs after the stage before it"':
+          data:
+            dataType: any
+            id: gate
+            useDefaultValueInput: false
+          visualData: 630/484/300/null//
         '[graphInput_000p_ewa]:graphInput "run_id"':
           data:
             dataType: string
@@ -1551,42 +1580,14 @@ data:
             useDefaultValueInput: false
           outgoingConnections:
             - data->"Return, attribution, benchmark, metrics — request body"
-              text_000v_ewa/run_id
-          visualData: 630/434/300/null//
-        '[graphInput_000q_ewa]:graphInput "api_base"':
-          data:
-            dataType: string
-            id: api_base
-            useDefaultValueInput: false
-          outgoingConnections:
-            - data->"Return, attribution, benchmark, metrics — endpoint"
-              text_000t_ewa/api_base
-          visualData: 630/138/300/null//
-        '[graphInput_000r_ewa]:graphInput "api_token"':
-          data:
-            dataType: string
-            id: api_token
-            useDefaultValueInput: false
-          outgoingConnections:
-            - data->"Service headers" object_000u_ewa/api_token
-          visualData: 630/286/300/null//
-        '[graphInput_000s_ewa]:graphInput "gate (sequencing)"':
-          data:
-            dataType: any
-            id: gate
-            useDefaultValueInput: false
-          visualData: 630/582/300/null//
-        '[graphOutput_000y_ewa]:graphOutput "performance"':
+              text_000r_ewa/run_id
+          visualData: 630/336/300/null//
+        '[graphOutput_000u_ewa]:graphOutput "performance"':
           data:
             dataType: object
             id: performance
-          visualData: 2420/286/300/null//
-        '[graphOutput_000z_ewa]:graphOutput "reconciles"':
-          data:
-            dataType: boolean
-            id: reconciles
-          visualData: 2420/434/300/null//
-        '[httpCall_000w_ewa]:httpCall "POST /api/pipeline/profitability"':
+          visualData: 2430/262/300/null//
+        '[httpCall_000s_ewa]:httpCall "POST /api/pipeline/profitability"':
           data:
             body: ""
             errorOnNon200: true
@@ -1597,27 +1598,17 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Attribution reconciliation check" code_000x_ewa/result
-          visualData: 1450/284/320/null//
-        '[object_000u_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/profitability"
-              httpCall_000w_ewa/headers
-          visualData: 1040/308/300/null//
-        '[text_000t_ewa]:text "Return, attribution, benchmark, metrics — endpoint"':
+            - json->"Attribution reconciliation — stops the run"
+              code_000t_ewa/result
+          visualData: 1450/186/320/null//
+        '[text_000q_ewa]:text "Return, attribution, benchmark, metrics — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/profitability"
           outgoingConnections:
-            - output->"POST /api/pipeline/profitability" httpCall_000w_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_000v_ewa]:text "Return, attribution, benchmark, metrics — request body"':
+            - output->"POST /api/pipeline/profitability" httpCall_000s_ewa/url
+          visualData: 1040/68/300/null//
+        '[text_000r_ewa]:text "Return, attribution, benchmark, metrics — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -1626,8 +1617,8 @@ data:
               }
           outgoingConnections:
             - output->"POST /api/pipeline/profitability"
-              httpCall_000w_ewa/req_body
-          visualData: 1040/560/300/null//
+              httpCall_000s_ewa/req_body
+          visualData: 1040/336/300/null//
     g_recs:
       metadata:
         description: Synthesises a Buy/Hold/Reduce/Sell proposal per asset and runs it
@@ -1635,7 +1626,7 @@ data:
         id: g_recs
         name: 06 · Recommendations and suitability
       nodes:
-        '[code_001v_ewa]:code "Advisor review queue"':
+        '[code_001n_ewa]:code "Advisor review queue"':
           data:
             allowConsole: true
             allowFetch: false
@@ -1647,7 +1638,10 @@ data:
               families disagree,
 
               // goes to the top of the advisor's review queue. Nothing is
-              auto-approved.
+              auto-approved, so
+
+              // this is a list for the orchestrator to carry, not a reason to
+              stop.
 
               const r = inputs.result.value;
 
@@ -1669,10 +1663,10 @@ data:
               - recommendations
               - needs_review
           outgoingConnections:
-            - needs_review->"needs_review" graphOutput_001x_ewa/value
-            - recommendations->"recommendations" graphOutput_001w_ewa/value
-          visualData: 1880/256/440/null//
-        '[comment_001m_ewa]:comment "STAGE 06 — RECOMMENDATIONS AND THE SUITABILITY GUARDRAIL"':
+            - needs_review->"needs_review" graphOutput_001o_ewa/value
+            - recommendations->"recommendations" graphOutput_001p_ewa/value
+          visualData: 1880/158/440/null//
+        '[comment_001f_ewa]:comment "STAGE 06 — RECOMMENDATIONS AND THE SUITABILITY GUARDRAIL"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -1697,47 +1691,48 @@ data:
                    MARKET SIGNAL:             BUY
                    CLIENT-SUITABILITY RESULT: DO NOT ADD / DISCUSS ONLY   (§18)
           visualData: 40/40/520/null//
-        '[graphInput_001n_ewa]:graphInput "run_id"':
-          data:
-            dataType: string
-            id: run_id
-            useDefaultValueInput: false
-          outgoingConnections:
-            - data->"Propose and check — request body" text_001t_ewa/run_id
-          visualData: 630/434/300/null//
-        '[graphInput_001o_ewa]:graphInput "api_base"':
+        '[graphInput_001g_ewa]:graphInput "api_base"':
           data:
             dataType: string
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Propose and check — endpoint" text_001r_ewa/api_base
-          visualData: 630/138/300/null//
-        '[graphInput_001p_ewa]:graphInput "api_token"':
+            - data->"Propose and check — endpoint" text_001k_ewa/api_base
+          visualData: 630/40/300/null//
+        '[graphInput_001h_ewa]:graphInput "service headers"':
           data:
-            dataType: string
-            id: api_token
+            dataType: object
+            id: headers
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_001s_ewa/api_token
-          visualData: 630/286/300/null//
-        '[graphInput_001q_ewa]:graphInput "gate (sequencing)"':
+            - data->"POST /api/pipeline/recommendations"
+              httpCall_001m_ewa/headers
+          visualData: 630/188/300/null//
+        '[graphInput_001i_ewa]:graphInput "gate — runs after the stage before it"':
           data:
             dataType: any
             id: gate
             useDefaultValueInput: false
-          visualData: 630/582/300/null//
-        '[graphOutput_001w_ewa]:graphOutput "recommendations"':
+          visualData: 630/484/300/null//
+        '[graphInput_001j_ewa]:graphInput "run_id"':
           data:
-            dataType: object
-            id: recommendations
-          visualData: 2430/286/300/null//
-        '[graphOutput_001x_ewa]:graphOutput "needs_review"':
+            dataType: string
+            id: run_id
+            useDefaultValueInput: false
+          outgoingConnections:
+            - data->"Propose and check — request body" text_001l_ewa/run_id
+          visualData: 630/336/300/null//
+        '[graphOutput_001o_ewa]:graphOutput "needs_review"':
           data:
             dataType: object[]
             id: needs_review
-          visualData: 2430/434/300/null//
-        '[httpCall_001u_ewa]:httpCall "POST /api/pipeline/recommendations"':
+          visualData: 2430/336/300/null//
+        '[graphOutput_001p_ewa]:graphOutput "recommendations"':
+          data:
+            dataType: object
+            id: recommendations
+          visualData: 2430/188/300/null//
+        '[httpCall_001m_ewa]:httpCall "POST /api/pipeline/recommendations"':
           data:
             body: ""
             errorOnNon200: true
@@ -1748,27 +1743,16 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Advisor review queue" code_001v_ewa/result
-          visualData: 1450/284/320/null//
-        '[object_001s_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/recommendations"
-              httpCall_001u_ewa/headers
-          visualData: 1040/308/300/null//
-        '[text_001r_ewa]:text "Propose and check — endpoint"':
+            - json->"Advisor review queue" code_001n_ewa/result
+          visualData: 1450/186/320/null//
+        '[text_001k_ewa]:text "Propose and check — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/recommendations"
           outgoingConnections:
-            - output->"POST /api/pipeline/recommendations" httpCall_001u_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_001t_ewa]:text "Propose and check — request body"':
+            - output->"POST /api/pipeline/recommendations" httpCall_001m_ewa/url
+          visualData: 1040/68/300/null//
+        '[text_001l_ewa]:text "Propose and check — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -1777,8 +1761,8 @@ data:
               }
           outgoingConnections:
             - output->"POST /api/pipeline/recommendations"
-              httpCall_001u_ewa/req_body
-          visualData: 1040/560/300/null//
+              httpCall_001m_ewa/req_body
+          visualData: 1040/336/300/null//
     g_render:
       metadata:
         description: Renders the email, the two-page PDF and the portal view from one
@@ -1786,7 +1770,7 @@ data:
         id: g_render
         name: 09 · Render and persist
       nodes:
-        '[code_003c_ewa]:code "Two-page constraint"':
+        '[code_002y_ewa]:code "Two-page constraint — stops the run"':
           data:
             allowConsole: true
             allowFetch: false
@@ -1797,28 +1781,30 @@ data:
               // The two-page limit is a hard constraint. The renderer drops
               optional blocks
 
-              // in a fixed order until it fits; this reports which level it
-              needed.
+              // in a fixed order until it fits, so a third page means the
+              reduction ladder
+
+              // ran out rather than that the letter is long — nothing is
+              persisted from it.
 
               const r = inputs.result.value;
 
               console.log(`${r.page_count} page(s), layout reduction level
               ${r.layout_reduction_level}`);
 
-              return {
-                render: { type: 'object', value: r },
-                within_limit: { type: 'boolean', value: r.page_count <= 2 },
-              };
+              if (r.page_count > 2) throw new Error(`stage 09: rendered
+              ${r.page_count} pages at reduction level
+              ${r.layout_reduction_level}`);
+
+              return { render: { type: 'object', value: r } };
             inputNames:
               - result
             outputNames:
               - render
-              - within_limit
           outgoingConnections:
-            - render->"Persist to D1 and R2 — request body" text_003f_ewa/render
-            - within_limit->"within_two_pages" graphOutput_003i_ewa/value
-          visualData: 1880/256/420/null//
-        '[comment_0033_ewa]:comment "STAGE 09 — ADVISOR APPROVAL GATE, RENDER, PERSIST"':
+            - render->"Persist to D1 and R2 — request body" text_0030_ewa/render
+          visualData: 1880/158/440/null//
+        '[comment_002q_ewa]:comment "STAGE 09 — ADVISOR APPROVAL GATE, RENDER, PERSIST"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -1847,52 +1833,47 @@ data:
 
               which is what makes a published report reproducible (§31).
           visualData: 40/40/520/null//
-        '[graphInput_0034_ewa]:graphInput "run_id"':
+        '[graphInput_002r_ewa]:graphInput "run_id"':
           data:
             dataType: string
             id: run_id
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Persist to D1 and R2 — request body" text_003f_ewa/run_id
+            - data->"Persist to D1 and R2 — request body" text_0030_ewa/run_id
             - data->"Render HTML, PDF and portal — request body"
-              text_003a_ewa/run_id
-          visualData: 630/434/300/null//
-        '[graphInput_0035_ewa]:graphInput "api_base"':
+              text_002w_ewa/run_id
+          visualData: 630/336/300/null//
+        '[graphInput_002s_ewa]:graphInput "api_base"':
           data:
             dataType: string
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Persist to D1 and R2 — endpoint" text_003d_ewa/api_base
+            - data->"Persist to D1 and R2 — endpoint" text_002z_ewa/api_base
             - data->"Render HTML, PDF and portal — endpoint"
-              text_0038_ewa/api_base
-          visualData: 630/138/300/null//
-        '[graphInput_0036_ewa]:graphInput "api_token"':
+              text_002v_ewa/api_base
+          visualData: 630/40/300/null//
+        '[graphInput_002t_ewa]:graphInput "service headers"':
           data:
-            dataType: string
-            id: api_token
+            dataType: object
+            id: headers
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_0039_ewa/api_token
-            - data->"Service headers" object_003e_ewa/api_token
-          visualData: 630/286/300/null//
-        '[graphInput_0037_ewa]:graphInput "gate (sequencing)"':
+            - data->"POST /api/pipeline/persist" httpCall_0031_ewa/headers
+            - data->"POST /api/pipeline/render" httpCall_002x_ewa/headers
+          visualData: 630/188/300/null//
+        '[graphInput_002u_ewa]:graphInput "gate — runs after the stage before it"':
           data:
             dataType: any
             id: gate
             useDefaultValueInput: false
-          visualData: 630/582/300/null//
-        '[graphOutput_003h_ewa]:graphOutput "report"':
+          visualData: 630/484/300/null//
+        '[graphOutput_0032_ewa]:graphOutput "report"':
           data:
             dataType: object
             id: report
-          visualData: 3250/286/300/null//
-        '[graphOutput_003i_ewa]:graphOutput "within_two_pages"':
-          data:
-            dataType: boolean
-            id: within_two_pages
-          visualData: 3250/434/300/null//
-        '[httpCall_003b_ewa]:httpCall "POST /api/pipeline/render"':
+          visualData: 3270/262/300/null//
+        '[httpCall_002x_ewa]:httpCall "POST /api/pipeline/render"':
           data:
             body: ""
             errorOnNon200: true
@@ -1903,9 +1884,9 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Two-page constraint" code_003c_ewa/result
-          visualData: 1450/284/320/null//
-        '[httpCall_003g_ewa]:httpCall "POST /api/pipeline/persist"':
+            - json->"Two-page constraint — stops the run" code_002y_ewa/result
+          visualData: 1450/186/320/null//
+        '[httpCall_0031_ewa]:httpCall "POST /api/pipeline/persist"':
           data:
             body: ""
             errorOnNon200: true
@@ -1916,36 +1897,16 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"report" graphOutput_003h_ewa/value
-          visualData: 2820/284/320/null//
-        '[object_0039_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/render" httpCall_003b_ewa/headers
-          visualData: 1040/308/300/null//
-        '[object_003e_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/persist" httpCall_003g_ewa/headers
-          visualData: 2410/308/300/null//
-        '[text_0038_ewa]:text "Render HTML, PDF and portal — endpoint"':
+            - json->"report" graphOutput_0032_ewa/value
+          visualData: 2840/186/320/null//
+        '[text_002v_ewa]:text "Render HTML, PDF and portal — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/render"
           outgoingConnections:
-            - output->"POST /api/pipeline/render" httpCall_003b_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_003a_ewa]:text "Render HTML, PDF and portal — request body"':
+            - output->"POST /api/pipeline/render" httpCall_002x_ewa/url
+          visualData: 1040/68/300/null//
+        '[text_002w_ewa]:text "Render HTML, PDF and portal — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -1954,16 +1915,16 @@ data:
                 "approved_only": true
               }
           outgoingConnections:
-            - output->"POST /api/pipeline/render" httpCall_003b_ewa/req_body
-          visualData: 1040/560/300/null//
-        '[text_003d_ewa]:text "Persist to D1 and R2 — endpoint"':
+            - output->"POST /api/pipeline/render" httpCall_002x_ewa/req_body
+          visualData: 1040/336/300/null//
+        '[text_002z_ewa]:text "Persist to D1 and R2 — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/persist"
           outgoingConnections:
-            - output->"POST /api/pipeline/persist" httpCall_003g_ewa/url
-          visualData: 2410/40/300/null//
-        '[text_003f_ewa]:text "Persist to D1 and R2 — request body"':
+            - output->"POST /api/pipeline/persist" httpCall_0031_ewa/url
+          visualData: 2430/68/300/null//
+        '[text_0030_ewa]:text "Persist to D1 and R2 — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -1972,8 +1933,8 @@ data:
                 "status": "pending_approval"
               }
           outgoingConnections:
-            - output->"POST /api/pipeline/persist" httpCall_003g_ewa/req_body
-          visualData: 2410/560/300/null//
+            - output->"POST /api/pipeline/persist" httpCall_0031_ewa/req_body
+          visualData: 2430/336/300/null//
     g_signals:
       metadata:
         description: Captures the two signal families independently and flags where they
@@ -1981,7 +1942,7 @@ data:
         id: g_signals
         name: 05 · TradingView technical and analyst signals
       nodes:
-        '[code_001j_ewa]:code "Separate the two families"':
+        '[code_001c_ewa]:code "Separate the two families"':
           data:
             allowConsole: true
             allowFetch: false
@@ -1995,7 +1956,10 @@ data:
               // is exactly what the advisor should be talking about. It is
               surfaced, never
 
-              // averaged away.
+              // averaged away — advisory, so it travels to the orchestrator
+              rather than
+
+              // stopping anything.
 
               const r = inputs.result.value;
 
@@ -2017,10 +1981,10 @@ data:
               - signals
               - conflicts
           outgoingConnections:
-            - conflicts->"signal_conflicts" graphOutput_001l_ewa/value
-            - signals->"signals" graphOutput_001k_ewa/value
-          visualData: 1880/256/430/null//
-        '[comment_001a_ewa]:comment "STAGE 05 — TRADINGVIEW SIGNALS, TWO INDEPENDENT FAMILIES"':
+            - conflicts->"signal_conflicts" graphOutput_001d_ewa/value
+            - signals->"signals" graphOutput_001e_ewa/value
+          visualData: 1880/158/440/null//
+        '[comment_0014_ewa]:comment "STAGE 05 — TRADINGVIEW SIGNALS, TWO INDEPENDENT FAMILIES"':
           data:
             backgroundColor: rgba(0,0,0,0.05)
             color:
@@ -2041,49 +2005,49 @@ data:
               "No analyst consensus available" — the technical rating is NEVER
               used to infer it (§16, §30).
           visualData: 40/40/520/null//
-        '[graphInput_001b_ewa]:graphInput "run_id"':
-          data:
-            dataType: string
-            id: run_id
-            useDefaultValueInput: false
-          outgoingConnections:
-            - data->"Capture both signal families — request body"
-              text_001h_ewa/run_id
-          visualData: 630/434/300/null//
-        '[graphInput_001c_ewa]:graphInput "api_base"':
+        '[graphInput_0015_ewa]:graphInput "api_base"':
           data:
             dataType: string
             id: api_base
             useDefaultValueInput: false
           outgoingConnections:
             - data->"Capture both signal families — endpoint"
-              text_001f_ewa/api_base
-          visualData: 630/138/300/null//
-        '[graphInput_001d_ewa]:graphInput "api_token"':
+              text_0019_ewa/api_base
+          visualData: 630/40/300/null//
+        '[graphInput_0016_ewa]:graphInput "service headers"':
           data:
-            dataType: string
-            id: api_token
+            dataType: object
+            id: headers
             useDefaultValueInput: false
           outgoingConnections:
-            - data->"Service headers" object_001g_ewa/api_token
-          visualData: 630/286/300/null//
-        '[graphInput_001e_ewa]:graphInput "gate (sequencing)"':
+            - data->"POST /api/pipeline/signals" httpCall_001b_ewa/headers
+          visualData: 630/188/300/null//
+        '[graphInput_0017_ewa]:graphInput "gate — runs after the stage before it"':
           data:
             dataType: any
             id: gate
             useDefaultValueInput: false
-          visualData: 630/582/300/null//
-        '[graphOutput_001k_ewa]:graphOutput "signals"':
+          visualData: 630/484/300/null//
+        '[graphInput_0018_ewa]:graphInput "run_id"':
           data:
-            dataType: object
-            id: signals
-          visualData: 2420/286/300/null//
-        '[graphOutput_001l_ewa]:graphOutput "signal_conflicts"':
+            dataType: string
+            id: run_id
+            useDefaultValueInput: false
+          outgoingConnections:
+            - data->"Capture both signal families — request body"
+              text_001a_ewa/run_id
+          visualData: 630/336/300/null//
+        '[graphOutput_001d_ewa]:graphOutput "signal_conflicts"':
           data:
             dataType: object[]
             id: signal_conflicts
-          visualData: 2420/434/300/null//
-        '[httpCall_001i_ewa]:httpCall "POST /api/pipeline/signals"':
+          visualData: 2430/336/300/null//
+        '[graphOutput_001e_ewa]:graphOutput "signals"':
+          data:
+            dataType: object
+            id: signals
+          visualData: 2430/188/300/null//
+        '[httpCall_001b_ewa]:httpCall "POST /api/pipeline/signals"':
           data:
             body: ""
             errorOnNon200: true
@@ -2094,26 +2058,16 @@ data:
             useHeadersInput: true
             useUrlInput: true
           outgoingConnections:
-            - json->"Separate the two families" code_001j_ewa/result
-          visualData: 1450/284/320/null//
-        '[object_001g_ewa]:object "Service headers"':
-          data:
-            jsonTemplate: |-
-              {
-                "content-type": "application/json",
-                "x-service-token": "{{api_token}}"
-              }
-          outgoingConnections:
-            - output->"POST /api/pipeline/signals" httpCall_001i_ewa/headers
-          visualData: 1040/308/300/null//
-        '[text_001f_ewa]:text "Capture both signal families — endpoint"':
+            - json->"Separate the two families" code_001c_ewa/result
+          visualData: 1450/186/320/null//
+        '[text_0019_ewa]:text "Capture both signal families — endpoint"':
           data:
             normalizeLineEndings: true
             text: "{{api_base}}/api/pipeline/signals"
           outgoingConnections:
-            - output->"POST /api/pipeline/signals" httpCall_001i_ewa/url
-          visualData: 1040/40/300/null//
-        '[text_001h_ewa]:text "Capture both signal families — request body"':
+            - output->"POST /api/pipeline/signals" httpCall_001b_ewa/url
+          visualData: 1040/68/300/null//
+        '[text_001a_ewa]:text "Capture both signal families — request body"':
           data:
             normalizeLineEndings: true
             text: |-
@@ -2121,8 +2075,8 @@ data:
                 "run_id": "{{run_id}}"
               }
           outgoingConnections:
-            - output->"POST /api/pipeline/signals" httpCall_001i_ewa/req_body
-          visualData: 1040/560/300/null//
+            - output->"POST /api/pipeline/signals" httpCall_001b_ewa/req_body
+          visualData: 1040/336/300/null//
   metadata:
     description: >-
       Monthly client reporting and daily world overview for XP-style financial
@@ -2141,8 +2095,5 @@ data:
       than editing prompt text here.
     id: enter_wealth_advisor
     title: XP Asset Management — AI advisory workflow
-  plugins:
-    - id: anthropic
-      name: Anthropic
-      type: built-in
+  plugins: []
   references: []

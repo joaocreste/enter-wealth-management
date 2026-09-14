@@ -142,23 +142,57 @@ owns and each carrying a comment node explaining what it guarantees:
 Stages are chained through an explicit `gate` input. Without it Rivet would run all
 nine at once, because they share only the connection settings.
 
+**Stages 01 to 06 are a table, not six functions.** They differ in four things — the
+endpoint they call, what they send, what they return and what they refuse to let past —
+and they used to be six near-identical fifty-line functions that had to be kept in step by
+hand. `STAGES` in `rivet/build-graph.mjs` holds the four values and `stageGraph` builds
+the canvas, so a seventh stage is a row.
+
+**The service token is a connection setting, not a stage's business.** It becomes a
+headers object once, in `00`, and every stage takes that object on a port — Rivet's HTTP
+node accepts an object there directly. Thirteen identical copies of those three lines used
+to be drawn, one beside each call, and the token appeared on eleven canvases.
+
+**A gate that nobody reads is a comment.** Six stages computed a verdict — `blocked`,
+`reconciles`, `ready`, `within_two_pages` and two more — published it on a graph output,
+and nothing in `00` was connected to any of them. A failed price sanity check logged a
+line and the run carried on to render a letter. The verdicts are split by what they are
+now:
+
+- a **hard** one throws, which fails the run inside the stage that found the problem,
+  before the stage after it starts — the only place a gate does any good. Stage 02 on a
+  failed price check, 03 on attribution that does not reconcile, 08 on a blocking error,
+  09 on a third page.
+- an **advisory** one travels: signal conflicts, proposals needing an explicit decision,
+  and the count pending advisor approval reach `00`, which reports them on a `checks`
+  output beside the report. Those are things an advisor has to look at, not things that
+  make the report wrong.
+
 **The canvas is computed, not typed.** Every node used to carry an x and a y chosen by
 hand, one stage at a time, and they drifted: the three nodes that build one HTTP request
 sat 110 pt apart while Rivet drew them 150 pt tall, so in all ten stages the headers node
 was buried under the endpoint node. `layoutGraph` in `rivet/build-graph.mjs` now derives
 the placement from the connections — a node sits one column right of everything that
 feeds it, and as late as its consumers allow, so a request group lands beside its own
-call. Order within a column is swept towards the middle of each node's neighbours, both
-directions, and the arrangement with the fewest crossings is the one drawn. Comments move
-to a rail down the left, out of the flow. A stage that grows a node lays itself out
-instead of needing its neighbours nudged by hand.
+call. Order within a column is swept towards the middle of each node's neighbours in the
+*adjacent* columns, both directions, and the arrangement with the fewest crossings is the
+one drawn. Comments move to a rail down the left, out of the flow.
 
-`npm run verify` checks the built project for nodes nothing wires and for nodes drawn on
-top of each other. Both stage 02's and stage 08's validation gates were once created,
-connected and then never added to their graph — Rivet silently drops the connections of a
-node it does not have, so the gate that stops a bad figure reaching a client was absent
-from the canvas and both stages' outputs hung from nothing. It read as a layout problem,
-which is why it survived. The check is there so it cannot.
+A chain is the exception. `00` feeds stage N's output into stage N+1's gate, so
+longest-path gave every stage a column of its own and drew nine stages as a staircase
+5 210 pt wide. A chain has nothing to lay out sideways, so it collapses back into one
+column and reads as a ladder, top to bottom, in 2 240 pt.
+
+`npm run verify` checks the built project for nodes nothing wires, for outputs the
+orchestrator declares and never reads, and for nodes drawn on top of each other. Each of
+the three is there because of a bug that shipped. Both stage 02's and stage 08's
+validation gates were once created, connected and then never added to their graph — Rivet
+silently drops the connections of a node it does not have, so the gate was absent from the
+canvas and both stages' outputs hung from nothing. The six dead verdicts above are the
+second. The third is the collapse above: it emptied the columns the chain used to occupy,
+a sparse array spreads as `undefined`, and every node in `00` came out at `y = NaN` — all
+twenty-two drawn on the same point, which the overlap check passed because every
+comparison against NaN is false.
 
 ---
 

@@ -12,7 +12,7 @@
  * model's job is language, not arithmetic.
  */
 
-export const PROMPT_VERSION = 'letter-2026-09-e';
+export const PROMPT_VERSION = 'letter-2026-09-f';
 
 export const SYSTEM_GUARDRAIL = `You are the writing layer of a regulated investment-advisory system at XP Asset Management.
 
@@ -21,7 +21,7 @@ Absolute rules:
 2. Never state a market fact that is not in FACTS. You have no knowledge of current markets beyond what is supplied.
 3. Where FACTS marks something as DATA UNAVAILABLE, say so plainly. Never fill the gap.
 4. Never present a recommendation as an executed or scheduled transaction. Recommendations are discussion points for the next meeting.
-5. Never present a historical measure as an expectation or a forecast.
+5. Never present a historical measure as an expectation or a forecast, or a forecast as an observation. A projection belongs to whoever published it and to the year it is for, and is written with both.
 6. Distinguish facts from the advisor's view. Facts are attributed to the data; views are attributed to the advisor.
 7. Describe the loss before the gain in any performance narrative. This is a house style rule and it is not optional.
 8. Short sentences. Average under 18 words. No hedging that could describe any portfolio in any month.
@@ -68,7 +68,11 @@ Return STRICT JSON with this exact shape and nothing else:
 - Quote levels and moves only from FACTS.indicators and FACTS.triggers.
 - A stance is the advisor's judgement, so it may go beyond the data — but the rationale must reference the data it rests on.
 - Where an indicator is marked unavailable, do not mention it.
-- FACTS.macro_vintage is a dated research view, not a live observation. If you use it, say when it was published.
+- FACTS.xp_house_view is XP's own monthly macro report — this house's published view, retrieved for this run. It is the primary macro reference and the macro_political block must state what it says, naming the report and the date it was published. Its conclusions and stance_by_topic are XP's words; its projections are XP's forecasts for a stated year, never current levels, and each carries the sentence it was read from.
+- Read today's data against the house view rather than beside it. Where an indicator in FACTS has moved away from what XP projects, say so plainly and name both figures — that is the most useful sentence on the page. Where it is consistent, say that too.
+- Quote a figure from FACTS.xp_house_view.projections only as its "written" string, with the year it belongs to and XP named as its author.
+- When FACTS.xp_house_view.available is false the house view could not be retrieved. Say so, and fall back to FACTS.macro_vintage, which is a dated research view rather than a live observation — if you use it, say when it was published. When available is true, ignore macro_vintage.
+- When FACTS.xp_house_view.stale is true the newest edition is older than usual. Use it, and say when it was published.
 - Write in English. The advisor reads this internally; only the client letter is in Portuguese.
 
 ## FACTS
@@ -289,6 +293,10 @@ Return STRICT JSON with this exact shape and nothing else:
 
 ## Rules specific to this task
 
+- FACTS.xp_house_view is XP's own monthly macro report — this house's published view, retrieved for this run. It is the primary macro reference. You are writing for an XP advisor, who cannot brief a client against the house view without knowing what it says: macro_political_pt must state it, naming the report and the date it was published.
+- Read the day against the house view. Where today's indicators or events run against what XP projects or expects, say so plainly in macro_political_pt or main_risk_or_opportunity_pt and name both figures. Where they confirm it, say that. An event that changes the house view's own argument is high importance even when exposure is small.
+- XP's projections are forecasts for a stated year, never current levels. Quote one only as its "written" string, with its year, and with XP named as its author: "a XP projeta a Selic em 13,25% no final de 2026". Never write a projection as though it were today's reading, and never mix it into a sentence about a live level without saying which is which.
+- When FACTS.xp_house_view.available is false, say in macro_political_pt that the Relatório Mensal da XP could not be read in this run and fall back to FACTS.macro_vintage, naming its publication date. When available is true, ignore macro_vintage. When stale is true, use the house view and say when it was published.
 - Rank by what matters for THESE portfolios: FACTS.book gives each client's exposure by asset class and FACTS.candidates says which clients each event touches. An event nobody is exposed to is dropped unless it is high importance for the market as a whole.
 - An event with market_wide true is the most covered story in the Brazilian press today (coverage says how many headlines). It is always kept and it comes first, unless a fired threshold in FACTS.triggers outranks it. Write why it matters through the mechanism — the real, the rates curve, the risk premium on Brazilian assets — and never say it is irrelevant because the exposure is small: the clients will ask about it anyway.
 - Keep at most 8 events, ordered by importance. Merge events that share one cause by keeping the one with the better source.

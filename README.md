@@ -81,8 +81,9 @@ validation.
 |---|---|---|
 | Every listed price (Yahoo Finance, TradingView) | Albert's identity, advisor, risk profile | Monthly quota values for Brazilian funds |
 | CDI, Selic, IPCA, PTAX (Banco Central) | The May 2025 XP position statement, reproduced as snapshot v1 | Return history before the platform existed |
-| TradingView technical ratings and analyst consensus | XP's February 2025 macro projections | The four demo clients other than Albert |
+| TradingView technical ratings and analyst consensus | XP's February 2025 macro projections, now only the fallback | The four demo clients other than Albert |
 | The day's headlines (Valor Econômico RSS), each linked to its article | | |
+| **XP's own monthly macro report** — the current *Brasil Macro Mensal*, with its projections | | |
 | The policy benchmark, composed from the above | | |
 
 Simulated data carries `mocked: true` in its source record, shows a `SIMULADO` chip in
@@ -103,6 +104,7 @@ Rivet graph  ──HTTP──▶  Cloudflare Worker  ──▶  D1   relational 
    │                                    BCB (authoritative for BRL rates and FX)
    │                                    CoinGecko (digital assets)
    │                                    Valor Econômico RSS (Brazilian headlines, linked)
+   │                                    XP Research (the house's own monthly macro report)
    ▼
 LLM stage: prompts held in the graph, FACTS object built in code
 ```
@@ -111,7 +113,7 @@ LLM stage: prompts held in the graph, FACTS object built in code
 |---|---|
 | `rivet/` | The graph, and `build-graph.mjs` which generates it from `src/llm/prompts.js` |
 | `src/core/` | Performance, attribution, recommendations, suitability, triggers, events, formatting, the canonical schema |
-| `src/adapters/` | Yahoo, TradingView, Banco Central, CoinGecko, the provider chain, cache and throttle |
+| `src/adapters/` | Yahoo, TradingView, Banco Central, CoinGecko, XP Research, the provider chain, cache and throttle |
 | `src/render/` | The letter model, charts, the HTML email, and a self-contained PDF engine |
 | `src/llm/prompts.js` | Every prompt, in English. The single source of truth |
 | `worker/` | The API, the pipeline steps Rivet calls, D1 migrations, the seed runner |
@@ -277,8 +279,8 @@ each agent is doing while it runs.
 
 | | Agent | What it does | With a model | Without |
 |---|---|---|---|---|
-| 1 | **Dados** | Retrieves every monitored indicator (Yahoo Finance, Banco Central, CoinGecko) with its day move, measures five sessions and thirty days on the daily histories kept in R2, the curated events and the events generated from moves that stand out (5 sessions at 3%+, else 30 days at 5%+, the timeframe written into the title) — each with a source record. Reads the last 36 hours of headlines from **Valor Econômico's public RSS feeds** (capa, política, finanças, brasil, empresas, mundo), groups the lines that name the same people and institutions, and treats the biggest group as the *story of the day* — a fact about the newsroom, computed in code. With Claude, the model classifies the most covered headlines (category, asset classes, mechanism, discussion prompt) and scans the web for the international press; every item must point at a headline id or a search-result URL the code handed over, and anything else is dropped. | Claude classifies the headlines and searches the international press, citations verified | headlines still arrive and are classified by rule, summarised by the newsroom's own first paragraph; no web scan |
-| 2 | **Inferência** | Reads what agent 1 gathered plus every client's exposure by asset class, decides what matters for *this* book today, ranks it, and writes the day's summary and the What Matters rows in Portuguese. The code keeps the exposure arithmetic; the model never gets to write a number that is not in the facts. | Claude (`ANTHROPIC_MODEL`) | a Portuguese template ranked by rule |
+| 1 | **Dados** | Reads **XP's own monthly macro report** first (see below). Retrieves every monitored indicator (Yahoo Finance, Banco Central, CoinGecko) with its day move, measures five sessions and thirty days on the daily histories kept in R2, the curated events and the events generated from moves that stand out (5 sessions at 3%+, else 30 days at 5%+, the timeframe written into the title) — each with a source record. Reads the last 36 hours of headlines from **Valor Econômico's public RSS feeds** (capa, política, finanças, brasil, empresas, mundo), groups the lines that name the same people and institutions, and treats the biggest group as the *story of the day* — a fact about the newsroom, computed in code. With Claude, the model classifies the most covered headlines (category, asset classes, mechanism, discussion prompt) and scans the web for the international press; every item must point at a headline id or a search-result URL the code handed over, and anything else is dropped. | Claude classifies the headlines and searches the international press, citations verified | headlines still arrive and are classified by rule, summarised by the newsroom's own first paragraph; no web scan |
+| 2 | **Inferência** | Reads what agent 1 gathered plus every client's exposure by asset class, decides what matters for *this* book today, ranks it, and writes the day's summary and the What Matters rows in Portuguese. The day is read *against* XP's house view: where an indicator has moved away from what the house projects, the briefing says so and names both figures. The code keeps the exposure arithmetic; the model never gets to write a number that is not in the facts. | Claude (`ANTHROPIC_MODEL`) | a Portuguese template ranked by rule |
 | 3 | **Gatilhos** | Evaluates every configured threshold and every client's allocation drift against their policy, with a *proximity* (1.0 = at the threshold) so the portal draws each as a bar and says plainly when an action is due. | pure code | pure code |
 
 Runs are recorded in `overview_runs` with their progress log and result; the
@@ -286,6 +288,96 @@ portal reads the last completed run rather than recomputing on a page view.
 `POST /api/advisor/refresh` starts a run and `GET /api/advisor/refresh/:id`
 reports it. The model path needs `npx wrangler secret put ANTHROPIC_API_KEY`;
 `/api/health` says which path is active.
+
+### XP's own monthly macro report
+
+An advisor at XP who briefs a client against the house view has a problem no
+amount of live market data fixes. So the first thing agent 1 does, before any
+price or headline, is read **XP's own *Brasil Macro Mensal*** — the report the
+Economia page links as *Relatório Mensal* — and everything else in the run is
+read against it.
+
+`src/adapters/xpresearch.js` takes three routes to the same edition:
+
+| | Route | Calls | Why |
+|---|---|---|---|
+| 0 | A deposited edition, from KV | 0 | What a Node job left there. Tried first, so a runtime XP refuses does not spend two doomed calls a run finding that out. See the caveat below |
+| 1 | The Economia RSS feed | 1 | XP syndicates the section with the whole report inside `content:encoded`. One call gets the summary, the headings, the editorial and the PDF links. It holds only the last ten Economia posts, so late in the month the report has scrolled off it |
+| 2 | The Brasil Macro Mensal archive | 2 | Every edition ever published, newest first, plus that edition's own page. Slower, always current |
+
+The report is recognised by its title, never by a substring: the weekly
+*Economia em Destaque* links to the monthly report every month and is not it.
+
+What the adapter takes out, and what it refuses to:
+
+- **the conclusions** — XP's seven or eight bullets for the month, verbatim;
+- **a stance per topic** — each heading is written `Inflação – Reduzimos a
+  projeção para o IPCA de 2026 de 5,1% para 5,0%`, a topic and a claim either
+  side of an en dash, so the headings alone are the house's position on
+  activity, fiscal, external accounts, inflation and monetary policy;
+- **the editorial**, verbatim;
+- **the projections**, and only where a sentence matches one of a few
+  unambiguous shapes. Every figure keeps the sentence it was read from, and a
+  month XP phrases differently yields *no figure* rather than a wrong one —
+  the sentence is still carried, and a sentence quoted as written is worth
+  more to a client letter than a number a parser guessed at.
+
+Three things the editions taught it, each of which produced a wrong number
+before it was handled and each of which is now a test in `npm run verify`:
+
+- a revision reads `de 5,1% para 5,0%`. The figure is the one after *para*.
+  Reading the first number reports the projection XP has just abandoned;
+- the year is as often a word as a number — `no final deste ano`, `4,2% no ano
+  que vem`. Those resolve against the edition's own publication year, so they
+  are exact rather than inferred;
+- `0,3% do PIB` and `83,3% do PIB` are the denominator, not growth. A figure
+  followed by *do PIB* is refused for the growth series.
+
+The house view reaches the model as `FACTS.xp_house_view` and is the primary
+macro reference: the prompt requires the *Macro e política* block to state what
+the report says and name it with its publication date, requires today's data to
+be read against it, and forbids a projection from being written as though it
+were a current level. Without a model the same block is composed in code, from
+the same fields. The February 2025 vintage in `seed/market.mjs` is no longer
+the house view — it is only what is left when the report cannot be retrieved,
+and the briefing says so and dates it.
+
+The portal shows the edition between the briefing and its sources: the report
+named, dated, linked and attributed, its stance per topic, and its projections
+as chips that each carry the year and, on hover, the sentence the figure came
+from. The source record is in the ledger under **XP Research — Brasil Macro
+Mensal** with the article URL, like every other provider.
+
+#### Why route 0 exists
+
+`xpi.com.br` sits behind a WAF that refuses the Cloudflare Workers runtime on
+every path — the feed, the archive, the article, the root domain — and refuses
+it *below* the header layer: no user agent, `Accept`, `Sec-Fetch-*` or client
+hint gets through, and the deployed Worker at Cloudflare's edge is refused
+exactly as the local one is. The identical request from Node is served
+normally.
+
+So the fetch and the parse happen in Node, and the Worker is handed the result:
+
+```bash
+npm run fetch:xp                                    # against the local Worker
+npm run fetch:xp -- --api https://…  --token "$SERVICE_TOKEN"
+npm run fetch:xp -- --dry-run                       # fetch and print, send nothing
+```
+
+`scripts/fetch-xp-report.mjs` retrieves the edition, parses it and `POST`s it to
+`/api/admin/xp-report`, which is guarded by the same service token the Rivet
+runner uses and writes the parsed edition into KV for 45 days. The macro agent
+then reads the house view from KV and makes **no outbound call for it at all**,
+which also keeps it clear of the fifty-fetch budget a Worker run has.
+`.github/workflows/xp-macro.yml` runs it daily at 09:00 UTC, an hour before the
+agents' own cron, and needs two repository secrets: `API_BASE` and
+`SERVICE_TOKEN`. The job fails loudly — a silent failure would leave the portal
+showing a February 2025 vintage while saying nothing was wrong.
+
+A live route that answers always wins over the deposit, so the Rivet runner and
+`npm run verify -- --live` read the report straight from XP and are never held
+back by a stale deposit.
 
 ### The indicator histories
 
@@ -529,7 +621,8 @@ password path stays as the local fallback. The advisor/client boundary is enforc
 | `npm run build:graph` | regenerate the Rivet project from the prompts |
 | `npm run run:report -- --client cli_albert` | run the graph headlessly |
 | `npm run run:overview` | run the daily overview graph |
-| `npm run verify` | 30 checks on the engine: formatting rules, return methods, the guardrail, report validation, the PDF |
+| `npm run fetch:xp` | fetch XP's monthly macro report and deposit it with the Worker |
+| `npm run verify` | 86 checks on the engine: formatting rules, return methods, the guardrail, report validation, the PDF, the XP report parser |
 | `npm run verify:live` | the above plus the live provider chain and the running API |
 | `npm run setup:cloudflare` | create D1, KV and R2, set the secrets, migrate |
 | `npm run deploy:worker` | deploy the API and point the portal at it |
@@ -549,4 +642,11 @@ password path stays as the local fallback. The advisor/client boundary is enforc
 - `PBKDF2_ITERATIONS` is 100,000, the Cloudflare Workers ceiling. The local
   emulator does not enforce that cap, so a higher value passes every local test
   and fails only on a real deploy.
+- **XP's own site refuses the Cloudflare Workers runtime**, deployed as well as
+  local, on every path and below the header layer. The house view therefore
+  reaches the Worker through a scheduled Node job rather than a fetch of its
+  own (see *XP's own monthly macro report*). If that job stops running for
+  forty-five days the Worker falls back to the archived February 2025 vintage
+  and says so, in the briefing and in the run log — but it is a moving part,
+  and a licensed research feed would remove it.
 - `docs/implementation-report.md` covers what one more month would buy.

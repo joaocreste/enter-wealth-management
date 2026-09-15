@@ -347,6 +347,49 @@ const CLASS_PT_LETTER = {
 };
 const classPt = (k) => CLASS_PT_LETTER[k] || String(k || '').toLowerCase();
 
+/**
+ * The macro block without a model, in either language.
+ *
+ * The house view is XP's own monthly report and it is what this block is for:
+ * the report named and dated, its stance on monetary policy or its first
+ * conclusion in XP's own words, and its projections quoted exactly as XP
+ * wrote them, each with the year it belongs to. A projection is never written
+ * as a level — "no final de 2026" or "em 2026" is part of every one of them.
+ * Without the report the archived vintage says so and dates itself.
+ */
+function houseViewBlock(facts, lang = 'pt') {
+  const hv = facts.xp_house_view;
+  const pt = lang === 'pt';
+  if (hv?.available) {
+    const when = hv.published ? `${hv.published.slice(8, 10)}/${hv.published.slice(5, 7)}/${hv.published.slice(0, 4)}` : hv.published_label;
+    const stance = hv.stance_by_topic?.find((t) => /política monetária|inflação/i.test(t.topic))?.thesis || hv.conclusions?.[0] || null;
+    // Grouped by indicator, so it reads "Selic 13,25% em 2026 e 11,50% em 2027"
+    // rather than as eight separate clauses.
+    const byIndicator = new Map();
+    for (const x of hv.projections || []) {
+      const v = x.unit === 'brl_per_usd' ? `R$ ${x.written}` : x.written;
+      if (!byIndicator.has(x.indicator)) byIndicator.set(x.indicator, []);
+      byIndicator.get(x.indicator).push(pt ? `${v} em ${x.year}` : `${v} in ${x.year}`);
+    }
+    const join = (xs) => (xs.length <= 1 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')}${pt ? ' e ' : ' and '}${xs[xs.length - 1]}`);
+    const proj = [...byIndicator].map(([label, years]) => `${label} ${join(years)}`);
+    return [
+      pt ? `Relatório Mensal da XP — “${hv.title}”, publicado em ${when}.` : `XP's monthly report — “${hv.title}”, published ${when}.`,
+      stance ? (pt ? `A casa escreve: “${trimDot(stance)}”.` : `The house writes, in Portuguese: “${trimDot(stance)}”.`) : null,
+      proj.length ? (pt ? `Projeções da XP: ${proj.join('; ')}.` : `XP projections: ${proj.join('; ')}.`) : null,
+      pt ? 'São projeções da casa para os anos indicados, não leituras de hoje; compare com as séries ao vivo acima em vez de substituí-las.'
+         : 'These are house projections for the years named, not today\'s readings; compare them against the live series above rather than substituting for them.',
+    ].filter(Boolean).join(' ');
+  }
+  const why = hv && !hv.available ? (pt ? ` (${hv.reason})` : ` (${hv.reason})`) : '';
+  if (facts.macro_vintage) {
+    return pt
+      ? `O Relatório Mensal da XP não pôde ser lido nesta execução${why}. Visão macro de referência: ${facts.macro_vintage.headline} (${facts.macro_vintage.provider}, publicada em ${facts.macro_vintage.published}). Compare com as séries ao vivo acima em vez de substituí-las.`
+      : `XP's monthly report could not be retrieved in this run${why}. Reference macro view: ${facts.macro_vintage.headline} (${facts.macro_vintage.provider}, published ${facts.macro_vintage.published}). Compare against the live series above rather than substituting for them.`;
+  }
+  return pt ? `Nenhuma visão macro de referência anexada${why}.` : `No macro research view attached${why}.`;
+}
+
 export function deterministicWorldView(facts) {
   const ind = Object.fromEntries((facts.indicators || []).map((i) => [i.key, i]));
   const fired = (facts.triggers || []).filter((t) => t.status === 'BREACHED');
@@ -368,9 +411,7 @@ export function deterministicWorldView(facts) {
       equities: join(say('sp500', (v) => v.toLocaleString('en-US', { maximumFractionDigits: 0 })), say('ibovespa', (v) => v.toLocaleString('en-US', { maximumFractionDigits: 0 })), say('vix')) || 'Equity indicators unavailable.',
       rates_credit: join(say('us10y', (v) => `${v.toFixed(2)}%`), say('selic', (v) => `${v.toFixed(2)}%`), say('hy_etf')) || 'Rates and credit indicators unavailable.',
       fx_commodities: join(say('usdbrl', (v) => v.toFixed(4)), say('dxy'), say('gold', (v) => `US$ ${v.toFixed(0)}`), say('brent', (v) => `US$ ${v.toFixed(2)}`)) || 'FX and commodity indicators unavailable.',
-      macro_political: facts.macro_vintage
-        ? `Reference macro view: ${facts.macro_vintage.headline} (${facts.macro_vintage.provider}, published ${facts.macro_vintage.published}). Compare against the live series above rather than substituting for them.`
-        : 'No macro research vintage attached.',
+      macro_political: houseViewBlock(facts, 'en'),
       main_risk_or_opportunity: fired.length
         ? `${fired.length} threshold${fired.length > 1 ? 's' : ''} breached: ${fired.map((t) => t.label).join('; ')}.`
         : 'No configured threshold is currently breached. Monitor the approaching set.',
@@ -429,9 +470,7 @@ export function deterministicDailyInference(facts) {
       equities_pt: join(say('sp500', (v) => n(v, 0)), say('ibovespa', (v) => n(v, 0)), say('vix', (v) => n(v, 2))) || 'Indicadores de ações indisponíveis.',
       rates_credit_pt: join(say('us10y', (v) => `${n(v, 2)}%`), say('selic', (v) => `${n(v, 2)}%`), say('hy_etf', (v) => n(v, 2))) || 'Indicadores de juros e crédito indisponíveis.',
       fx_commodities_pt: join(say('usdbrl', (v) => `R$ ${n(v, 4)}`), say('dxy', (v) => n(v, 2)), say('gold', (v) => `US$ ${n(v, 0)}`), say('brent', (v) => `US$ ${n(v, 2)}`)) || 'Indicadores de câmbio e commodities indisponíveis.',
-      macro_political_pt: facts.macro_vintage
-        ? `Visão macro de referência: ${facts.macro_vintage.headline} (${facts.macro_vintage.provider}, publicada em ${facts.macro_vintage.published}). Compare com as séries ao vivo acima em vez de substituí-las.`
-        : 'Nenhuma visão macro de referência anexada.',
+      macro_political_pt: houseViewBlock(facts, 'pt'),
       main_risk_or_opportunity_pt: fired.length
         ? `${fired.length === 1 ? 'Limiar rompido' : 'Limiares rompidos'}: ${fired.map((t) => t.label).join('; ')}.`
         : 'Nenhum limiar configurado está rompido. Acompanhe os que se aproximam.',

@@ -315,6 +315,27 @@ label{font-size:12.5px;color:var(--ink-600);display:block;margin-bottom:6px}
 .brief-block.key h4{background:var(--structure);color:var(--paper-2);letter-spacing:.06em;font-size:9.5px;margin:0;align-self:stretch;display:flex;align-items:center;justify-content:center;text-align:center;padding:12px 8px}
 .brief-block.key p{padding:14px 16px 14px 0}
 .brief-foot{border-top:1px solid var(--rule);margin-top:24px;padding-top:14px}
+/* XP's own monthly report, sitting between the briefing and its sources: a
+   dated house view, not another row of live data. */
+.house-view{margin-top:24px;border:1px solid var(--rule);border-left:3px solid var(--accent-2);background:var(--paper-3);border-radius:var(--radius-data);padding:18px 20px}
+.house-view.out{border-left-color:var(--caution)}
+.house-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.house-view h4{font-family:var(--sans);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--accent-2);margin:0}
+.house-h .meta{font-size:11.5px;color:var(--ink-500)}
+.house-title{font-family:var(--display);font-weight:300;font-size:17px;line-height:1.4;color:var(--ink-950);margin:8px 0 0;max-width:64ch}
+.house-title a{color:inherit;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px}
+.house-title a:hover{text-decoration-color:var(--accent-2)}
+.house-stance{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:7px}
+.house-stance li{font-size:13px;line-height:1.55;color:var(--ink-800);padding-left:14px;position:relative}
+.house-stance li::before{content:'';position:absolute;left:0;top:.62em;width:5px;height:1px;background:var(--accent-2)}
+.house-stance b{font-weight:600;color:var(--ink-950)}
+.house-proj{margin-top:16px;border-top:1px solid var(--rule);padding-top:12px}
+.house-proj h5{font-family:var(--sans);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-500);margin:0 0 9px}
+.house-chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip.proj{font-family:var(--mono);font-size:11px;color:var(--ink-800);border-color:var(--rule);background:var(--paper-2);cursor:help;white-space:normal}
+.chip.proj b{font-family:var(--sans);font-weight:600;color:var(--ink-950);letter-spacing:.02em}
+.house-proj .note{margin-top:10px}
+@media (max-width:720px){.house-view{padding:16px}.house-h{gap:4px}}
 @media (max-width:700px){.brief-blocks{grid-template-columns:1fr;gap:18px}.brief-block.key{grid-template-columns:1fr}.brief-block.key p{padding:12px 14px}}
 
 /* ─── figures ────────────────────────────────────────────────────────── */

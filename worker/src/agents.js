@@ -35,6 +35,7 @@ import { indicatorQuote } from '../../src/adapters/marketdata.js';
 import * as Valor from '../../src/adapters/valor.js';
 import * as Google from '../../src/adapters/googlenews.js';
 import * as Bing from '../../src/adapters/bingnews.js';
+import * as XPResearch from '../../src/adapters/xpresearch.js';
 import { monthToDate } from '../../src/adapters/yahoo.js';
 import { triggerProximity } from '../../src/core/triggers.js';
 import { makeSource } from '../../src/core/sources.js';
@@ -180,21 +181,33 @@ async function agentDados(env, runId) {
     const retrieved = indicators.filter((i) => !i.unavailable).length;
     await report(1, 26, `Agente 1 · Dados — ${retrieved} de ${indicators.length} indicadores recuperados (${indicators.filter((i) => i.from_series).length} cotações lidas da própria série diária); medindo 5 sessões e 30 dias nas séries em R2`);
     await windowMoves(env, indicators, series);
+    // XP's own monthly macro report, before anything else is read. An advisor
+    // at XP who briefs a client against the house view has a problem no amount
+    // of live data fixes, so the day is read against this — and when it cannot
+    // be retrieved the run says so rather than quietly going without it.
+    await report(1, 27, 'Agente 1 · Dados — lendo o Relatório Mensal da XP (Brasil Macro Mensal) em conteudos.xpi.com.br');
+    const xpReport = await XPResearch.monthlyReport();
+    if (xpReport.unavailable) {
+      await report(1, 28, `Agente 1 · Dados — o Relatório Mensal da XP não pôde ser lido nesta execução (${String(xpReport.reason).slice(0, 90)}); a visão macro da casa fica com a projeção arquivada de ${MACRO_VINTAGE.published}`);
+    } else {
+      await report(1, 28, `Agente 1 · Dados — Relatório Mensal da XP de ${xpReport.published_label}: “${xpReport.title}”${xpReport.stale ? ` (publicado há ${xpReport.age_days} dias)` : ''} — ${xpReport.summary.length} conclusões, ${xpReport.figures.length} projeções com a frase de origem`);
+    }
+
     // The signal dashboard reads the newest capture per instrument; without this it would show the capture made at seed time forever.
-    await report(1, 27, 'Agente 1 · Dados — recapturando na TradingView a leitura técnica e o consenso de analistas de cada instrumento');
+    await report(1, 29, 'Agente 1 · Dados — recapturando na TradingView a leitura técnica e o consenso de analistas de cada instrumento');
     let signalsCaptured = 0;
     try {
       const assets = await all(db, 'SELECT * FROM assets WHERE tv_symbol IS NOT NULL');
       signalsCaptured = Object.keys(await P.fetchSignals(env, assets)).length;
     } catch (err) {
-      await report(1, 27, `Agente 1 · Dados — sinais da TradingView indisponíveis nesta execução (${String(err.message).slice(0, 80)}); o painel segue com a captura anterior`);
+      await report(1, 29, `Agente 1 · Dados — sinais da TradingView indisponíveis nesta execução (${String(err.message).slice(0, 80)}); o painel segue com a captura anterior`);
     }
-    await report(1, 28, `Agente 1 · Dados — ${signalsCaptured} sinais recapturados; lendo os eventos curados das últimas 48 horas e os movimentos que se destacam em 5 sessões ou 30 dias`);
+    await report(1, 30, `Agente 1 · Dados — ${signalsCaptured} sinais recapturados; lendo os eventos curados das últimas 48 horas e os movimentos que se destacam em 5 sessões ou 30 dias`);
     const curated = (await P.loadMarketEvents(env, { since: addDays(date, -1), limit: 20 })).filter((e) => withinNewsWindow(e.date, date));
     const generated = P.eventsFromIndicatorMoves(indicators, { window: 'notable' });
 
     // The headlines come from newsrooms, not from a search: Valor Econômico's own feeds and the Google News feeds, Brazil and abroad.
-    await report(1, 29, 'Agente 1 · Dados — lendo as manchetes das últimas 48 horas: Valor Econômico (RSS) e Google News (Brasil e internacional)');
+    await report(1, 31, 'Agente 1 · Dados — lendo as manchetes das últimas 48 horas: Valor Econômico (RSS) e Google News (Brasil e internacional)');
     const brazil = await gatherHeadlines(env, { date, modelOn: !!env.ANTHROPIC_API_KEY || !!env.OPENAI_API_KEY, report });
 
     let newsEvents = []; let newsSources = [];
@@ -228,8 +241,8 @@ async function agentDados(env, runId) {
     const { clients, portfolios } = await bookExposures(db, advisor.id);
     const events = dedupeEvents([...brazil.events, ...curated, ...generated, ...newsEvents]);
     const triggerEvals = await P.evaluateTriggers(env, indicators, advisor.id);
-    const sources = [...indicators.filter((i) => i.source).map((i) => i.source), ...brazil.sources, ...newsSources];
-    return { date, advisorId: advisor.id, actorId: row.actor_id, trigger: row.trigger, indicators, retrieved, events, clients, portfolios, triggerEvals, sources, news };
+    const sources = [...(xpReport.source ? [xpReport.source] : []), ...indicators.filter((i) => i.source).map((i) => i.source), ...brazil.sources, ...newsSources];
+    return { date, advisorId: advisor.id, actorId: row.actor_id, trigger: row.trigger, indicators, retrieved, events, clients, portfolios, triggerEvals, sources, news, xpReport };
   } catch (err) {
     await fail(err);
     return null;
@@ -242,11 +255,14 @@ async function agentInferencia(env, runId, s) {
   const { report, fail } = await loadRun(db, runId);
   try {
     const modelOn = LLM.llmAvailable(env);
+    const houseNote = s.xpReport?.unavailable === false
+      ? `, contra o Relatório Mensal da XP de ${s.xpReport.published_label}`
+      : ', sem o Relatório Mensal da XP nesta execução';
     await report(2, 52, modelOn
-      ? `Agente 2 · Inferência — o modelo lê ${s.events.length} eventos, ${s.retrieved} indicadores e ${s.portfolios.length} carteiras e decide o que importa hoje`
-      : `Agente 2 · Inferência — sem modelo configurado: ordenando ${s.events.length} eventos por relevância e exposição`);
+      ? `Agente 2 · Inferência — o modelo lê ${s.events.length} eventos, ${s.retrieved} indicadores e ${s.portfolios.length} carteiras${houseNote}, e decide o que importa hoje`
+      : `Agente 2 · Inferência — sem modelo configurado: ordenando ${s.events.length} eventos por relevância e exposição${houseNote}`);
     const baseRows = P.buildWhatMattersTable(s.events, s.indicators, s.portfolios);
-    const facts = inferenceFacts({ date: s.date, indicators: s.indicators, triggers: s.triggerEvals, events: s.events, portfolios: s.portfolios, baseRows });
+    const facts = inferenceFacts({ date: s.date, indicators: s.indicators, triggers: s.triggerEvals, events: s.events, portfolios: s.portfolios, baseRows, xpReport: s.xpReport });
     let inference; let mode = 'deterministic_template'; let model = null; let promptVersion = null;
     if (modelOn) {
       try {
@@ -262,7 +278,7 @@ async function agentInferencia(env, runId, s) {
     }
     await report(2, 74, 'Agente 2 · Inferência — escrevendo o resumo do dia e a tabela do que importa');
     const whatMatters = mergeInference(baseRows, inference, s.events);
-    const worldView = await upsertWorldView(db, s.advisorId, s.date, inference, { mode, model, promptVersion, news: s.news, sources: s.sources });
+    const worldView = await upsertWorldView(db, s.advisorId, s.date, inference, { mode, model, promptVersion, news: s.news, sources: s.sources, houseView: XPResearch.houseView(s.xpReport) });
     return { ...s, whatMatters, worldView, inference: { mode, model, prompt_version: promptVersion, fallback_reason: inference.fallback_reason ?? null } };
   } catch (err) {
     await fail(err);
@@ -300,6 +316,7 @@ async function agentGatilhos(env, runId, s) {
       date: s.date,
       advisor: { id: advisor.id, name: advisor.name, code: advisor.advisor_code, team: advisor.team },
       world_view: s.worldView,
+      house_view: XPResearch.houseView(s.xpReport),
       indicators: s.indicators.map(compactIndicator),
       triggers,
       drift_alerts: driftAlerts,
@@ -315,7 +332,7 @@ async function agentGatilhos(env, runId, s) {
     };
     await run(db, 'UPDATE overview_runs SET status = ?, step = 4, progress = 100, message = ?, result_json = ?, finished_at = ?, log_json = ? WHERE id = ?',
       'completed', 'Concluído', JSON.stringify(result), nowIso(), JSON.stringify([...log, { at: nowIso(), step: 4, message: 'Concluído' }].slice(-80)), runId);
-    await audit(db, { entity: 'overview_run', entity_id: runId, action: 'completed', actor_id: s.actorId, detail: { trigger: s.trigger, inference: s.inference.mode, news: news.mode, breached, drifts: driftAlerts.length } });
+    await audit(db, { entity: 'overview_run', entity_id: runId, action: 'completed', actor_id: s.actorId, detail: { trigger: s.trigger, inference: s.inference.mode, news: news.mode, house_view: s.xpReport?.unavailable === false ? s.xpReport.published : 'indisponível', breached, drifts: driftAlerts.length } });
     return { ok: true };
   } catch (err) {
     await fail(err);
@@ -811,7 +828,7 @@ function levelNote(i) {
   return null;
 }
 
-function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRows }) {
+function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRows, xpReport }) {
   return {
     date,
     indicators: indicators.map((i) => ({
@@ -841,7 +858,11 @@ function inferenceFacts({ date, indicators, triggers, events, portfolios, baseRo
     })),
     book: portfolios.map((p) => ({ client: p.client_name, exposures: p.portfolio.exposures })),
     asset_classes: ASSET_CLASSES,
-    macro_vintage: MACRO_VINTAGE,
+    // The house view comes first and the archived vintage is only what is left
+    // when the report could not be read, so the model is never given two macro
+    // views at once and left to choose between them.
+    xp_house_view: XPResearch.houseView(xpReport),
+    macro_vintage: xpReport?.unavailable === false ? null : MACRO_VINTAGE,
   };
 }
 
@@ -922,6 +943,7 @@ async function upsertWorldView(db, advisorId, date, inference, meta) {
     mode: meta.mode, model: meta.model, prompt_version: meta.promptVersion,
     fallback_reason: inference.fallback_reason ?? null,
     generated_without_model: !!inference.generated_without_model,
+    house_view: meta.houseView || null,
     news: {
       mode: meta.news.mode, searches: meta.news.searches ?? 0, kept: meta.news.items?.length ?? 0,
       headlines: meta.news.headlines ? { provider: meta.news.headlines.provider, providers: meta.news.headlines.providers ?? [], window_hours: meta.news.headlines.window_hours ?? NEWS_WINDOW_HOURS, mode: meta.news.headlines.mode, items: meta.news.headlines.items, kept: meta.news.headlines.kept, top_story: meta.news.headlines.top_story ?? null } : null,

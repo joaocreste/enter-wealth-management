@@ -36,6 +36,10 @@ line('advisor', `${login.user.name} <${login.user.email}>`);
 
 step(2, 'World Overview: what matters today');
 const overview = await api('/api/advisor/overview');
+const house = overview.house_view;
+line("XP's house view", house?.available
+  ? `${house.title} — published ${house.published_label}, ${house.projections.length} projections`
+  : `not retrieved (${house?.reason || 'not attempted'}) — the archived vintage stands in`);
 line('indicators retrieved', `${overview.indicators.filter((i) => !i.unavailable).length} of ${overview.indicators.length}`);
 line('thresholds breached', overview.triggers.filter((t) => t.status === 'BREACHED').map((t) => t.label).join('; ') || 'none');
 line('events mapped to the book', overview.what_matters.length);

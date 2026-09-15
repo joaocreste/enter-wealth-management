@@ -28,6 +28,7 @@ import { articleUrl } from '../src/adapters/bingnews.js';
 import { describeLevelSeries } from '../src/adapters/marketdata.js';
 import { monthToDate } from '../src/adapters/yahoo.js';
 import { buildWhatMattersTable, notableWindow } from '../src/core/events.js';
+import { figuresIn, projectionSentences, parseArchive, parseFeed, isoFromRfc822, ptLabel, parseEdition, houseView as xpHouseView, ptDate, monthlyReport, deposit as depositXp, DEPOSIT_KEY, PROVIDER as XP_RESEARCH } from '../src/adapters/xpresearch.js';
 
 let pass = 0; let fail = 0;
 const t = (name, fn) => {
@@ -510,6 +511,20 @@ if (process.argv.includes('--live')) {
     eq(full.report.status, 'pending_approval');
     ok(full.report.canonical.letter.greeting.startsWith('Prezado'), 'the letter does not greet the client');
   });
+  await tAsync('XP publishes its monthly macro report where the macro agent looks for it', async () => {
+    const r = await monthlyReport();
+    ok(!r.unavailable, r.reason || 'the report could not be read');
+    ok(/^20\d\d-\d\d-\d\d$/.test(r.published), `no publication date: ${r.published}`);
+    ok(r.age_days < 100, `the newest edition is ${r.age_days} days old`);
+    ok(r.sections.length >= 3, `only ${r.sections.length} sections`);
+    ok(r.summary.length || r.sections.some((x) => x.paragraphs.length), 'the edition carried no text');
+    ok(r.figures.length >= 2, `only ${r.figures.length} projections read`);
+    ok(['feed', 'archive'].includes(r.route), `unknown route ${r.route}`);
+    for (const f of r.figures) ok(f.quote.includes(f.written.replace('%', '')), `${f.key} ${f.year} is not in its own sentence`);
+    eq(r.source.provider, XP_RESEARCH);
+    ok(r.source.reference.startsWith('https://conteudos.xpi.com.br/'), r.source.reference);
+    eq(r.source.mocked, false);
+  });
   await tAsync('a client cannot read another client', async () => {
     const login = await (await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'albert.dasilva@exemplo.com.br', password: 'albert2026' }) })).json();
     const res = await fetch(`${BASE}/api/clients/cli_beatriz`, { headers: { authorization: `Bearer ${login.token}` } });
@@ -558,6 +573,143 @@ t('a Bing News item names its publisher and links to the article, not to Bing', 
   eq(it.title, 'Ibovespa vai às mínimas'); eq(it.source, 'Valor Econômico');
   eq(articleUrl(it.link), 'https://valor.globo.com/financas/noticia/2026/09/11/x.ghtml');
   eq(articleUrl('https://example.com/a'), 'https://example.com/a');
+});
+
+console.log('\n  The XP monthly report — the house view, read from the house\'s own sentences');
+t('a revision reports the figure XP moved to, never the one it left', () => {
+  const [f] = figuresIn(['Nossa projeção para o IPCA de 2026 foi reduzida de 5,1% para 5,0%, refletindo surpresas baixistas.'], 2026);
+  eq(f.key, 'ipca'); eq(f.year, 2026); eq(f.written, '5,0%'); close(f.value, 0.05, 1e-9);
+});
+t('a revision inside a continuation clause does the same', () => {
+  const figs = figuresIn(['Elevamos nossa projeção para o IPCA de 2026 de 5,3% para 5,5%; para 2027, subimos a expectativa de 4,0% para 4,2%.'], 2026);
+  eq(figs.find((f) => f.year === 2026).written, '5,5%');
+  eq(figs.find((f) => f.year === 2027).written, '4,2%');
+});
+t('"este ano" and "o ano que vem" resolve against the edition, not against today', () => {
+  const figs = figuresIn(['Nossas projeções para o IPCA continuaram em 5,1% este ano e 4,2% no ano que vem, com elevada incerteza.'], 2026);
+  eq(figs.length, 2);
+  eq(figs.find((f) => f.year === 2026).written, '5,1%');
+  eq(figs.find((f) => f.year === 2027).written, '4,2%');
+  eq(figuresIn(['Projetamos a taxa Selic em 11,50% ao final do ano que vem.'], 2025)[0].year, 2026);
+});
+t('a share of output is never read as growth', () => {
+  eq(figuresIn(['Tendência de curto prazo reforça nossa projeção de déficit primário de 0,3% do PIB para o governo central em 2026.'], 2026).length, 0);
+  eq(figuresIn(['O aumento das despesas financeiras levará a dívida pública para 83,3% e 88,1% do PIB em 2026 e 2027.'], 2026).length, 0);
+});
+t('a sentence naming two years yields both', () => {
+  const figs = figuresIn(['Projetamos a taxa Selic em 13,25% no final de 2026 e 11,50% em 2027 (nível alcançado em junho).'], 2026);
+  eq(figs.length, 2); eq(figs[0].written, '13,25%'); eq(figs[1].written, '11,50%');
+  const fx = figuresIn(['Continuamos a projetar 5,00 reais por dólar no final de 2026 e 5,30 no final de 2027.'], 2026);
+  eq(fx.length, 2); eq(fx[0].unit, 'brl_per_usd'); close(fx[1].value, 5.3, 1e-9);
+});
+t('a phrasing the parser does not recognise yields no figure at all', () => {
+  eq(figuresIn(['na taxa Selic, para 13,75% (esperávamos três reduções antes, para 13,50%), seguidos por uma pausa.'], 2026).length, 0);
+});
+t('every figure carries the sentence it was read from, and the sentence contains it', () => {
+  for (const f of figuresIn([
+    'Reduzimos nossa projeção para o crescimento do PIB em 2026, de 2,0% para 1,7%, devido ao arrefecimento.',
+    'Projetamos a taxa Selic em 13,25% no final de 2026 e 11,50% em 2027.',
+  ], 2026)) {
+    ok(f.quote && f.quote.length > 20, `${f.key} has no quote`);
+    ok(f.quote.includes(f.written.replace('%', '')), `${f.key} quote does not contain ${f.written}`);
+  }
+});
+t('the projection sentences keep what the figures could not', () => {
+  const sents = projectionSentences(['Mantemos a projeção de 14,00% para a taxa Selic no final deste ano.', 'O tempo melhorou.']);
+  eq(sents.length, 1);
+  ok(sents[0].includes('14,00%'));
+});
+t('a Portuguese card date becomes an ISO date', () => {
+  eq(ptDate('3 Set 2026'), '2026-09-03');
+  eq(ptDate('14 Fev 2025'), '2025-02-14');
+  eq(ptDate('sem data'), null);
+});
+t('the archive is read newest first, whatever order the cards arrive in', () => {
+  const card = (slug, title, when) => `<a class="bloco-materia box-rounded" href="https://conteudos.xpi.com.br/economia/brasil-macro-mensal-${slug}/" data-wa="x" title="${title}"><div class="conteudo-aprenda"><div class="data">${when} • 33 mins de leitura</div><div class="conteudo-titulo"><h3>${title}</h3></div><div class="personas"><h4>Caio Megale</h4><p>Economista-chefe da XP</p></div></div></a>`;
+  const editions = parseArchive(`${card('julho', 'Brasil Macro Mensal: Julho', '7 Jul 2026')}${card('setembro', 'Brasil Macro Mensal: Setembro', '3 Set 2026')}`);
+  eq(editions.length, 2);
+  eq(editions[0].published, '2026-09-03');
+  eq(editions[0].authors[0].name, 'Caio Megale');
+  ok(editions[0].url.endsWith('/brasil-macro-mensal-setembro/'));
+});
+t('the feed yields the report and never the weekly note that links to it', () => {
+  const item = (title, when, content) => `<item><title><![CDATA[${title}]]></title><link>https://conteudos.xpi.com.br/economia/${title.toLowerCase().replace(/[^a-z]+/g, '-')}/</link><pubDate>${when}</pubDate><dc:creator><![CDATA[Caio Megale]]></dc:creator><content:encoded><![CDATA[${content}]]></content:encoded></item>`;
+  const xml = `<rss><channel>`
+    + item('Economia em Destaque: PIB reflete desaceleração', 'Fri, 04 Sep 2026 18:28:13 +0000', '<p>Comenta o <em>Brasil Macro Mensal</em> desta semana.</p>')
+    + item('Brasil Macro Mensal: Desaceleração antes do esperado', 'Thu, 03 Sep 2026 19:39:25 +0000', '<ul class="wp-block-list"><li>Projetamos a taxa Selic em 13,25% no final de 2026 e 11,50% em 2027, diante da desaceleração.</li></ul>')
+    + item('Brasil Macro Mensal: Edição anterior', 'Thu, 06 Aug 2026 19:00:00 +0000', '<p>anterior</p>')
+    + `</channel></rss>`;
+  const editions = parseFeed(xml);
+  eq(editions.length, 2, 'the weekly note was taken for the report');
+  eq(editions[0].published, '2026-09-03');
+  eq(editions[0].published_label, '3 Set 2026');
+  eq(editions[0].authors[0].name, 'Caio Megale');
+  const ed = parseEdition(editions[0].content, editions[0]);
+  eq(ed.figures.length, 2);
+  eq(ed.figures[0].written, '13,25%');
+});
+t('a feed date and an archive card date agree on the same edition', () => {
+  eq(isoFromRfc822('Thu, 03 Sep 2026 19:39:25 +0000'), '2026-09-03');
+  eq(ptLabel('2026-09-03'), '3 Set 2026');
+  eq(ptDate(ptLabel('2026-09-03')), '2026-09-03');
+  eq(isoFromRfc822('não é uma data'), null);
+});
+t('an edition gives its conclusions, a stance per topic, and the report PDF', () => {
+  const html = `<article><ul class="wp-block-list"><li>Reduzimos nossa projeção para o crescimento do PIB em 2026, de 2,0% para 1,7%, devido ao arrefecimento dos componentes cíclicos;</li></ul>`
+    + `<h2>Editorial – Desaceleração mais cedo do que o esperado</h2><p>${'A economia brasileira está perdendo força mais cedo do que esperávamos, e isso muda o cenário para o ano que vem. '.repeat(2)}</p>`
+    + `<h3>Política Monetária – Não vemos pausa no ciclo de corte de juros</h3><p>${'O Copom deve seguir cortando a taxa básica ao longo dos próximos trimestres, segundo o nosso cenário base. '.repeat(2)}</p></article>`
+    + `<a href="https://conteudos.xpi.com.br/wp-content/uploads/2026/09/XP-Macro-Mensal-Set26.pdf">Leia o relatório em PDF – PT</a>`;
+  const ed = parseEdition(html, { url: 'https://conteudos.xpi.com.br/economia/x/', title: 'Brasil Macro Mensal: X', published: '2026-09-03', published_label: '3 Set 2026' });
+  eq(ed.summary.length, 1);
+  eq(ed.sections.length, 2);
+  eq(ed.sections[1].topic, 'Política Monetária');
+  eq(ed.sections[1].thesis, 'Não vemos pausa no ciclo de corte de juros');
+  eq(ed.editorial.length, 1);
+  eq(ed.pdf.pt, 'https://conteudos.xpi.com.br/wp-content/uploads/2026/09/XP-Macro-Mensal-Set26.pdf');
+  eq(ed.figures.find((f) => f.key === 'gdp').written, '1,7%');
+});
+await ta('a deposited edition is read back whole, and an unretrieved one is refused', async () => {
+  const { cacheGet, cacheSet } = await import('../src/adapters/cache.js');
+  await cacheSet(DEPOSIT_KEY, null, 1);
+  let refused = null;
+  try { await depositXp({ unavailable: true, reason: 'HTTP 403' }); } catch (e) { refused = e.message; }
+  ok(refused && /never retrieved/.test(refused), 'an unretrieved edition was accepted');
+  const report = {
+    unavailable: false, url: 'https://conteudos.xpi.com.br/economia/x/', title: 'Brasil Macro Mensal: X',
+    published: '2026-09-03', published_label: '3 Set 2026', summary: ['uma conclusão'],
+    sections: [{ topic: 'Inflação', thesis: 'IPCA menor', paragraphs: ['p'] }], editorial: [], authors: [{ name: 'Caio Megale' }],
+    figures: [{ key: 'selic', label: 'Selic', year: 2026, unit: 'rate', written: '13,25%', value: 0.1325, quote: 'Projetamos a taxa Selic em 13,25% no final de 2026.' }],
+    projection_sentences: [], pdf: {}, previous: [], source: { id: 'src_1' }, attempts: [],
+  };
+  const held = await depositXp(report, { at: '2026-09-15T17:00:00.000Z' });
+  eq(held.published, '2026-09-03');
+  const back = await cacheGet(DEPOSIT_KEY, 3600);
+  eq(back.edition.title, 'Brasil Macro Mensal: X');
+  eq(back.edition.figures[0].written, '13,25%');
+  eq(back.deposited_at, '2026-09-15T17:00:00.000Z');
+  ok(!('source' in back.edition), 'the deposit kept a stale source record');
+  // The fixture must not outlive the check: the deposit key is the one the
+  // macro agent and the deposit job both read, and a test edition left in it
+  // would be published as XP's house view.
+  await cacheSet(DEPOSIT_KEY, null, 1);
+  eq(await monthlyReport({ routes: ['deposited'] }).then((r) => r.unavailable), true);
+});
+t('a report that could not be read says so instead of going quiet', () => {
+  const hv = xpHouseView({ unavailable: true, reason: 'HTTP 503' });
+  eq(hv.available, false);
+  ok(hv.reason.includes('503'));
+  ok(hv.where.includes('conteudos.xpi.com.br'));
+});
+t('the house view names the provider and every projection carries its year', () => {
+  const hv = xpHouseView({
+    unavailable: false, title: 'Brasil Macro Mensal: X', published: '2026-09-03', published_label: '3 Set 2026',
+    summary: ['uma conclusão'], sections: [{ topic: 'Inflação', thesis: 'IPCA menor' }], editorial: [], authors: [{ name: 'Caio Megale' }],
+    figures: [{ key: 'selic', label: 'Selic', year: 2026, unit: 'rate', written: '13,25%', value: 0.1325, quote: 'Projetamos a taxa Selic em 13,25% no final de 2026.' }],
+    projection_sentences: [], pdf: {}, source: { id: 'src_1' },
+  });
+  eq(hv.provider, XP_RESEARCH);
+  ok(hv.provider.includes('XP'));
+  for (const p of hv.projections) { ok(Number.isFinite(p.year), 'a projection without a year'); ok(p.quote, 'a projection without its sentence'); }
 });
 
 console.log('\n  The letter — one piece of writing, and a binary answer on policy');

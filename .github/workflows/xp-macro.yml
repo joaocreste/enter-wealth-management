@@ -1,0 +1,36 @@
+# Hands XP's monthly macro report to the Worker.
+#
+# conteudos.xpi.com.br sits behind a WAF that refuses the Cloudflare Workers
+# runtime on every path, below the header layer, so the Worker cannot fetch the
+# house view however it shapes the request. Node is served normally. This job
+# therefore does the fetch and the parse and deposits the parsed edition; the
+# daily macro agent reads it from KV and makes no outbound call for it at all.
+#
+# Daily, though the report is monthly: a deposit is good for 45 days, so a
+# missed run changes nothing and a repeat run simply refreshes it. It runs an
+# hour before the agents' own cron (10:00 UTC) so a new edition is already in
+# place when the morning is written.
+name: Deposit XP's monthly macro report
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: xp-macro
+  cancel-in-progress: false
+
+jobs:
+  deposit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch the edition and deposit it
+        env:
+          API_BASE: ${{ secrets.API_BASE }}
+          SERVICE_TOKEN: ${{ secrets.SERVICE_TOKEN }}
+        run: node scripts/fetch-xp-report.mjs

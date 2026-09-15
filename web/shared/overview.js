@@ -74,6 +74,53 @@ export function newsHealth(news, modelWrote) {
 }
 
 /**
+ * XP's own monthly macro report, shown as what it is: a dated house view with
+ * a link to the report itself, not another row of live data. The reader can
+ * always see which edition the morning was written against, and every
+ * projection carries the year it is for — a projection printed as a bare
+ * figure reads as today's level, which is the one thing it is not.
+ */
+export function houseViewCard(hv) {
+  if (!hv) return null;
+  if (!hv.available) {
+    return h('div.house-view.out', {},
+      h('h4', { text: 'Relatório Mensal da XP' }),
+      h('p.note', { text: `Não foi possível ler o relatório nesta execução: ${hv.reason}. A visão macro desta manhã foi escrita sem ele.` }),
+      h('p.note', {}, h('a', { href: hv.where || 'https://conteudos.xpi.com.br/economia/', target: '_blank', rel: 'noopener', text: 'conteudos.xpi.com.br/economia' })));
+  }
+  const byIndicator = new Map();
+  for (const p of hv.projections || []) {
+    const v = p.unit === 'brl_per_usd' ? `R$ ${p.written}` : p.written;
+    if (!byIndicator.has(p.indicator)) byIndicator.set(p.indicator, []);
+    byIndicator.get(p.indicator).push({ text: `${v} em ${p.year}`, quote: p.quote });
+  }
+  return h('div.house-view', {},
+    h('div.house-h', {},
+      h('h4', { text: 'Relatório Mensal da XP' }),
+      h('span.meta', { text: [hv.published_label, hv.authors?.length ? hv.authors.join(', ') : null].filter(Boolean).join(' · ') })),
+    h('p.house-title', {}, hv.url ? h('a', { href: hv.url, target: '_blank', rel: 'noopener', text: hv.title }) : hv.title),
+    hv.stale ? h('p.note', {}, h('span.chip.warn', { text: `PUBLICADO HÁ ${hv.age_days} DIAS` }), ' nenhuma edição mais recente estava no arquivo da XP.') : null,
+    (hv.stance_by_topic || []).length
+      ? h('ul.house-stance', {}, hv.stance_by_topic.map((t) => h('li', {}, h('b', { text: t.topic }), ` — ${t.thesis}`)))
+      : null,
+    byIndicator.size
+      ? h('div.house-proj', {},
+        h('h5', { text: 'Projeções da XP' }),
+        h('div.house-chips', {}, [...byIndicator].map(([label, years]) => h('span.chip.proj', {
+          title: years.map((y) => y.quote).join(' | '),
+        }, h('b', { text: label }), ` ${years.map((y) => y.text).join(' · ')}`))),
+        h('p.note', { text: 'Projeções da XP para os anos indicados, lidas das frases do próprio relatório. Não são leituras de hoje; passe o cursor sobre uma projeção para ver a frase de origem.' }))
+      : null);
+}
+
+/** One line for the briefing's foot: which edition this morning was read against. */
+export function houseViewNote(hv) {
+  if (!hv) return null;
+  if (!hv.available) return h('span.muted', { text: `O Relatório Mensal da XP não pôde ser lido nesta execução: ${hv.reason}.` });
+  return h('span.muted', {}, `A visão macro da casa vem do Relatório Mensal da XP de ${hv.published_label}, “${hv.title}”, lido em conteudos.xpi.com.br a cada execução.`);
+}
+
+/**
  * The briefing: the headline, the summary, the five blocks and the note that
  * says where the numbers came from. `workflowStatus` adds the approved/draft
  * chip the advisor sees; a client sees the text without the workflow.
@@ -102,10 +149,11 @@ export function briefingSection(o, { workflowStatus = true } = {}) {
       h('div.brief-blocks', {}, blocks.map(([k, v, key]) => h('div.brief-block', { class: key ? 'key' : '' },
         h('h4', { text: k }),
         h('p', { text: v })))),
+      houseViewCard(o.house_view || view.house_view),
       h('div.brief-foot', {},
         h('p.note', {},
           'Este resumo é construído a partir dos dados recuperados pelos agentes, não da memória de um modelo. ',
-          'Cada número acima vem de um provedor identificado abaixo. ', newsNote(o.news)),
+          'Cada número acima vem de um provedor identificado abaixo. ', houseViewNote(o.house_view || view.house_view), ' ', newsNote(o.news)),
         sourcesBlock(o.sources, 'Ver fontes'))));
 }
 

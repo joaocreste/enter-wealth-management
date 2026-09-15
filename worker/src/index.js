@@ -29,6 +29,7 @@ import { logReturns, correlationMatrix } from '../../src/core/correlation.js';
 import { riskClassOf, RISK_CLASSES, monthEnd, monthBefore, monthlyReturnsFromCloses, riskFromMonthly, efficientFrontier } from '../../src/core/risk.js';
 import { dailySeries, dividendsBetween } from '../../src/adapters/yahoo.js';
 import * as bcb from '../../src/adapters/bcb.js';
+import * as XPResearch from '../../src/adapters/xpresearch.js';
 import { makeSource, SourceLedger } from '../../src/core/sources.js';
 import * as A from './agents.js';
 import * as S from './series.js';
@@ -165,6 +166,28 @@ async function route(request, env, url, ctx) {
     }
     const result = await seedDatabase(env);
     return ok(result);
+  }
+
+  // ── the XP monthly report, deposited by a runtime XP will serve ──────────
+  // conteudos.xpi.com.br refuses the Workers runtime below the header layer,
+  // so this Worker cannot fetch the house view however it shapes the request.
+  // A Node process can, and hands the parsed edition over here; the macro
+  // agent then reads it from KV and makes no outbound call for it at all.
+  // Trusted internal caller only, the same service token the Rivet runner uses.
+  if (path === '/api/admin/xp-report' && method === 'POST') {
+    if (!(env.SERVICE_TOKEN && request.headers.get('X-Service-Token') === env.SERVICE_TOKEN)) {
+      return bad(403, 'service token required');
+    }
+    P.attachKv(env);
+    const report = body?.report;
+    if (!report || report.unavailable || !report.published) return bad(400, 'the payload carries no retrieved edition');
+    try {
+      const held = await XPResearch.deposit(report, { at: body.fetched_at || nowIso() });
+      await audit(db, { entity: 'xp_report', entity_id: report.url || report.published, action: 'deposited', actor_id: 'svc_rivet', detail: held });
+      return ok({ ok: true, ...held, figures: (report.figures || []).length });
+    } catch (err) {
+      return bad(400, err.message);
+    }
   }
 
   // ── report artefacts ─────────────────────────────────────────────────────
@@ -691,6 +714,7 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
     return ok({
       date: r.date,
       world_view: wv ? { generated_summary: wv.generated_summary ?? null, approval_status: wv.approval_status ?? null, briefing: wv.briefing ?? null } : null,
+      house_view: r.house_view || null,
       indicators: r.indicators || [],
       sources: r.sources || [],
       inference: r.inference ? { mode: r.inference.mode, model: r.inference.model ?? null } : null,

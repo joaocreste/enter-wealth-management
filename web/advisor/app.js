@@ -9,7 +9,7 @@ import {
   h, mount, frag, api, auth, stat, table, router, setActive,
   pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix,
   progressCard, dialog, apiUpload, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday, donut,
-  money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass,
+  money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass, MINUS,
   barChart, allocationBar, bandChart, lineChart, sparkline, scatterChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
 } from '../shared/ui.js';
@@ -23,6 +23,8 @@ let CLIENTS = [];
 let ROUTER = null;
 
 const num = (v, d = 1) => (v == null || !Number.isFinite(v) ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }));
+/** A bare ratio — a Sharpe, not a percentage — with the brand's true minus (§8.3). */
+const ratio = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : `${v < 0 ? MINUS : ''}${num(Math.abs(v), d)}`);
 
 /** Asset-class keys are English in the data model; the portal reads Portuguese. */
 const CLASS_PT = {
@@ -579,7 +581,7 @@ function reportChip(status) {
 
 // ═══ client detail ═════════════════════════════════════════════════════════
 const CLIENT_TABS = [
-  ['overview', 'Visão geral'], ['performance', 'Rentabilidade'], ['portfolio', 'Alocação'],
+  ['overview', 'Visão geral'], ['performance', 'Rentabilidade'], ['risk', 'Risco'], ['portfolio', 'Alocação'],
   ['holdings', 'Posições'], ['recommendations', 'Recomendações'], ['policy', 'Política'],
   ['meetings', 'Reuniões'], ['reports', 'Cartas'], ['audit', 'Auditoria'],
 ];
@@ -778,6 +780,7 @@ function policyDocCurrent(c, versions) {
 async function renderClientTab(tab, id, d) {
   switch (tab) {
     case 'performance': return tabPerformance(id, d);
+    case 'risk': return tabRisk(id);
     case 'portfolio': return tabPortfolio(id, d);
     case 'holdings': return tabHoldings(id, d);
     case 'recommendations': return tabRecommendations(id, d);
@@ -799,15 +802,51 @@ function cumulativeSeries(returns) {
   return { portfolio, benchmark };
 }
 
+// ── how much risk the portfolio has been taking ───────────────────────────
+// Trailing twelve months, from the monthly returns actually apurados, against
+// the CDI published for each of those months. The Sharpe ratio is printed
+// beside the two figures it is made of — a ratio without its return and its
+// risk-free leg is a number nobody can check.
+const vol12 = (v) => (v == null ? 'indisponível' : weight(v, { locale: L, decimals: 1 }));
+const sharpe12 = (v) => (v == null ? 'indisponível' : ratio(v));
+
+function riskRow(r, { small = true } = {}) {
+  const cur = r?.current || null;
+  const rf = r?.risk_free || null;
+  const window = cur ? `${monthLabel(cur.from, L)} a ${monthLabel(cur.month, L)}` : (r?.reason || 'histórico insuficiente');
+  return [
+    stat('Volatilidade 12m', vol12(cur?.volatility), { small, sub: cur?.volatility == null ? r?.reason || 'sem janela de 12 meses fechada' : `anualizada · ${window}` }),
+    stat('Índice de Sharpe 12m', sharpe12(cur?.sharpe), {
+      small,
+      tone: cur?.sharpe == null ? '' : toneClass(cur.sharpe),
+      sub: cur?.sharpe == null ? (rf?.reason || 'CDI indisponível para a janela') : 'retorno acima do CDI por unidade de risco',
+    }),
+    stat('Retorno 12m', cur?.total_return == null ? 'indisponível' : percent(cur.total_return, { locale: L }), { small, tone: toneClass(cur?.total_return), sub: 'retorno composto da carteira na janela' }),
+    stat('CDI 12m', cur?.risk_free_return == null ? 'indisponível' : percent(cur.risk_free_return, { locale: L }), { small, tone: 'bench', sub: 'acumulado no período · Banco Central' }),
+  ];
+}
+
+/** The risk half of the client payload, never fatal: the overview renders without it. */
+async function loadPortfolioRisk(id) {
+  try { return await api(`/api/clients/${id}/risk`); }
+  catch { return null; }
+}
+
 async function tabOverview(id, d) {
   const last = d.returns[d.returns.length - 1];
   const series = cumulativeSeries(d.returns);
+  const risk = await loadPortfolioRisk(id);
   return frag(
     h('div.grid.g4', { style: { marginBottom: '24px' } },
       stat('Patrimônio', money(d.total_value, { locale: L })),
       stat(`Rentabilidade em ${last ? monthLabel(last.month, L) : '—'}`, last ? percent(last.portfolio, { locale: L }) : '—', { tone: toneClass(last?.portfolio) }),
       stat('Carteira de referência', last?.benchmark != null ? percent(last.benchmark, { locale: L }) : '—', { tone: 'bench' }),
       stat('Perfil de risco', d.client.risk_profile, { small: true, sub: `próxima revisão ${d.client.next_review_at ? shortDate(d.client.next_review_at) : '—'}` })),
+    h('div.grid.g4', { style: { marginBottom: '24px' } }, risk
+      ? riskRow(risk)
+      : [stat('Volatilidade 12m', 'indisponível', { small: true, sub: 'a medida de risco não pôde ser calculada' }),
+        stat('Índice de Sharpe 12m', 'indisponível', { small: true, sub: 'a medida de risco não pôde ser calculada' })]),
+    h('p.note', { style: { margin: '-12px 0 24px' }, text: 'Volatilidade anualizada e índice de Sharpe contra o CDI, medidos nos últimos doze meses de retornos apurados. São medidas históricas, não expectativas. O detalhe está na aba Risco.' }),
     h('div.grid.g2', {},
       h('div.card', {}, lineChart(series, {
         title: 'Retorno acumulado desde o início do histórico',
@@ -892,7 +931,7 @@ async function tabPerformance(id, d) {
       h('div.grid.g4', {},
         stat('Retorno anualizado', percent(metrics.annualised_return, { locale: L }), { small: true, tone: toneClass(metrics.annualised_return) }),
         stat('Volatilidade anualizada', weight(metrics.annualised_volatility, { locale: L }), { small: true }),
-        stat('Índice de Sharpe', metrics.sharpe_ratio == null ? 'indisponível' : num(metrics.sharpe_ratio, 2), { small: true, sub: metrics.risk_free?.name ? `contra o ${metrics.risk_free.name}` : metrics.risk_free?.reason }),
+        stat('Índice de Sharpe', metrics.sharpe_ratio == null ? 'indisponível' : ratio(metrics.sharpe_ratio), { small: true, sub: metrics.risk_free?.name ? `contra o ${metrics.risk_free.name}` : metrics.risk_free?.reason }),
         stat('Máximo drawdown', percent(metrics.max_drawdown, { locale: L }), { small: true, tone: 'loss', sub: metrics.max_drawdown_window ? `${metrics.max_drawdown_window.peak_month} → ${metrics.max_drawdown_window.trough_month}` : null }),
         stat('Retorno em 3 anos', metrics.three_year_available ? percent(metrics.three_year_return, { locale: L }) : 'histórico insuficiente', { small: true, sub: metrics.three_year_note })),
       h('p.note', { style: { marginTop: '12px' }, text: 'Estas são medidas históricas calculadas a partir do histórico de retornos. Não são expectativas nem projeções, e não devem ser apresentadas ao cliente como tal.' })) : null,
@@ -900,6 +939,153 @@ async function tabPerformance(id, d) {
     sourcesBlock(p.sources || perf.sources, 'Ver fontes desta apuração'),
   );
 }
+
+/**
+ * Risco — how much risk this portfolio has been taking, and where it sits.
+ *
+ * Three readings, in the order an advisor asks them. How unstable has the book
+ * been, and is that rising or falling. Was the instability paid for, against
+ * the CDI actually published month by month. And which lines are carrying it:
+ * every position with its own trailing-twelve-month volatility, most volatile
+ * first. A position that cannot be measured is listed with the reason rather
+ * than left off the page (§30).
+ *
+ * The portfolio's own risk draws at once. The per-asset list waits on the
+ * desk-wide engine, which reaches every provider in the book on a cold run, so
+ * it loads into its own section instead of holding the tab.
+ */
+async function tabRisk(id) {
+  const r = await api(`/api/clients/${id}/risk`);
+  const cur = r.current;
+  const pts = (rows, k) => (rows || []).filter((p) => p[k] != null).map((p) => ({ label: p.month, value: p[k] }));
+  const volSeries = { portfolio: pts(r.series, 'volatility'), benchmark: pts(r.benchmark_series, 'volatility') };
+  const shSeries = { portfolio: pts(r.series, 'sharpe'), benchmark: pts(r.benchmark_series, 'sharpe') };
+  const historyLine = `${r.window.history.months} meses de retornos apurados${r.window.history.from ? `, de ${monthLabel(r.window.history.from, L)} a ${monthLabel(r.window.history.to, L)}` : ''}`;
+  const life = r.lifetime?.available ? r.lifetime : null;
+  const bench = r.benchmark_current;
+
+  return frag(
+    h('div.grid.g4', { style: { marginBottom: '20px' } }, riskRow(r, { small: false })),
+
+    h('div.hint', { style: { marginBottom: '24px' } },
+      h('b', { text: 'Método: ' }), r.method.pt,
+      ` A volatilidade é o ${r.method.volatility}. O índice de Sharpe toma o ${r.method.sharpe}.`,
+      life ? ` Na história inteira da carteira (${historyLine}), a volatilidade anualizada é ${vol12(life.annualised_volatility)} e o índice de Sharpe, ${sharpe12(life.sharpe_ratio)}.` : '',
+      h('div.note', { style: { marginTop: '8px' }, text: 'Todas as medidas desta página são históricas, calculadas a partir dos retornos já apurados. Não são expectativas nem projeções e não devem ser apresentadas ao cliente como tal.' })),
+
+    h('div.grid.g2', {},
+      h('div.card', {}, volSeries.portfolio.length > 1
+        ? lineChart(volSeries, {
+          title: 'Volatilidade anualizada · janela móvel de 12 meses',
+          caption: `Cada ponto mede os doze meses encerrados naquele mês. A linha cheia é a carteira; a pontilhada em cobre é a carteira de referência. A escala é a faixa dos próprios dados — uma volatilidade não tem zero que sirva de leitura. ${historyLine}.`,
+          format: (v) => weight(v, { locale: L, decimals: 1 }),
+          baseline: null,
+        })
+        : h('div.empty', { text: `Sem volatilidade em janela de 12 meses: ${r.reason || 'histórico insuficiente'}.` })),
+      h('div.card', {}, shSeries.portfolio.length > 1
+        ? lineChart(shSeries, {
+          title: 'Índice de Sharpe · janela móvel de 12 meses',
+          caption: 'Retorno acima do CDI por unidade de risco, nos doze meses encerrados em cada ponto. Acima da linha do zero a carteira foi paga pelo risco que correu; abaixo dela, não. CDI do Banco Central, mês a mês.',
+          format: (v) => ratio(v),
+          baseline: 0,
+        })
+        : h('div.empty', { text: `Sem índice de Sharpe: ${r.risk_free?.reason || r.reason || 'histórico insuficiente'}.` }))),
+
+    cur && bench?.volatility != null ? h('p.note', { style: { marginTop: '16px' } },
+      `Nos doze meses até ${monthLabel(cur.month, L)} a carteira oscilou ${vol12(cur.volatility)} ao ano contra ${vol12(bench.volatility)} da carteira de referência`,
+      cur.total_return != null ? `, e rendeu ${percent(cur.total_return, { locale: L })} contra ${percent(cur.risk_free_return, { locale: L })} do CDI` : '',
+      '. ',
+      cur.sharpe == null ? '' : cur.sharpe < 0
+        ? 'Um Sharpe negativo diz que o risco corrido no período não foi pago: o CDI entregou mais, sem oscilação.'
+        : 'Um Sharpe positivo diz que o excesso sobre o CDI compensou a oscilação do período.') : null,
+
+    sourcesBlock(r.sources, 'Ver fontes destas medidas'),
+
+    assetVolatilitySection(id, cur),
+  );
+}
+
+/**
+ * Every position with its own trailing-twelve-month volatility, most volatile
+ * first — the same measure, from the same engine, as the desk's risk/return
+ * chart. Loads after the page: a cold run touches every provider in the book.
+ */
+function assetVolatilitySection(id, portfolioCurrent) {
+  const nameOf = (a) => a.ticker || shortAssetName(a.name);
+  const box = h('div');
+  const meta = h('span.meta', { text: 'janela de 12 meses' });
+
+  async function load() {
+    mount(box, h('div.loading', {}, loader(), h('span', { text: 'Medindo a volatilidade de cada posição…' })));
+    let r;
+    try { r = await api(`/api/clients/${id}/risk/assets`); }
+    catch (err) { mount(box, h('div.err', { text: `Não foi possível medir a volatilidade das posições: ${err.message}` })); return; }
+
+    mount(meta, r.window
+      ? `${r.assets.length} ${r.assets.length === 1 ? 'posição medida' : 'posições medidas'} · ${dateLong(r.window.from, L)} a ${dateLong(r.window.to, L)} · em reais`
+      : 'janela de 12 meses');
+
+    // the list is ordered by volatility, so the order should be legible without
+    // reading every figure; the bar is scaled to the most volatile line on it
+    const scale = Math.max(...r.assets.map((a) => a.volatility || 0), ...r.references.map((x) => x.volatility || 0), 1e-6);
+    const volCell = (v) => h('td.num', {},
+      h('span', { text: weight(v, { locale: L, decimals: 1 }) }),
+      h('span.vbar', {}, h('i', { style: { width: `${Math.min(100, (v / scale) * 100).toFixed(1)}%` } })));
+
+    const simulated = r.assets.filter((a) => a.simulated);
+    const partial = r.assets.filter((a) => a.partial);
+
+    mount(box,
+      r.assets.length
+        ? table(['Ativo', { label: 'Peso', num: true }, { label: 'Valor', num: true }, { label: 'Volatilidade 12m', num: true }, { label: 'Retorno 12m', num: true }, { label: 'Meses', num: true }, 'Base de cálculo'],
+          r.assets.map((a) => h('tr', {},
+            h('td.name', {}, nameOf(a), h('span.sub', { text: [cls(a.asset_class), a.name === nameOf(a) ? null : a.name].filter(Boolean).join(' · ') })),
+            h('td.num', { text: weight(a.weight, { locale: L }) }),
+            h('td.num', { text: money(a.market_value, { locale: L }) }),
+            volCell(a.volatility),
+            h('td.num', { class: toneClass(a.total_return), text: percent(a.total_return, { locale: L, decimals: 1 }) }),
+            h('td.num', { text: `${a.observations} de ${a.months}` }),
+            h('td', { text: [a.basis, a.simulated ? 'cotas simuladas para a demonstração' : null, a.note].filter(Boolean).join(' · ') }))))
+        : h('div.empty', { text: `Nenhuma posição desta carteira pôde ser medida nesta janela${r.error ? `: ${r.error}` : '.'}` }),
+
+      h('p.chart-caption', {},
+        'Ordenado da posição mais volátil para a menos volátil. A volatilidade é o desvio-padrão dos doze retornos mensais do ativo, anualizado por √12, amostrado nos fins de mês e medido em reais — a mesma medida do gráfico de retorno e risco da mesa. ',
+        portfolioCurrent?.volatility != null
+          ? `A carteira inteira oscilou ${vol12(portfolioCurrent.volatility)} no mesmo período: menos do que a média ponderada destas linhas, porque elas não se movem juntas. É a diversificação aparecendo no número. `
+          : '',
+        simulated.length ? `Cotas simuladas para a demonstração: ${simulated.map((a) => a.ticker || shortAssetName(a.name)).join(', ')}. ` : '',
+        partial.length ? `Série incompleta na janela: ${partial.map((a) => a.ticker || shortAssetName(a.name)).join(', ')}.` : ''),
+
+      r.references?.length ? h('div', { style: { marginTop: '28px' } },
+        h('div.rail-h', { text: 'Referências de mercado, na mesma janela' }),
+        table(['Referência', { label: 'Volatilidade 12m', num: true }, { label: 'Retorno 12m', num: true }, { label: 'Meses', num: true }, 'Base de cálculo'],
+          [...r.references].sort((a, b) => b.volatility - a.volatility).map((x) => h('tr', {},
+            h('td.name', { text: x.label }),
+            volCell(x.volatility),
+            h('td.num', { class: toneClass(x.total_return), text: percent(x.total_return, { locale: L, decimals: 1 }) }),
+            h('td.num', { text: `${x.observations} de ${x.months}` }),
+            h('td', { text: x.basis || '' }))))) : null,
+
+      r.excluded?.length ? h('div', { style: { marginTop: '28px' } },
+        h('div.rail-h', { text: 'Posições sem medida de risco' }),
+        table(['Ativo', 'Classe', { label: 'Valor', num: true }, { label: 'Peso', num: true }, 'Motivo'],
+          r.excluded.map((e) => h('tr', {},
+            h('td.name', {}, nameOf(e), e.name === nameOf(e) ? null : h('span.sub', { text: e.name })),
+            h('td', { text: cls(e.asset_class) || '—' }),
+            h('td.num', { text: money(e.market_value, { locale: L }) }),
+            h('td.num', { text: weight(e.weight, { locale: L }) }),
+            h('td', { text: e.reason })))),
+        h('p.chart-caption', { text: 'Ficam fora da lista acima com o motivo. Uma posição que não pôde ser medida não entra na conta como volatilidade zero.' })) : null,
+
+      sourcesBlock(r.sources, 'Ver fontes das séries'));
+  }
+
+  load();
+  return h('section.section', { style: { marginTop: '32px' } },
+    h('div.section-h', {}, h('h2', { text: 'Volatilidade por ativo' }), meta),
+    box);
+}
+
 
 async function tabPortfolio(id, d) {
   return frag(

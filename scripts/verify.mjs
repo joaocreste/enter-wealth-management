@@ -7,7 +7,7 @@
  * These are the properties that, if they broke, would put a wrong number in front
  * of a client. They are asserted rather than assumed.
  */
-import { monthlyProfitability, modifiedDietz, timeWeightedReturn, historicalMetrics } from '../src/core/performance.js';
+import { monthlyProfitability, modifiedDietz, timeWeightedReturn, historicalMetrics, rollingMetrics } from '../src/core/performance.js';
 import { proposeForAsset, bandPosition, ACTIONS } from '../src/core/recommendations.js';
 import { checkSuitability, SUITABILITY, withinPolicy, policyFitLabel } from '../src/core/suitability.js';
 import { evaluateTrigger, driftTriggers, triggerProximity, TRIGGER_STATUS } from '../src/core/triggers.js';
@@ -201,6 +201,32 @@ t('three-year return is withheld when history is short', () => {
   const m = historicalMetrics([...Array(12)].map((_, i) => ({ month: `2026-${i}`, value: 0.01 })));
   eq(m.three_year_return, null);
   ok(m.three_year_note.includes('12'));
+});
+t('a rolling window reports exactly what the same window reported to historicalMetrics', () => {
+  const months = [...Array(20)].map((_, i) => ({ month: `2025-${String(i + 1).padStart(2, '0')}`, value: (i % 5 - 2) / 100 }));
+  const rf = months.map(() => 0.009);
+  const roll = rollingMetrics(months, rf, { window: 12 });
+  eq(roll.length, 9, 'twenty months close nine twelve-month windows');
+  eq(roll[0].month, months[11].month);
+  eq(roll[roll.length - 1].month, months[19].month);
+  const last = historicalMetrics(months.slice(-12), rf.slice(-12));
+  close(roll[roll.length - 1].volatility, last.annualised_volatility, 1e-12);
+  close(roll[roll.length - 1].sharpe, last.sharpe_ratio, 1e-12);
+});
+t('a window missing a month is left unmeasured rather than measured short', () => {
+  const months = [...Array(13)].map((_, i) => ({ month: `2025-${String(i + 1).padStart(2, '0')}`, value: i === 0 ? null : 0.01 + (i % 3) / 100 }));
+  const roll = rollingMetrics(months, months.map(() => 0.008), { window: 12 });
+  eq(roll[0].volatility, null, 'the window holding the gap publishes no volatility');
+  eq(roll[0].sharpe, null);
+  ok(roll[1].volatility != null, 'the next window, complete, does');
+});
+t('no risk-free rate means no Sharpe ratio, never a Sharpe against zero', () => {
+  const months = [...Array(12)].map((_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, value: 0.01 + i / 1000 }));
+  const roll = rollingMetrics(months, null, { window: 12 });
+  eq(roll.length, 1);
+  eq(roll[0].sharpe, null);
+  eq(roll[0].risk_free_return, null);
+  ok(roll[0].volatility > 0);
 });
 
 console.log('\n  Recommendations and the guardrail');

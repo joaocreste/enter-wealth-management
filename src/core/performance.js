@@ -346,3 +346,45 @@ export function historicalMetrics(monthlyReturns, riskFreeMonthly = null) {
     classification: 'historical_measure',
   };
 }
+
+/**
+ * The same historical measures, month by month over a trailing window (§15).
+ *
+ * One reading per month that closes a full window: the volatility and the
+ * Sharpe ratio plotted against a month are exactly what `historicalMetrics`
+ * would have reported had the history ended there, so a point on the chart and
+ * the figure on the overview are the same number computed the same way.
+ *
+ * A window missing a monthly return, or missing the risk-free rate for one of
+ * its months, carries null for the figure that cannot be computed. A twelve
+ * month volatility measured over nine months is not a twelve month volatility,
+ * and is never plotted as one (§30).
+ *
+ * @param {Array<{month: string, value: number|null}>} monthlyReturns  ascending
+ * @param {Array<number|null>|null} riskFreeMonthly  the risk-free rate of each
+ *        month, aligned index by index with `monthlyReturns`
+ */
+export function rollingMetrics(monthlyReturns, riskFreeMonthly = null, { window = 12 } = {}) {
+  const out = [];
+  for (let end = window; end <= monthlyReturns.length; end += 1) {
+    const slice = monthlyReturns.slice(end - window, end);
+    const rf = riskFreeMonthly ? riskFreeMonthly.slice(end - window, end) : null;
+    const complete = slice.every((m) => Number.isFinite(m.value));
+    const rfComplete = complete && !!rf && rf.every((v) => Number.isFinite(v));
+    const m = historicalMetrics(slice, rfComplete ? rf : null);
+    const measured = complete && m.available;
+    out.push({
+      month: slice[window - 1].month,
+      from: slice[0].month,
+      months: window,
+      observations: m.observations ?? 0,
+      complete,
+      total_return: measured ? m.cumulative_return : null,
+      annualised_return: measured ? m.annualised_return : null,
+      volatility: measured ? m.annualised_volatility : null,
+      sharpe: rfComplete && m.available ? m.sharpe_ratio : null,
+      risk_free_return: rfComplete ? rf.reduce((a, r) => a * (1 + r), 1) - 1 : null,
+    });
+  }
+  return out;
+}

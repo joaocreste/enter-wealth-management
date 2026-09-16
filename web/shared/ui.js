@@ -483,13 +483,27 @@ export function bandChart(rows, { title = null, caption = null, width = 560, row
 }
 
 /** Cumulative line: the portfolio in slate, the benchmark in copper, dashed. Hover reads a month. */
-export function lineChart(series, { title = null, caption = null, width = 560, height = 190, locale = 'pt-BR' } = {}) {
+/**
+ * Two series over the same months, the portfolio in ink and the reference
+ * dotted in copper. `format` renders a value wherever one is written, so the
+ * same chart draws a cumulative return, a volatility or a ratio; `baseline`
+ * fixes the line the eye reads against, and null asks for none — a level such
+ * as volatility has no meaningful zero and should not be flattened against one.
+ */
+export function lineChart(series, {
+  title = null, caption = null, width = 560, height = 190, locale = 'pt-BR',
+  format = null, baseline = 0,
+  labels = { portfolio: 'Carteira', benchmark: 'Referência' },
+} = {}) {
   const port = series.portfolio || [];
   if (port.length < 2) return h('div.empty', { text: 'Histórico insuficiente.' });
   const bench = series.benchmark || [];
+  const fmt = format || ((v) => percent(v, { locale }));
   const pad = { l: 4, r: 68, t: 12, b: 22 };
   const all = [...port, ...bench].map((p) => p.value);
-  const lo = Math.min(0, ...all); const hi = Math.max(0, ...all);
+  const air = baseline == null ? Math.max(1e-9, (Math.max(...all) - Math.min(...all)) * 0.12) : 0;
+  const lo = baseline == null ? Math.min(...all) - air : Math.min(baseline, ...all);
+  const hi = baseline == null ? Math.max(...all) + air : Math.max(baseline, ...all);
   const span = Math.max(1e-6, hi - lo);
   const plotW = width - pad.l - pad.r;
   const sx = (i, n) => pad.l + (i / Math.max(1, n - 1)) * plotW;
@@ -497,21 +511,21 @@ export function lineChart(series, { title = null, caption = null, width = 560, h
   const d = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${sx(i, pts.length).toFixed(1)},${sy(p.value).toFixed(1)}`).join(' ');
 
   const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', height, role: 'img', 'aria-label': title || 'cumulative' });
-  svg.append(svgEl('line', { x1: pad.l, y1: sy(0), x2: width - pad.r, y2: sy(0), class: 'c-rule', 'stroke-width': 1 }));
+  if (baseline != null) svg.append(svgEl('line', { x1: pad.l, y1: sy(baseline), x2: width - pad.r, y2: sy(baseline), class: 'c-rule', 'stroke-width': 1 }));
   if (bench.length > 1) svg.append(svgEl('path', { d: d(bench), class: 'c-line bench' }));
   svg.append(svgEl('path', { d: d(port), class: 'c-line port' }));
 
   const last = port[port.length - 1];
   const lastB = bench[bench.length - 1];
   svg.append(svgEl('rect', { x: (sx(port.length - 1, port.length) - 2.5).toFixed(1), y: (sy(last.value) - 2.5).toFixed(1), width: 5, height: 5, class: 'c-end port' }));
-  svg.append(text({ x: width - pad.r + 8, y: sy(last.value) + 4, 'font-size': 11.5, class: 'c-tag port' }, percent(last.value, { locale })));
+  svg.append(text({ x: width - pad.r + 8, y: sy(last.value) + 4, 'font-size': 11.5, class: 'c-tag port' }, fmt(last.value)));
   if (lastB) {
     svg.append(svgEl('rect', { x: (sx(bench.length - 1, bench.length) - 2.5).toFixed(1), y: (sy(lastB.value) - 2.5).toFixed(1), width: 5, height: 5, class: 'c-end bench' }));
     // keep the two end labels from overprinting when the series finish close together
     let yB = sy(lastB.value) + 4;
     const yP = sy(last.value) + 4;
     if (Math.abs(yB - yP) < 13) yB = yB < yP ? yP - 13 : yP + 13;
-    svg.append(text({ x: width - pad.r + 8, y: yB, 'font-size': 11.5, class: 'c-tag bench' }, percent(lastB.value, { locale })));
+    svg.append(text({ x: width - pad.r + 8, y: yB, 'font-size': 11.5, class: 'c-tag bench' }, fmt(lastB.value)));
   }
   for (const [i, p] of [[0, port[0]], [port.length - 1, last]]) {
     svg.append(text({ x: sx(i, port.length), y: height - 5, 'text-anchor': i === 0 ? 'start' : 'end', 'font-size': 10.5, class: 'c-muted' }, monthLabel(p.label, locale) || p.label || ''));
@@ -532,8 +546,8 @@ export function lineChart(series, { title = null, caption = null, width = 560, h
     const x = sx(i, port.length);
     vline.setAttribute('x1', x); vline.setAttribute('x2', x); vline.style.display = '';
     tip.replaceChildren(h('b', { text: monthLabel(p.label, locale) }),
-      h('span', { text: `Carteira ${percent(p.value, { locale })}` }),
-      b ? h('br') : null, b ? h('span.b', { text: `Referência ${percent(b.value, { locale })}` }) : null);
+      h('span', { text: `${labels.portfolio} ${fmt(p.value)}` }),
+      b ? h('br') : null, b ? h('span.b', { text: `${labels.benchmark} ${fmt(b.value)}` }) : null);
     const px = (x / width) * r.width;
     const flip = px > r.width * 0.6;
     tip.style.display = 'block';

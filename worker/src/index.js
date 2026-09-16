@@ -40,6 +40,7 @@ import * as PD from './policy-document.js';
 import { gateEnabled, gatePassed, gateSubmit, gatePage } from './gate.js';
 import { hydrateRecommendation, allocationOf, meetingPrep, runProfitabilityLive } from './client-analysis.js';
 import { assetRiskReturn } from './risk-return.js';
+import { assetRisk, portfolioRisk } from './client-risk.js';
 export { OverviewAgents } from './agents.js';
 export { LetterAgent } from './letter-agent.js';
 export { BulkReports } from './bulk-reports.js';
@@ -97,7 +98,7 @@ const ok = (data, init = {}) => new Response(JSON.stringify(data), { status: 200
 const bad = (status, error, extra = {}) => new Response(JSON.stringify({ error, ...extra }), { status, headers: JSON_HEADERS });
 
 export default {
-  /** The daily cron (wrangler.toml [triggers]): rebuild the World Overview for every advisor. */
+  /** The business-day cron (wrangler.toml [triggers]): rebuild the World Overview for every advisor. */
   async scheduled(event, env, ctx) {
     const advisors = await all(env.DB, 'SELECT a.*, u.name, u.email FROM advisors a JOIN users u ON u.id = a.user_id');
     for (const advisor of advisors) await A.startOverviewRun(env, ctx, { advisor, trigger: 'cron' });
@@ -826,6 +827,23 @@ async function clientRoutes(env, request, { scope, sub, method, body, url, sessi
     if (!isAdvisor) return bad(404, 'no published report for this month');
     const live = await runProfitabilityLive(env, client.id, month);
     return ok({ month, from_report: false, ...live });
+  }
+
+  // ── how much risk this portfolio has been taking ─────────────────────────
+  // The portfolio's own volatility and Sharpe against the CDI over a rolling
+  // twelve months. One query and one cached call to the Banco Central, so the
+  // client's overview can head with it.
+  if (sub === '/risk') {
+    if (!isAdvisor) return bad(403, 'advisor only');
+    return ok(await portfolioRisk(env, db, client));
+  }
+
+  // Every position with its own trailing-twelve-month volatility. Separate,
+  // because a cold run reaches every provider in the book and takes the better
+  // part of a minute: the Risco tab draws the portfolio first and fills this in.
+  if (sub === '/risk/assets') {
+    if (!isAdvisor) return bad(403, 'advisor only');
+    return ok(await assetRisk(env, db, client));
   }
 
   if (sub === '/reports') {

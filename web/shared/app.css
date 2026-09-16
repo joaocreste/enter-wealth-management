@@ -560,6 +560,12 @@ figure svg{display:block;overflow:visible;font-family:var(--sans)}
 figure svg text{font-family:var(--sans);font-variant-numeric:tabular-nums;font-weight:300}
 .chart-title{font-size:var(--t-subhead);font-weight:400;color:var(--ink-950);margin:0 0 14px;letter-spacing:0;line-height:1.3}
 .chart-caption{font-size:11.5px;color:var(--ink-500);margin-top:12px;line-height:1.45}
+
+/* A volatility read as a length beside its figure. The risk list is ordered by
+   it, so the order should be legible without reading every number; the bar
+   carries no colour, because a volatility is neither a gain nor a loss (§7.1). */
+.vbar{display:block;height:3px;background:var(--rule-2);margin:6px 0 1px;position:relative}
+.vbar i{position:absolute;top:0;bottom:0;left:0;background:var(--structure);display:block;min-width:1px}
 .c-lbl{fill:var(--ink-800)} .c-lbl.strong{fill:var(--ink-950);font-weight:500}
 .c-muted{fill:var(--ink-500)}
 .c-zero{stroke:var(--ink-200)} .c-rule{stroke:var(--rule)}

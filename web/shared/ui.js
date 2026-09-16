@@ -591,9 +591,9 @@ export function sparkline(points, { width = 100, height = 28, format = (v) => St
 
 // ── the daily agents: progress ────────────────────────────────────────────
 export const DAILY_AGENTS = [
-  { step: 1, key: 'dados', title: 'Agente 1 · Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },
-  { step: 2, key: 'inferencia', title: 'Agente 2 · Inferência', what: 'o que importa hoje para as suas carteiras' },
-  { step: 3, key: 'gatilhos', title: 'Agente 3 · Gatilhos', what: 'limiares de mercado e desvios de alocação' },
+  { step: 1, key: 'dados', title: 'Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },
+  { step: 2, key: 'inferencia', title: 'Inferência', what: 'o que importa hoje para as suas carteiras' },
+  { step: 3, key: 'gatilhos', title: 'Gatilhos', what: 'limiares de mercado e desvios de alocação' },
 ];
 
 /** A progress ring. `set(p)` takes 0..100. */

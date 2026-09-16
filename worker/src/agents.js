@@ -42,9 +42,9 @@ import { makeSource } from '../../src/core/sources.js';
 import { percent, num, pp, monthLabel } from '../../src/core/format.js';
 
 export const AGENTS = [
-  { step: 1, key: 'dados', title: 'Agente 1 · Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },
-  { step: 2, key: 'inferencia', title: 'Agente 2 · Inferência', what: 'o que importa hoje para as suas carteiras' },
-  { step: 3, key: 'gatilhos', title: 'Agente 3 · Gatilhos', what: 'limiares de mercado e desvios de alocação' },
+  { step: 1, key: 'dados', title: 'Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },
+  { step: 2, key: 'inferencia', title: 'Inferência', what: 'o que importa hoje para as suas carteiras' },
+  { step: 3, key: 'gatilhos', title: 'Gatilhos', what: 'limiares de mercado e desvios de alocação' },
 ];
 const STALE_MS = 10 * 60 * 1000;
 /** Nothing older than this reaches "O que importa hoje": a headline, a scanned story or a curated event. */
@@ -167,7 +167,7 @@ async function agentDados(env, runId) {
     const series = new Map();
     for (let i = 0; i < INDICATORS.length; i += 1) {
       const ind = INDICATORS[i];
-      await report(1, 2 + (i / INDICATORS.length) * 24, `Agente 1 · Dados — consultando ${providerOf(ind)}: ${ind.label} (${i + 1} de ${INDICATORS.length})`);
+      await report(1, 2 + (i / INDICATORS.length) * 24, `Consultando ${providerOf(ind)}: ${ind.label} (${i + 1} de ${INDICATORS.length})`);
       if (ind.yahoo_symbol) {
         let s = null;
         try { s = await S.ensureSeries(env, ind); } catch { /* the quote endpoint still answers */ }
@@ -179,41 +179,41 @@ async function agentDados(env, runId) {
       }
     }
     const retrieved = indicators.filter((i) => !i.unavailable).length;
-    await report(1, 26, `Agente 1 · Dados — ${retrieved} de ${indicators.length} indicadores recuperados (${indicators.filter((i) => i.from_series).length} cotações lidas da própria série diária); medindo 5 sessões e 30 dias nas séries em R2`);
+    await report(1, 26, `${retrieved} de ${indicators.length} indicadores recuperados (${indicators.filter((i) => i.from_series).length} cotações lidas da própria série diária); medindo 5 sessões e 30 dias nas séries em R2`);
     await windowMoves(env, indicators, series);
     // XP's own monthly macro report, before anything else is read. An advisor
     // at XP who briefs a client against the house view has a problem no amount
     // of live data fixes, so the day is read against this — and when it cannot
     // be retrieved the run says so rather than quietly going without it.
-    await report(1, 27, 'Agente 1 · Dados — lendo o Relatório Mensal da XP (Brasil Macro Mensal) em conteudos.xpi.com.br');
+    await report(1, 27, 'Lendo o Relatório Mensal da XP (Brasil Macro Mensal) em conteudos.xpi.com.br');
     const xpReport = await XPResearch.monthlyReport();
     if (xpReport.unavailable) {
-      await report(1, 28, `Agente 1 · Dados — o Relatório Mensal da XP não pôde ser lido nesta execução (${String(xpReport.reason).slice(0, 90)}); a visão macro da casa fica com a projeção arquivada de ${MACRO_VINTAGE.published}`);
+      await report(1, 28, `O Relatório Mensal da XP não pôde ser lido nesta execução (${String(xpReport.reason).slice(0, 90)}); a visão macro da casa fica com a projeção arquivada de ${MACRO_VINTAGE.published}`);
     } else {
-      await report(1, 28, `Agente 1 · Dados — Relatório Mensal da XP de ${xpReport.published_label}: “${xpReport.title}”${xpReport.stale ? ` (publicado há ${xpReport.age_days} dias)` : ''} — ${xpReport.summary.length} conclusões, ${xpReport.figures.length} projeções com a frase de origem`);
+      await report(1, 28, `Relatório Mensal da XP de ${xpReport.published_label}: “${xpReport.title}”${xpReport.stale ? ` (publicado há ${xpReport.age_days} dias)` : ''} — ${xpReport.summary.length} conclusões, ${xpReport.figures.length} projeções com a frase de origem`);
     }
 
     // The signal dashboard reads the newest capture per instrument; without this it would show the capture made at seed time forever.
-    await report(1, 29, 'Agente 1 · Dados — recapturando na TradingView a leitura técnica e o consenso de analistas de cada instrumento');
+    await report(1, 29, 'Recapturando na TradingView a leitura técnica e o consenso de analistas de cada instrumento');
     let signalsCaptured = 0;
     try {
       const assets = await all(db, 'SELECT * FROM assets WHERE tv_symbol IS NOT NULL');
       signalsCaptured = Object.keys(await P.fetchSignals(env, assets)).length;
     } catch (err) {
-      await report(1, 29, `Agente 1 · Dados — sinais da TradingView indisponíveis nesta execução (${String(err.message).slice(0, 80)}); o painel segue com a captura anterior`);
+      await report(1, 29, `Sinais da TradingView indisponíveis nesta execução (${String(err.message).slice(0, 80)}); o painel segue com a captura anterior`);
     }
-    await report(1, 30, `Agente 1 · Dados — ${signalsCaptured} sinais recapturados; lendo os eventos curados das últimas 48 horas e os movimentos que se destacam em 5 sessões ou 30 dias`);
+    await report(1, 30, `${signalsCaptured} sinais recapturados; lendo os eventos curados das últimas 48 horas e os movimentos que se destacam em 5 sessões ou 30 dias`);
     const curated = (await P.loadMarketEvents(env, { since: addDays(date, -1), limit: 20 })).filter((e) => withinNewsWindow(e.date, date));
     const generated = P.eventsFromIndicatorMoves(indicators, { window: 'notable' });
 
     // The headlines come from newsrooms, not from a search: Valor Econômico's own feeds and the Google News feeds, Brazil and abroad.
-    await report(1, 31, 'Agente 1 · Dados — lendo as manchetes das últimas 48 horas: Valor Econômico (RSS) e Google News (Brasil e internacional)');
+    await report(1, 31, 'Lendo as manchetes das últimas 48 horas: Valor Econômico (RSS) e Google News (Brasil e internacional)');
     const brazil = await gatherHeadlines(env, { date, modelOn: !!env.ANTHROPIC_API_KEY || !!env.OPENAI_API_KEY, report });
 
     let newsEvents = []; let newsSources = [];
     let news = { mode: 'skipped', reason: 'sem modelo de linguagem configurado — defina ANTHROPIC_API_KEY para a varredura da imprensa internacional com fontes citadas', items: [], dropped: [], searches: 0 };
     if (env.ANTHROPIC_API_KEY) {
-      await report(1, 37, 'Agente 1 · Dados — o modelo varre a imprensa internacional na web e cita a fonte de cada item');
+      await report(1, 37, 'O modelo varre a imprensa internacional na web e cita a fonte de cada item');
       try {
         const facts = { date, indicator_keys: INDICATORS.map((i) => i.key), asset_classes: ASSET_CLASSES };
         let scan;
@@ -222,7 +222,7 @@ async function agentDados(env, runId) {
         } catch (err) {
           // A gateway timeout on a search-heavy turn is the usual failure; one more try, with fewer searches.
           if (!/\b5\d\d\b|timeout|timed out|abort/i.test(err.message)) throw err;
-          await report(1, 41, `Agente 1 · Dados — a varredura na web falhou (${err.message.slice(0, 60)}); tentando de novo com menos buscas`);
+          await report(1, 41, `A varredura na web falhou (${err.message.slice(0, 60)}); tentando de novo com menos buscas`);
           scan = await LLM.scanNews(env, facts, { maxSearches: 2 });
         }
         // The model is asked for the last 48 hours; whatever it brings from before that is dropped here, and the drop is recorded.
@@ -230,14 +230,14 @@ async function agentDados(env, runId) {
         const stale = scan.items.filter((it) => !withinNewsWindow(it.date, date)).map((it) => ({ title: it.title || '(sem título)', reason: `mais de ${NEWS_WINDOW_HOURS} horas (${it.date})` }));
         ({ events: newsEvents, sources: newsSources } = newsToEvents(fresh, date));
         news = { mode: 'model', model: scan.model, searches: scan.searches, items: newsEvents.map(compactNews), dropped: [...scan.dropped, ...stale], urls: scan.urls };
-        await report(1, 44, `Agente 1 · Dados — ${newsEvents.length} notícias internacionais com fonte verificada em ${scan.searches} buscas${scan.dropped.length ? `; ${scan.dropped.length} descartadas por falta de fonte` : ''}`);
+        await report(1, 44, `${newsEvents.length} notícias internacionais com fonte verificada em ${scan.searches} buscas${scan.dropped.length ? `; ${scan.dropped.length} descartadas por falta de fonte` : ''}`);
       } catch (err) {
         news = { mode: 'failed', reason: err.message, items: [], dropped: [], searches: 0 };
-        await report(1, 44, `Agente 1 · Dados — varredura internacional indisponível (${err.message.slice(0, 80)}); seguindo com as manchetes do Valor, indicadores e eventos curados`);
+        await report(1, 44, `Varredura internacional indisponível (${err.message.slice(0, 80)}); seguindo com as manchetes do Valor, indicadores e eventos curados`);
       }
     }
     news.headlines = brazil.meta;
-    await report(1, 47, 'Agente 1 · Dados — mapeando a exposição de cada carteira por classe de ativo');
+    await report(1, 47, 'Mapeando a exposição de cada carteira por classe de ativo');
     const { clients, portfolios } = await bookExposures(db, advisor.id);
     const events = dedupeEvents([...brazil.events, ...curated, ...generated, ...newsEvents]);
     const triggerEvals = await P.evaluateTriggers(env, indicators, advisor.id);
@@ -259,8 +259,8 @@ async function agentInferencia(env, runId, s) {
       ? `, contra o Relatório Mensal da XP de ${s.xpReport.published_label}`
       : ', sem o Relatório Mensal da XP nesta execução';
     await report(2, 52, modelOn
-      ? `Agente 2 · Inferência — o modelo lê ${s.events.length} eventos, ${s.retrieved} indicadores e ${s.portfolios.length} carteiras${houseNote}, e decide o que importa hoje`
-      : `Agente 2 · Inferência — sem modelo configurado: ordenando ${s.events.length} eventos por relevância e exposição${houseNote}`);
+      ? `O modelo lê ${s.events.length} eventos, ${s.retrieved} indicadores e ${s.portfolios.length} carteiras${houseNote}, e decide o que importa hoje`
+      : `Sem modelo configurado: ordenando ${s.events.length} eventos por relevância e exposição${houseNote}`);
     const baseRows = P.buildWhatMattersTable(s.events, s.indicators, s.portfolios);
     const facts = inferenceFacts({ date: s.date, indicators: s.indicators, triggers: s.triggerEvals, events: s.events, portfolios: s.portfolios, baseRows, xpReport: s.xpReport });
     let inference; let mode = 'deterministic_template'; let model = null; let promptVersion = null;
@@ -271,12 +271,12 @@ async function agentInferencia(env, runId, s) {
       } catch (err) {
         inference = LLM.deterministicDailyInference(facts);
         inference.fallback_reason = err.message;
-        await report(2, 70, `Agente 2 · Inferência — o modelo falhou (${err.message.slice(0, 80)}); usando o texto determinístico`);
+        await report(2, 70, `O modelo falhou (${err.message.slice(0, 80)}); usando o texto determinístico`);
       }
     } else {
       inference = LLM.deterministicDailyInference(facts);
     }
-    await report(2, 74, 'Agente 2 · Inferência — escrevendo o resumo do dia e a tabela do que importa');
+    await report(2, 74, 'Escrevendo o resumo do dia e a tabela do que importa');
     const whatMatters = mergeInference(baseRows, inference, s.events);
     const worldView = await upsertWorldView(db, s.advisorId, s.date, inference, { mode, model, promptVersion, news: s.news, sources: s.sources, houseView: XPResearch.houseView(s.xpReport) });
     return { ...s, whatMatters, worldView, inference: { mode, model, prompt_version: promptVersion, fallback_reason: inference.fallback_reason ?? null } };
@@ -291,12 +291,12 @@ async function agentGatilhos(env, runId, s) {
   const db = env.DB;
   const { advisor, log, report, fail } = await loadRun(db, runId);
   try {
-    await report(3, 82, `Agente 3 · Gatilhos — avaliando ${s.triggerEvals.length} limiares de mercado contra ${s.portfolios.length} carteiras`);
+    await report(3, 82, `Avaliando ${s.triggerEvals.length} limiares de mercado contra ${s.portfolios.length} carteiras`);
     const exposures = s.portfolios.map((p) => ({ client_id: p.client_id, client_name: p.client_name, exposures: p.portfolio.exposures }));
     const triggers = P.mapTriggersToClients(s.triggerEvals, exposures).map((t) => ({
       ...t, proximity: triggerProximity(t), action_due: t.status === 'BREACHED',
     }));
-    await report(3, 90, 'Agente 3 · Gatilhos — medindo os desvios de alocação contra a política de cada cliente');
+    await report(3, 90, 'Medindo os desvios de alocação contra a política de cada cliente');
     const driftAlerts = [];
     for (const c of s.clients) {
       const policy = await currentPolicy(db, c.id);
@@ -308,7 +308,7 @@ async function agentGatilhos(env, runId, s) {
       }
     }
     const breached = triggers.filter((t) => t.status === 'BREACHED').length;
-    await report(3, 96, `Agente 3 · Gatilhos — ${breached} ${breached === 1 ? 'limiar rompido' : 'limiares rompidos'}, ${driftAlerts.length} ${driftAlerts.length === 1 ? 'desvio' : 'desvios'} além do gatilho de rebalanceamento`);
+    await report(3, 96, `${breached} ${breached === 1 ? 'limiar rompido' : 'limiares rompidos'}, ${driftAlerts.length} ${driftAlerts.length === 1 ? 'desvio' : 'desvios'} além do gatilho de rebalanceamento`);
 
     const news = s.news;
     const hl = news.headlines || null;
@@ -465,7 +465,7 @@ async function gatherHeadlines(env, { date, modelOn, report }) {
   if (!items.length) {
     meta.mode = 'failed';
     meta.reason = meta.feeds.map((f) => f.error).filter(Boolean)[0] || `nenhuma manchete nas últimas ${NEWS_WINDOW_HOURS} horas`;
-    await report(1, 33, `Agente 1 · Dados — manchetes indisponíveis (${meta.reason.slice(0, 80)})`);
+    await report(1, 33, `Manchetes indisponíveis (${meta.reason.slice(0, 80)})`);
     return { events: [], sources: [], meta };
   }
   const clusters = Valor.clusterHeadlines(items).map((c) => ({ ...c, region: regionOfCluster(c), lead: preferredLead(c) }));
@@ -478,7 +478,7 @@ async function gatherHeadlines(env, { date, modelOn, report }) {
   const okFeeds = meta.feeds.filter((f) => f.ok).length;
   let classified = null;
   if (modelOn) {
-    await report(1, 33, `Agente 1 · Dados — ${items.length} manchetes (${valor.items.length} do Valor, ${engine.items.length} do ${engine.provider}) em ${okFeeds} feeds; o modelo classifica as ${candidates.length} mais cobertas`);
+    await report(1, 33, `${items.length} manchetes (${valor.items.length} do Valor, ${engine.items.length} do ${engine.provider}) em ${okFeeds} feeds; o modelo classifica as ${candidates.length} mais cobertas`);
     try {
       const r = await LLM.classifyHeadlines(env, {
         date,
@@ -492,14 +492,14 @@ async function gatherHeadlines(env, { date, modelOn, report }) {
       meta.reason = `classificação pelo modelo falhou (${err.message.slice(0, 80)}); manchetes classificadas por regra`;
     }
   } else {
-    await report(1, 33, `Agente 1 · Dados — ${items.length} manchetes (${valor.items.length} do Valor, ${engine.items.length} do ${engine.provider}) em ${okFeeds} feeds; sem modelo, as mais cobertas entram classificadas por regra`);
+    await report(1, 33, `${items.length} manchetes (${valor.items.length} do Valor, ${engine.items.length} do ${engine.provider}) em ${okFeeds} feeds; sem modelo, as mais cobertas entram classificadas por regra`);
   }
   const picked = classified && classified.length ? classified : ruleClassify(candidates);
   const { events, sources } = headlinesToEvents(picked, candidates, date);
   meta.kept = events.length;
   const top = events.find((e) => e.market_wide);
   if (top) meta.top_story = { title: top.title_pt, url: top.source_url, coverage: top.coverage, provider: top.source_provider };
-  await report(1, 35, `Agente 1 · Dados — ${events.length} manchetes entram como eventos (${events.filter((e) => e.region === 'br').length} Brasil, ${events.filter((e) => e.region === 'intl').length} internacional)${top ? `; notícia do dia: “${top.title_pt.slice(0, 70)}” (${top.coverage} manchetes, ${top.source_provider})` : ''}`);
+  await report(1, 35, `${events.length} manchetes entram como eventos (${events.filter((e) => e.region === 'br').length} Brasil, ${events.filter((e) => e.region === 'intl').length} internacional)${top ? `; notícia do dia: “${top.title_pt.slice(0, 70)}” (${top.coverage} manchetes, ${top.source_provider})` : ''}`);
   return { events, sources, meta };
 }
 

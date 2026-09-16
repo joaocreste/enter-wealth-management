@@ -28,3 +28,7 @@ enter_challenge.rivet-project
 
 # Your copy of the deployed Worker secrets.
 .secrets.local
+
+# Python bytecode from the deck builder.
+__pycache__/
+*.pyc

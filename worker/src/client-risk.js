@@ -127,7 +127,7 @@ export async function assetRisk(env, db, client) {
 
   let desk = null;
   let deskError = null;
-  try { desk = await assetRiskReturn(env, db); } catch (err) { deskError = err.message; }
+  try { desk = await assetRiskReturn(env, db, { rolling: true }); } catch (err) { deskError = err.message; }
 
   const measured = new Map((desk?.assets || []).map((a) => [a.id, a]));
   const unmeasured = new Map((desk?.excluded || []).filter((x) => !x.reference).map((x) => [x.id, x]));
@@ -160,6 +160,9 @@ export async function assetRisk(env, db, client) {
         simulated: a.simulated,
         basis: a.basis,
         note: a.note,
+        // the same measure taken month by month, so the row can say whether
+        // today's volatility is where this line usually sits
+        rolling: a.rolling || [],
         source_ids: a.source_ids || [],
       });
     } else {
@@ -176,7 +179,8 @@ export async function assetRisk(env, db, client) {
 
   const references = (desk?.references || []).map((r) => ({
     key: r.key, label: r.label, volatility: r.volatility, total_return: r.total_return,
-    observations: r.observations, months: r.months, partial: r.partial, basis: r.basis, source_ids: r.source_ids || [],
+    observations: r.observations, months: r.months, partial: r.partial, basis: r.basis,
+    rolling: r.rolling || [], source_ids: r.source_ids || [],
   }));
 
   // Sources: only the ones these rows actually rest on, plus the derived record
@@ -200,6 +204,7 @@ export async function assetRisk(env, db, client) {
     total_value: total,
     window: desk?.window || null,
     method: desk?.method || null,
+    rolling_window: desk?.rolling_window || null,
     assets,
     excluded,
     references,

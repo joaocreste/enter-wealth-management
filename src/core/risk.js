@@ -95,3 +95,32 @@ export function efficientFrontier(points) {
   for (let i = 1; i < hull.length; i += 1) if (hull[i].y > hull[top].y) top = i;
   return hull.slice(0, top + 1).map((p) => p.key);
 }
+
+/**
+ * The same measure taken over a window that moves one month at a time: one
+ * reading per closed window, so a volatility can be read against where that
+ * series usually sits rather than only against its neighbours.
+ *
+ * `exclude` is given each window, as the slice and its bounds in the full
+ * series, and decides whether that window may be measured at all — a provider
+ * gap is a fact about some months, not about the whole series, and should cost
+ * the windows that contain it and no others. An unmeasurable window carries
+ * null, never zero (§30).
+ *
+ * @param {Array<{ month: string, value: number|null }>} returns  ascending
+ */
+export function rollingRisk(returns, { window = PERIODS_PER_YEAR, exclude = null, ...opts } = {}) {
+  const out = [];
+  for (let end = window; end <= returns.length; end += 1) {
+    const slice = returns.slice(end - window, end);
+    const m = exclude && exclude(slice, end - window, end) ? null : riskFromMonthly(slice, opts);
+    out.push({
+      month: slice[window - 1].month,
+      from: slice[0].month,
+      volatility: m?.volatility ?? null,
+      total_return: m?.total_return ?? null,
+      observations: m?.observations ?? 0,
+    });
+  }
+  return out;
+}

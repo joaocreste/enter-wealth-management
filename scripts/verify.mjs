@@ -22,7 +22,7 @@ import { renderLetterPdf, contributorBars } from '../src/render/pdf/letter.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
 import { rangeBarGeometry } from '../src/render/charts.js';
 import { pearson, logReturns, correlationMatrix } from '../src/core/correlation.js';
-import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, efficientFrontier } from '../src/core/risk.js';
+import { riskFromMonthly, riskClassOf, monthEnd, monthBefore, monthlyReturnsFromCloses, rollingRisk, efficientFrontier } from '../src/core/risk.js';
 import { parseRss, clusterHeadlines, sourceFor, distinctStories, isServicePiece, PROVIDER as VALOR } from '../src/adapters/valor.js';
 import { splitTitle, feedUrl } from '../src/adapters/googlenews.js';
 import { articleUrl } from '../src/adapters/bingnews.js';
@@ -201,6 +201,24 @@ t('three-year return is withheld when history is short', () => {
   const m = historicalMetrics([...Array(12)].map((_, i) => ({ month: `2026-${i}`, value: 0.01 })));
   eq(m.three_year_return, null);
   ok(m.three_year_note.includes('12'));
+});
+t('the last rolling reading is the headline measure, computed the same way', () => {
+  const r = [...Array(24)].map((_, i) => ({ month: `2025-${String(i + 1).padStart(2, '0')}`, value: (i % 7 - 3) / 100 }));
+  const roll = rollingRisk(r, { window: 12 });
+  eq(roll.length, 13, 'twenty-four months close thirteen twelve-month windows');
+  const head = riskFromMonthly(r.slice(-12));
+  close(roll[roll.length - 1].volatility, head.volatility, 1e-12);
+  close(roll[roll.length - 1].total_return, head.total_return, 1e-12);
+  eq(roll[roll.length - 1].month, r[23].month);
+  eq(roll[0].from, r[0].month);
+});
+t('a provider gap costs the windows that contain it and no others', () => {
+  const r = [...Array(24)].map((_, i) => ({ month: `2025-${String(i + 1).padStart(2, '0')}`, value: (i % 5 - 2) / 100 }));
+  // the gap sits at index 3: it is inside the first four windows and no later one
+  const roll = rollingRisk(r, { window: 12, exclude: (_, from, to) => from <= 3 && 3 < to });
+  eq(roll.slice(0, 4).filter((p) => p.volatility == null).length, 4, 'the windows holding the gap are unmeasured');
+  ok(roll.slice(4).every((p) => p.volatility != null), 'every window past it is measured');
+  eq(roll[0].observations, 0, 'an unmeasured window counts no observations, it does not report zero risk');
 });
 t('a rolling window reports exactly what the same window reported to historicalMetrics', () => {
   const months = [...Array(20)].map((_, i) => ({ month: `2025-${String(i + 1).padStart(2, '0')}`, value: (i % 5 - 2) / 100 }));

@@ -10,7 +10,7 @@ import {
   pageHead, railBrand, navItem, railFoot, icon, greeting, installSessionGuard, crumbs, loader, correlationMatrix,
   progressCard, dialog, apiUpload, bulletBar, driftBar, DAILY_AGENTS, dateWithWeekday, donut,
   money, percent, pp, weight, dateLong, shortDate, monthLabel, toneClass, MINUS,
-  barChart, allocationBar, bandChart, lineChart, sparkline, scatterChart, sourcesBlock, sourceLine,
+  barChart, allocationBar, bandChart, lineChart, sparkline, trendLine, scatterChart, sourcesBlock, sourceLine,
   apiUrl, loginUrl, clientUrl,
 } from '../shared/ui.js';
 import { briefingSection, indicatorsSection, newsNote, newsHealth, formatIndicator, levelLine, groupPt, dmy, hhmm } from '../shared/overview.js';
@@ -1005,6 +1005,64 @@ async function tabRisk(id) {
   );
 }
 
+// ── the rolling volatility of one line, on hover over its row ─────────────
+// The list answers "which position is the most volatile". It cannot answer
+// "is 73% a lot for this one" — that needs the line's own history. The card
+// carries the same measure taken month by month, with the median it usually
+// sits on, so a figure can be read as high or low for the asset itself.
+const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const mmYY = (ym) => (ym ? `${MES_CURTO[Number(ym.slice(5, 7)) - 1]}/${ym.slice(2, 4)}` : '—');
+const median = (xs) => { const v = [...xs].sort((a, b) => a - b); const i = v.length >> 1; return v.length % 2 ? v[i] : (v[i - 1] + v[i]) / 2; };
+
+/** One popover for the life of the page, on the body so no overflow clips it. */
+let POP = null;
+function volPopover() {
+  if (!POP) { POP = h('div.risk-pop'); document.body.append(POP); }
+  return POP;
+}
+
+function volPopoverCard(label, series, now) {
+  const vals = series.map((p) => p.volatility);
+  const med = median(vals);
+  const lo = Math.min(...vals); const hi = Math.max(...vals);
+  const at = (v) => mmYY(series[vals.indexOf(v)].month);
+  const vol = (v) => weight(v, { locale: L, decimals: 1 });
+  return frag(
+    h('b', { text: label }),
+    h('span.rp-sub', { text: 'volatilidade 12m móvel' }),
+    h('div.rp-plot', {}, trendLine(vals, { baseline: med })),
+    h('div.rp-ax', {}, h('span', { text: mmYY(series[0].month) }), h('span', { text: mmYY(series[series.length - 1].month) })),
+    h('div.rp-foot', {},
+      h('div', {}, h('span.k', { text: 'agora ' }), h('em', { text: vol(now ?? vals[vals.length - 1]) }),
+        h('span.k', { text: `  ·  mediana ${vol(med)}` })),
+      h('div', {}, h('span.k', { text: `mín ${vol(lo)} em ${at(lo)}  ·  máx ${vol(hi)} em ${at(hi)}` })),
+      h('div', {}, h('span.k', { text: `${series.length} janelas de 12 meses, uma por mês` }))));
+}
+
+/**
+ * Show `card` while the cursor is on `row`. The card follows the cursor and is
+ * kept inside the window, so a row near the bottom does not push it off-screen.
+ */
+function bindVolPopover(row, build) {
+  const pop = volPopover();
+  const place = (e) => {
+    const w = pop.offsetWidth || 286; const ht = pop.offsetHeight || 250;
+    const below = e.clientY + 20;
+    pop.style.left = `${Math.max(12, Math.min(e.clientX + 20, window.innerWidth - w - 12))}px`;
+    // below the cursor by default, above it when there is no room: never over
+    // the row being read
+    pop.style.top = `${below + ht + 12 <= window.innerHeight ? below : Math.max(12, e.clientY - ht - 16)}px`;
+  };
+  const hide = () => { pop.style.display = 'none'; };
+  row.classList.add('has-pop');
+  row.addEventListener('mouseenter', (e) => { mount(pop, build()); pop.style.display = 'block'; place(e); });
+  row.addEventListener('mousemove', place);
+  row.addEventListener('mouseleave', hide);
+  // a navigation while the cursor sits on a row would otherwise leave it up
+  window.addEventListener('hashchange', hide, { once: true });
+  return row;
+}
+
 /**
  * Every position with its own trailing-twelve-month volatility, most volatile
  * first — the same measure, from the same engine, as the desk's risk/return
@@ -1013,6 +1071,13 @@ async function tabRisk(id) {
 function assetVolatilitySection(id, portfolioCurrent) {
   const nameOf = (a) => a.ticker || shortAssetName(a.name);
   const box = h('div');
+  // a row whose line has fewer than two readings has no trend to show, and
+  // gets no card rather than an empty one
+  const withTrend = (row, item, label) => {
+    const series = (item.rolling || []).filter((p) => p.volatility != null);
+    return series.length < 2 ? row
+      : bindVolPopover(row, () => volPopoverCard(label, series, item.volatility));
+  };
   const meta = h('span.meta', { text: 'janela de 12 meses' });
 
   async function load() {
@@ -1038,14 +1103,15 @@ function assetVolatilitySection(id, portfolioCurrent) {
     mount(box,
       r.assets.length
         ? table(['Ativo', { label: 'Peso', num: true }, { label: 'Valor', num: true }, { label: 'Volatilidade 12m', num: true }, { label: 'Retorno 12m', num: true }, { label: 'Meses', num: true }, 'Base de cálculo'],
-          r.assets.map((a) => h('tr', {},
+          r.assets.map((a) => withTrend(h('tr', {},
             h('td.name', {}, nameOf(a), h('span.sub', { text: [cls(a.asset_class), a.name === nameOf(a) ? null : a.name].filter(Boolean).join(' · ') })),
             h('td.num', { text: weight(a.weight, { locale: L }) }),
             h('td.num', { text: money(a.market_value, { locale: L }) }),
             volCell(a.volatility),
             h('td.num', { class: toneClass(a.total_return), text: percent(a.total_return, { locale: L, decimals: 1 }) }),
             h('td.num', { text: `${a.observations} de ${a.months}` }),
-            h('td', { text: [a.basis, a.simulated ? 'cotas simuladas para a demonstração' : null, a.note].filter(Boolean).join(' · ') }))))
+            h('td', { text: [a.basis, a.simulated ? 'cotas simuladas para a demonstração' : null, a.note].filter(Boolean).join(' · ') })),
+          a, nameOf(a))))
         : h('div.empty', { text: `Nenhuma posição desta carteira pôde ser medida nesta janela${r.error ? `: ${r.error}` : '.'}` }),
 
       h('p.chart-caption', {},
@@ -1059,12 +1125,13 @@ function assetVolatilitySection(id, portfolioCurrent) {
       r.references?.length ? h('div', { style: { marginTop: '28px' } },
         h('div.rail-h', { text: 'Referências de mercado, na mesma janela' }),
         table(['Referência', { label: 'Volatilidade 12m', num: true }, { label: 'Retorno 12m', num: true }, { label: 'Meses', num: true }, 'Base de cálculo'],
-          [...r.references].sort((a, b) => b.volatility - a.volatility).map((x) => h('tr', {},
+          [...r.references].sort((a, b) => b.volatility - a.volatility).map((x) => withTrend(h('tr', {},
             h('td.name', { text: x.label }),
             volCell(x.volatility),
             h('td.num', { class: toneClass(x.total_return), text: percent(x.total_return, { locale: L, decimals: 1 }) }),
             h('td.num', { text: `${x.observations} de ${x.months}` }),
-            h('td', { text: x.basis || '' }))))) : null,
+            h('td', { text: x.basis || '' })),
+          x, x.label)))) : null,
 
       r.excluded?.length ? h('div', { style: { marginTop: '28px' } },
         h('div.rail-h', { text: 'Posições sem medida de risco' }),

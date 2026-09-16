@@ -503,6 +503,10 @@ table.d.matters .talk{color:var(--ink-950)}
 .spark-base{stroke:var(--ink-300);stroke-width:1;stroke-dasharray:2 3}
 .spark-cursor{stroke:var(--ink-400);stroke-width:1}
 .spark-wrap .chart-tip{top:auto}
+.trend{display:block;width:100%;height:100%;overflow:visible}
+.trend-line{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.trend-base{stroke:currentColor;opacity:.32;stroke-width:1;stroke-dasharray:2 3}
+.trend-now{stroke:currentColor;stroke-width:1.5}
 
 /* the window toggles over the indicator strip, and the custom range */
 .win{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
@@ -584,6 +588,37 @@ figure svg text{font-family:var(--sans);font-variant-numeric:tabular-nums;font-w
 .chart-tip .b{color:var(--copper-300)}
 :root[data-theme="dark"] .chart-tip{background:var(--paper-3);color:var(--ink-950);border:1px solid var(--rule)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chart-tip{background:var(--paper-3);color:var(--ink-950);border:1px solid var(--rule)}}
+
+/* ─── the rolling volatility of one line, on hover over its row ──────────
+   Today's figure only says a position is more volatile than its neighbours.
+   This says whether it is more volatile than itself: where that volatility has
+   been sitting, and whether it has just arrived where it is. Same panel as the
+   chart tooltip, so a reading that follows the cursor always looks the same. */
+.risk-pop{
+  position:fixed;z-index:60;pointer-events:none;display:none;width:286px;
+  background:#242424;color:#DDDDDD;padding:13px 15px 12px;
+  font-size:11.5px;line-height:1.45;font-variant-numeric:tabular-nums;
+  box-shadow:0 12px 34px rgba(0,0,0,.30)
+}
+.risk-pop b{display:block;color:#fff;font-weight:500;font-size:13.5px;letter-spacing:0;margin-bottom:1px}
+.risk-pop .rp-sub{display:block;color:#989898;font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;margin-bottom:11px}
+.risk-pop .rp-plot{height:74px}
+.risk-pop .rp-ax{display:flex;justify-content:space-between;color:#989898;font-size:10.5px;margin-top:5px}
+.risk-pop .rp-foot{margin-top:11px;padding-top:9px;border-top:1px solid rgba(255,255,255,.14);display:grid;gap:3px}
+.risk-pop .rp-foot .k{color:#989898}
+.risk-pop .rp-foot em{font-style:normal;color:#fff}
+table.d tr.has-pop{cursor:default}
+:root[data-theme="dark"] .risk-pop{background:var(--paper-3);color:var(--ink-950);border:1px solid var(--rule);box-shadow:0 12px 34px rgba(0,0,0,.5)}
+:root[data-theme="dark"] .risk-pop b,:root[data-theme="dark"] .risk-pop .rp-foot em{color:var(--ink-950)}
+:root[data-theme="dark"] .risk-pop .rp-sub,:root[data-theme="dark"] .risk-pop .rp-ax,:root[data-theme="dark"] .risk-pop .rp-foot .k{color:var(--ink-500)}
+:root[data-theme="dark"] .risk-pop .rp-foot{border-top-color:var(--rule)}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .risk-pop{background:var(--paper-3);color:var(--ink-950);border:1px solid var(--rule);box-shadow:0 12px 34px rgba(0,0,0,.5)}
+  :root:not([data-theme="light"]) .risk-pop b,:root:not([data-theme="light"]) .risk-pop .rp-foot em{color:var(--ink-950)}
+  :root:not([data-theme="light"]) .risk-pop .rp-sub,:root:not([data-theme="light"]) .risk-pop .rp-ax,:root:not([data-theme="light"]) .risk-pop .rp-foot .k{color:var(--ink-500)}
+  :root:not([data-theme="light"]) .risk-pop .rp-foot{border-top-color:var(--rule)}
+}
+@media (hover:none){.risk-pop{display:none !important}}
 
 /* ─── risk / return scatter ──────────────────────────────────────────── */
 .sc-fig svg.sc{display:block;width:100%;height:auto;overflow:visible}

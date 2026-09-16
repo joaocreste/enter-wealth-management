@@ -603,6 +603,44 @@ export function sparkline(points, { width = 100, height = 28, format = (v) => St
   return wrap;
 }
 
+/**
+ * One series as a bare line, sized by its container: no axes, no interaction,
+ * no reading of its own. It is shown beside the figure it belongs to, to say
+ * where that figure usually sits — never instead of the figure. A gap in the
+ * series breaks the line rather than being drawn straight through.
+ *
+ * `baseline` draws a hairline at a reference value (a median, a target) that is
+ * folded into the vertical scale. The last reading is marked with a tick, so
+ * "now" is legible on a line that carries no colour (§7.1).
+ */
+export function trendLine(values, { width = 260, height = 72, baseline = null } = {}) {
+  const known = values.filter((v) => Number.isFinite(v));
+  if (known.length < 2) return null;
+  const ref = baseline != null ? [baseline] : [];
+  const lo = Math.min(...known, ...ref); const hi = Math.max(...known, ...ref);
+  const span = Math.max(1e-9, hi - lo);
+  const pad = 6;
+  const sx = (i) => (i / Math.max(1, values.length - 1)) * width;
+  const sy = (v) => pad + (1 - (v - lo) / span) * (height - pad * 2);
+
+  let d = ''; let pen = false;
+  values.forEach((v, i) => {
+    if (!Number.isFinite(v)) { pen = false; return; }
+    d += `${pen ? 'L' : 'M'}${sx(i).toFixed(1)},${sy(v).toFixed(1)}`;
+    pen = true;
+  });
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none', class: 'trend', 'aria-hidden': 'true' });
+  if (baseline != null) svg.append(svgEl('line', { x1: 0, y1: sy(baseline), x2: width, y2: sy(baseline), class: 'trend-base', 'vector-effect': 'non-scaling-stroke' }));
+  svg.append(svgEl('path', { d, class: 'trend-line', 'vector-effect': 'non-scaling-stroke' }));
+  const last = values.reduce((a, v, i) => (Number.isFinite(v) ? i : a), -1);
+  if (last >= 0) {
+    const y = sy(values[last]); const x = sx(last).toFixed(1);
+    svg.append(svgEl('line', { x1: x, y1: (y - 4).toFixed(1), x2: x, y2: (y + 4).toFixed(1), class: 'trend-now', 'vector-effect': 'non-scaling-stroke' }));
+  }
+  return svg;
+}
+
 // ── the daily agents: progress ────────────────────────────────────────────
 export const DAILY_AGENTS = [
   { step: 1, key: 'dados', title: 'Dados', what: 'indicadores, eventos e notícias, cada um com a fonte' },

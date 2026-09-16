@@ -258,7 +258,11 @@ export function deterministicLetter(facts) {
   // 2 · what drove it — the loss before the gain, always
   if (lb.monthly_return != null) {
     const parts = [];
-    if (worst) parts.push(`${cap(nm(worst))} foi o que mais pesou no resultado do mês.`);
+    if (worst) {
+      parts.push(lb.worst_contribution
+        ? `${cap(nm(worst))} foi o que mais pesou no resultado do mês, com ${lb.worst_contribution} sobre o total da carteira.`
+        : `${cap(nm(worst))} foi o que mais pesou no resultado do mês.`);
+    }
     if (best) parts.push(`Do lado bom, ${nm(best)} ajudou.`);
     if (f.attribution?.fx_contribution != null && Math.abs(f.attribution.fx_contribution) > 0.001) {
       parts.push(f.attribution.fx_contribution > 0
@@ -270,14 +274,39 @@ export function deterministicLetter(facts) {
   }
 
   // 3 · the world, and only the part that reaches this portfolio
+  //
+  // Each event is named with the way it reaches this carteira, because an
+  // event named without its consequence is a headline and the client has
+  // those already. This paragraph used to list three headlines and then
+  // explain the first, which left the other two hanging: Albert was told the
+  // price of gold and never told that he owns none of it. The events with no
+  // exposure are dismissed in one sentence instead of being read out — the
+  // absence of a link is itself worth saying, and it is short.
   const events = (f.events || []).slice(0, 3);
   const impacts = (f.impact || []).filter((i) => i.relevance === 'high' || i.relevance === 'medium');
-  if (events.length) {
-    const said = events.map((e) => trimDot(e.title_pt || e.title)).join('. ');
-    const reach = impacts.length
-      ? ` ${dot(cap(impacts[0].potential_impact_pt || impacts[0].potential_impact || ''))}`
-      : ' Nenhum desses movimentos exige uma ação imediata na sua carteira.';
-    paragraphs.push(`${dot(said)}${reach}`);
+  if (events.length || impacts.length) {
+    const reaching = impacts.slice(0, 2).map((i) => {
+      const what = trimDot(i.title_pt || i.title);
+      const how = trimDot(i.potential_impact_pt || i.potential_impact || '');
+      return how ? `${dot(what)} ${dot(cap(how))}` : dot(what);
+    });
+    const touched = new Set(impacts.map((i) => i.event_id));
+    const untouched = events.filter((e) => !touched.has(e.id)).slice(0, 2)
+      .map((e) => trimDot(e.title_pt || e.title));
+
+    const bits = [];
+    if (reaching.length) bits.push(reaching.join(' '));
+    else bits.push('Nenhum movimento relevante do mês alcança a sua carteira de forma direta.');
+    if (untouched.length) {
+      // Introduced after a colon, never used as a noun. An event title is a
+      // whole sentence — "Ouro se mantém acima de US$ 4.400 a onça" — and
+      // reading it as the subject of a verb produced "Ouro se mantém acima de
+      // US$ 4.400 a onça dominou as manchetes do mês".
+      bits.push(untouched.length === 1
+        ? `Uma notícia dominou o mês sem alcançar a sua carteira: ${lower(untouched[0])}.`
+        : `Duas notícias dominaram o mês sem alcançar a sua carteira: ${untouched.map(lower).join('; ')}.`);
+    }
+    paragraphs.push(bits.join(' '));
   }
 
   // 4 · the house view, marked as a view and spoken in the plural
@@ -291,17 +320,24 @@ export function deterministicLetter(facts) {
 
   // 5 · what to discuss, in prose, in the order of the annex
   const recs = f.letter_recommendations || [];
-  if (recs.length) {
+  // A class under its floor is out of policy exactly as a position over its cap
+  // is, and it is the kind the client cannot see for themselves: there is no
+  // holding to look at, only an absence. It belongs in the same sentence.
+  const classBreaches = f.policy_breaches || [];
+  if (recs.length || classBreaches.length) {
     const outside = recs.filter((r) => r.within_policy === false);
     const conflicts = recs.filter((r) => r.signal_conflict);
-    const bits = [`Quero conversar sobre ${countPt(Math.min(recs.length, 3))} na nossa reunião.`];
+    const bits = [`Quero conversar sobre ${countPt(Math.min(recs.length + classBreaches.length, 3))} na nossa reunião.`];
     if (outside.length) {
       bits.push(`${cap(listPt(outside.slice(0, 2).map((r) => r.short_name || r.ticker || r.name)))} ${outside.length === 1 ? 'está fora' : 'estão fora'} da sua política hoje, e ${outside.length === 1 ? 'é o ponto' : 'são os pontos'} em que não se trata de sugestão, e sim de enquadramento.`);
+    }
+    for (const b of classBreaches.slice(0, 2)) {
+      if (b.statement_pt) bits.push(trimDot(b.statement_pt) + '.');
     }
     if (conflicts.length) {
       // "deles" would point back at the count of things to discuss, which is a
       // different number. Naming the positions keeps the two counts apart.
-      bits.push(`A leitura técnica e o consenso de analistas discordam em ${conflicts.length === 1 ? 'uma das posições' : `${wordFor(conflicts.length)} das posições`}, e quando os dois discordam preferimos decidir com você.`);
+      bits.push(`A leitura técnica e o consenso de analistas discordam em ${conflicts.length === 1 ? 'uma das posições' : `${wordForF(conflicts.length)} das posições`}, e quando os dois discordam preferimos decidir com você.`);
     }
     bits.push('Nada disso é ordem, e nada acontece sem a sua palavra.');
     paragraphs.push(bits.join(' '));
@@ -340,6 +376,9 @@ const trimDot = (t) => String(t || '').trim().replace(/[.!?]+$/, '');
 const countPt = (n) => ['nenhuma coisa', 'uma coisa', 'duas coisas', 'três coisas'][n] || `${n} coisas`;
 /** A letter writes "três", not "3". */
 const wordFor = (n) => ['zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez'][n] || String(n);
+// "duas das posições", not "dois das posições": um and dois are the only two
+// that inflect, and the noun they counted here has always been feminine.
+const wordForF = (n) => (n === 1 ? 'uma' : n === 2 ? 'duas' : wordFor(n));
 const listPt = (xs) => (xs.length <= 1 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
 const CLASS_PT_LETTER = {
   Cash: 'caixa', 'Fixed Income': 'renda fixa', 'Equities BR': 'renda variável Brasil', 'Equities Global': 'renda variável global',

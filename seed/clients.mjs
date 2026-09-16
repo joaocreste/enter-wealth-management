@@ -18,7 +18,11 @@ function navSeries({ assetId, seed, months, annualReturn, annualVol, start = 100
       asset_id: assetId,
       observation_date: monthEnd(m),
       price: Number(price.toFixed(6)),
-      provider: 'XP position statement (simulated for the demo dataset)',
+      // The provider name is printed verbatim in the client's sources line, so
+      // it is written in the letter's language. The disclosure stays: a reader
+      // must be able to see that these quotas are simulated, and a reviewer must
+      // never mistake them for a real XP feed.
+      provider: 'Extrato XP (cotas simuladas para a base de demonstração)',
       simulated: true,
     };
   });

@@ -113,7 +113,10 @@ export async function assetRiskReturn(env, db) {
       const obs = navByAsset[a.id] || [];
       if (!obs.length) { skip('sem cotas do custodiante'); continue; }
       returns = monthlyReturnsFromCloses(anchors.map((d) => atOrBefore(obs, d, 'value')), months);
-      simulated = obs.some((o) => /simulated/i.test(o.provider || ''));
+      // Both spellings: the provider name is written in the language of the
+      // letter it is printed in, and this flag is what keeps a simulated quota
+      // from being presented as a real one.
+      simulated = obs.some((o) => o.simulated === true || /simulat|simulad/i.test(o.provider || ''));
       const provider = obs[obs.length - 1].provider || 'XP position statement (advisor-supplied)';
       sources = [makeSource({
         provider, kind: 'statement', instrument: a.name, identifier: a.isin || a.id, requested_range: `${from}..${to}`,

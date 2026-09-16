@@ -16,6 +16,7 @@ import { money, percent, pp, previousMonth, monthBounds, MINUS } from '../src/co
 import { TrueTypeFont } from '../src/render/pdf/ttf.js';
 import { brandFonts } from '../src/render/fonts/index.js';
 import { deterministicLetter } from '../worker/src/llm.js';
+import { allocationRows } from '../worker/src/pipeline.js';
 import { buildLetterModel, sanitiseLetter, strayNumbers, houseView, stanceStep, ACTION_PT } from '../src/render/letter-model.js';
 import { renderLetterPdf, contributorBars } from '../src/render/pdf/letter.js';
 import { PdfDocument } from '../src/render/pdf/writer.js';
@@ -878,6 +879,31 @@ t('the client reads three verbs, and every engine action maps onto one of them',
   eq([...seen].sort().join(', '), 'Aumentar, Manter, Reduzir');
 });
 
+t('a row outside the policy explains the rule it breaks, not the market view', () => {
+  // Three verbs mean a breached position can still read "Manter" — held, not
+  // increased, which is what the guardrail decided. That makes the line beneath
+  // it the only place the client learns why the row says "Fora da política",
+  // and it was spending that line on analysts disagreeing.
+  const rec = {
+    asset_id: 'ast_hapv3', ticker: 'HAPV3', name: 'Hapvida', asset_class: 'Equities BR',
+    final_action: 'DISCUSS', current_weight: 0.026, advisor_status: 'approved',
+    suitability_result: 'DO_NOT_ADD', signal_conflict: true,
+    rationale_pt: 'A leitura técnica aponta venda e o consenso de analistas aponta compra.',
+    flags: [{ code: 'RISK_GRADE_ABOVE_PROFILE', breach: true, message_pt: 'O grau de risco 5 deste ativo está acima do máximo de 4 previsto para o perfil Moderado.' }],
+  };
+  const breached = buildLetterModel({ ...LETTER_REPORT, recommendations: [rec] }, { locale: 'pt-BR' }).recommendations[0];
+  eq(breached.within_policy, false);
+  eq(breached.action_label, 'Manter');
+  ok(breached.rationale.includes('grau de risco'), 'the breached row does not say which rule it breaks');
+  ok(!breached.rationale.includes('analistas'), 'the market view crowded out the policy rule');
+
+  // Nothing breached, nothing to explain: the market view is the better read.
+  const clean = { ...rec, suitability_result: 'PASS', flags: [] };
+  const ok2 = buildLetterModel({ ...LETTER_REPORT, recommendations: [clean] }, { locale: 'pt-BR' }).recommendations[0];
+  eq(ok2.within_policy, true);
+  ok(ok2.rationale.includes('analistas'), 'a compliant row lost its market rationale');
+});
+
 t('a view the firm never formed never reaches the client as the firm\'s view', () => {
   // The deterministic World Overview sets every stance to neutral and says so.
   eq(houseView({ headline_pt: 'Brent rompeu US$ 90', summary_pt: '4 limiares rompidos.', mode: 'deterministic_template', generated_without_model: true, stance_by_asset_class: {} }), null);
@@ -954,8 +980,20 @@ t('the five steps are read off the client\'s own band, and its two halves separa
   eq(stanceStep(0.10, 0.10, band), 0, 'at target');
   eq(stanceStep(0.25, 0.10, band), 2, 'above the band');
   eq(stanceStep(0.03, 0.10, band), -2, 'below the band');
-  eq(stanceStep(0.20, 0.10, band), 2, 'on the ceiling');
-  eq(stanceStep(0.05, 0.10, band), -2, 'on the floor');
+  // The caption under the chart tells the client that −− and ++ mean outside
+  // the permitted range, and the annex table calls a class on its own limit
+  // compliant. Both ends of the scale are therefore read off the band itself:
+  // on the limit is the last step inside, not the first step outside. Scored by
+  // ratio alone the two pages disagreed here — the chart put a class at its
+  // ceiling outside the band while the table printed its weight as inside.
+  eq(stanceStep(0.20, 0.10, band), 1, 'on the ceiling is the top of the band, not past it');
+  eq(stanceStep(0.05, 0.10, band), -1, 'on the floor is the bottom of the band, not under it');
+  eq(stanceStep(0.2001, 0.10, band), 2, 'a hair over the ceiling is outside');
+  // A class the policy asks for and the client holds none of. There is no
+  // position to look at, only an absence, and it still has to reach the end of
+  // the scale.
+  eq(stanceStep(0, 0.05, { min: 0.03, max: 0.12 }), -2, 'nothing held against a floor');
+  eq(stanceStep(0, 0.03, { min: 0, max: 0.08 }), -1, 'nothing held, and none required');
   // The band is asymmetric: 10 points of room above, 5 below. The same 2-point
   // drift must not read neutral going up and overweight going down.
   eq(stanceStep(0.12, 0.10, band), 0, '2 points into 10 of room is still neutral');
@@ -975,6 +1013,39 @@ t('the chart and the annex table cannot disagree: a class outside its band is at
   eq(model.stance.find((r) => r.label === 'Renda variável Brasil').change, 'down', 'the class that fell reads as unchanged');
   // Nine hundredths of a point is the portfolio breathing, not a decision.
   eq(model.stance.find((r) => r.label === 'Caixa').change, 'flat');
+});
+
+t('a class the policy asks for and the client holds none of still gets a row', () => {
+  // Albert's own case. The Moderado policy asks for 5% in listed real estate
+  // with a 3% floor; he holds none of it. Read off the holdings, the class had
+  // no row, so the floor could not be breached on paper, the chart had nothing
+  // to draw, and the ALVO column quietly added up to 92%.
+  const policy = {
+    target_allocation: { Cash: 0.05, 'Fixed Income': 0.40, 'Equities BR': 0.20, 'Equities Global': 0.15, Alternatives: 0.12, 'Real Estate': 0.05, Commodities: 0.03, 'Digital Assets': 0 },
+    permitted_ranges: {
+      Cash: { min: 0.02, max: 0.12 }, 'Fixed Income': { min: 0.30, max: 0.55 },
+      'Equities BR': { min: 0.10, max: 0.30 }, 'Equities Global': { min: 0.05, max: 0.25 },
+      Alternatives: { min: 0.05, max: 0.20 }, 'Real Estate': { min: 0.03, max: 0.12 },
+      Commodities: { min: 0, max: 0.08 }, 'Digital Assets': { min: 0, max: 0.02 },
+    },
+  };
+  const exposures = { Cash: 0.075, 'Fixed Income': 0.326, 'Equities BR': 0.283, 'Equities Global': 0.182, Alternatives: 0.134 };
+  const rows = allocationRows({ exposures, policy, totalValue: 397984 });
+
+  const re = rows.find((r) => r.asset_class === 'Real Estate');
+  ok(re, 'the class the policy asks for is missing from the table');
+  eq(re.weight, 0);
+  eq(re.value, 0);
+  eq(stanceStep(re.weight, re.target, re.range), -2, 'a class under its floor sits at the end of the scale');
+
+  // Targeted at zero with no floor: a 0% row against a 0% target says nothing,
+  // and its absence is what keeps the column adding to 100.
+  ok(!rows.some((r) => r.asset_class === 'Digital Assets'), 'a class nobody asked for and nobody holds');
+  eq(Math.round(rows.reduce((a, r) => a + (r.target ?? 0), 0) * 100), 100, 'the ALVO column must add to 100%');
+
+  // The heaviest class still leads, and the empty ones fall to the end.
+  eq(rows[0].asset_class, 'Fixed Income');
+  eq(rows.at(-1).weight, 0);
 });
 
 t('a first letter shows position without claiming a movement it cannot see', () => {

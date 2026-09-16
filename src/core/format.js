@@ -35,7 +35,10 @@ function parts(value, decimals, locale) {
  */
 export function money(value, { currency = 'BRL', locale = 'pt-BR', decimals = null, signed = false } = {}) {
   if (value == null || !Number.isFinite(value)) return 'DATA UNAVAILABLE';
-  const dp = decimals != null ? decimals : Math.abs(value) >= 1000 ? 0 : 2;
+  // Cents below a thousand, none above it — and none for nothing at all. In a
+  // column of whole reais, "R$ 0,00" reads as a different kind of number from
+  // the rest; a class the client holds none of is worth exactly R$ 0.
+  const dp = decimals != null ? decimals : (value === 0 || Math.abs(value) >= 1000) ? 0 : 2;
   const { neg, body } = parts(value, dp, locale);
   const sym = CURRENCY_PREFIX[currency] || currency + ' ';
   const sign = neg ? MINUS : signed ? '+' : '';

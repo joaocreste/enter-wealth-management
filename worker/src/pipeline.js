@@ -21,6 +21,7 @@ import { evaluateTrigger, mapTriggersToClients, driftTriggers, TRIGGER_STATUS } 
 import { buildWhatMattersTable, mapEventToPortfolio, notableWindow } from '../../src/core/events.js';
 import { previousMonth, monthBounds } from '../../src/core/format.js';
 import { emptyReport, validateReport, standardDisclosures, REPORT_SCHEMA_VERSION } from '../../src/core/report-schema.js';
+import { ASSET_CLASS_PT } from '../../src/render/letter-model.js';
 import { useKv } from '../../src/adapters/cache.js';
 
 /** Composite benchmark: the policy's own target allocation, priced with real series. */
@@ -447,6 +448,39 @@ export async function buildAndCheckRecommendations(env, ctx, market, perf, signa
       message_pt: `A carteira se afastou ${(maxDrift * 100).toFixed(1).replace('.', ',')} p.p. da alocação aprovada, acima do gatilho de revisão de ${(((ctx.policy?.rebalance_trigger ?? 0.05)) * 100).toFixed(0)} p.p.`,
     });
   }
+  // A class outside its own band, checked against the policy rather than against
+  // the holdings.
+  //
+  // The per-asset flags cannot see this. CLASS_BELOW_MIN fires only when a
+  // recommendation proposes reducing, CLASS_ABOVE_MAX only when one proposes
+  // adding, and both hang off an asset — so a class the client holds nothing in
+  // has no asset, no recommendation, and no way to be reported. That is how
+  // Albert's carteira came to sit at 0% against a 3% floor in listed real estate
+  // with the letter calling itself complete.
+  for (const [k, band] of Object.entries(ctx.policy?.permitted_ranges || {})) {
+    const w = exposures[k] ?? 0;
+    const min = band?.min ?? 0;
+    const max = band?.max ?? 1;
+    const under = w < min - 1e-9;
+    const over = w > max + 1e-9;
+    if (!under && !over) continue;
+    const pt = ASSET_CLASS_PT[k] || k;
+    const pct = (x) => (x * 100).toFixed(1).replace(/\.0$/, '');
+    const pctPt = (x) => pct(x).replace('.', ',');
+    portfolioFlags.push({
+      code: under ? 'CLASS_BELOW_BAND' : 'CLASS_ABOVE_BAND',
+      severity: 'high',
+      breach: true,
+      asset_class: k,
+      message: under
+        ? `${k} is at ${pct(w)}% against a policy floor of ${pct(min)}%.`
+        : `${k} is at ${pct(w)}% against a policy ceiling of ${pct(max)}%.`,
+      message_pt: under
+        ? `${pt} está em ${pctPt(w)}%, abaixo do mínimo de ${pctPt(min)}% previsto na sua política.`
+        : `${pt} está em ${pctPt(w)}%, acima do teto de ${pctPt(max)}% previsto na sua política.`,
+    });
+  }
+
   if (unhedgedFx > (ctx.policy?.max_unhedged_fx ?? 1)) {
     portfolioFlags.push({
       code: 'FX_EXPOSURE_ABOVE_LIMIT', severity: 'high',
@@ -480,10 +514,53 @@ function classWeightsAtOpen(market) {
   return out;
 }
 
+/**
+ * One row per class the policy governs, not one per class the client happens to
+ * hold.
+ *
+ * Reading the rows off the holdings made under-allocation invisible: a class the
+ * client had nothing in simply had no row, so a weight below the floor could
+ * never be drawn and never be named. Albert is the case in point — his policy
+ * asks for 5% in listed real estate with a 3% floor, he holds none, and the
+ * letter reported every breach except that one. It also left the ALVO column
+ * summing to 92%, because the targets of the missing classes went with them.
+ *
+ * A class earns a row when the client holds it, when the policy wants some of
+ * it, or when the policy sets a floor under it. What that leaves out is only the
+ * classes targeted at zero with no floor — Digital Assets for a moderate profile
+ * — where a 0% row against a 0% target says nothing. Since every excluded class
+ * has a target of exactly zero, the ALVO column still adds to 100%.
+ */
+export function allocationRows({ exposures, policy, totalValue = 0, openingWeights = {} }) {
+  const held = exposures || {};
+  const targets = policy?.target_allocation || {};
+  const ranges = policy?.permitted_ranges || {};
+  // classWeightsAtOpen returns {} when the month's opening prices are missing.
+  // With no opening at all we know nothing; with an opening that omits a class,
+  // the class was genuinely absent, and 0% is the honest reading.
+  const hasOpening = Object.keys(openingWeights || {}).length > 0;
+
+  const keys = new Set([...Object.keys(held), ...Object.keys(targets), ...Object.keys(ranges)]);
+  return [...keys]
+    .filter((k) => (held[k] ?? 0) > 0 || (targets[k] ?? 0) > 0 || (ranges[k]?.min ?? 0) > 0)
+    .map((asset_class) => {
+      const weight = held[asset_class] ?? 0;
+      return {
+        asset_class,
+        weight,
+        target: targets[asset_class] ?? null,
+        range: ranges[asset_class] ?? null,
+        value: weight * totalValue,
+        opening_weight: openingWeights[asset_class] ?? (hasOpening ? 0 : null),
+      };
+    })
+    .sort((a, b) => b.weight - a.weight);
+}
+
 // ── 20. canonical report assembly ───────────────────────────────────────────
 export function assembleCanonicalReport({
   ctx, market, perf, benchmark, metrics, signals, recommendations, worldView,
-  eventsForClient, narrative, exposures,
+  eventsForClient, narrative, exposures, portfolioFlags = [],
   locale = 'pt-BR', reportId = null, graphRunId = null, promptVersion = null,
 }) {
   const ledger = new SourceLedger();
@@ -653,14 +730,11 @@ export function assembleCanonicalReport({
     // letter covers, on the same holdings, so the letter can say which way each
     // class moved and not only where it ended. The month, not an older
     // snapshot: a letter about August should compare with August's first day.
-    allocation: Object.entries(exposures || {}).map(([asset_class, weight]) => ({
-      asset_class,
-      weight,
-      target: ctx.policy?.target_allocation?.[asset_class] ?? null,
-      range: ctx.policy?.permitted_ranges?.[asset_class] ?? null,
-      value: weight * totalValue,
-      opening_weight: openingWeights[asset_class] ?? null,
-    })).sort((a, b) => b.weight - a.weight),
+    allocation: allocationRows({ exposures, policy: ctx.policy, totalValue, openingWeights }),
+    // The breaches that belong to the carteira as a whole rather than to any one
+    // position, so the letter can name them beside the ones it reads off the
+    // recommendation rows.
+    policy_flags: portfolioFlags || [],
     holdings: market.priced.map((p) => ({
       asset_id: p.asset.id,
       ticker: p.asset.ticker,

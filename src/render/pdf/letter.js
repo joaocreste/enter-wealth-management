@@ -17,7 +17,7 @@
 import { PdfDocument, A4 } from './writer.js';
 import { svgPathToPdf } from './svgpath.js';
 import { color, semantic, LOGO_SYMBOL_PATH, LOGO_SYMBOL_ASPECT } from '../../core/brand.js';
-import { money, percent, pp, weight as fmtWeight, dateLong, MINUS } from '../../core/format.js';
+import { money, percent, pp, weight as fmtWeight, dateLong, shortDate, MINUS } from '../../core/format.js';
 import { rangeBarGeometry } from '../charts.js';
 
 const POSITION = color.position;
@@ -155,7 +155,13 @@ function letterBudget(t) {
 const ANNEX_LADDER = 9;
 function annexBudget(level) {
   return {
-    maxAllocationRows: level >= 1 ? 6 : 8,
+    // Every class the policy governs, at every rung. This used to be the annex's
+    // first economy — drop two rows and save thirty points — which was fair
+    // while a row meant a class the client holds. It no longer is: the ALVO
+    // column is the policy, it has to add up to 100%, and a reader who totals a
+    // trimmed column finds 92% and doubts the rest of the page. Eight is the
+    // most classes any profile defines.
+    maxAllocationRows: 8,
     maxRecommendations: level >= 3 ? 3 : level >= 2 ? 4 : 5,
     compactSources: level >= 4,
     methodSentences: level >= 2 ? 2 : 99,
@@ -259,7 +265,10 @@ function drawFoot(doc, model, pageNo, isLast, discH) {
     });
   } else {
     doc.text(
-      L === 'pt-BR' ? 'Continua na página 2' : 'Continued on page 2',
+      // The signature closes the letter; what follows it is the annex, not more
+      // letter. "Continues on page 2" printed under a sign-off reads as though
+      // the writer had not finished.
+      L === 'pt-BR' ? 'Os números estão no anexo, na página 2' : 'The figures are in the annex, on page 2',
       M.left, PAGE.footerH + 11, { font: 'light', size: SZ.small, color: INK3 },
     );
   }
@@ -371,7 +380,9 @@ function buildAnnexBlocks(doc, model, b) {
       // month name has nowhere to collide with the metadata beside it.
       tracked(doc, model.annex_title || (L === 'pt-BR' ? 'Anexo' : 'Annex'), X, y, { font: 'light', size: 8.4, color: COPPER, track: 0.16 });
       const meta = [
-        `${L === 'pt-BR' ? 'Perfil' : 'Profile'} ${model.client?.risk_profile || '—'}`,
+        // Lower-cased to agree with the dateline on page one: the same client
+        // read "Perfil moderado" there and "Perfil Moderado" here.
+        `${L === 'pt-BR' ? 'Perfil' : 'Profile'} ${L === 'pt-BR' ? String(model.client?.risk_profile || '—').toLowerCase() : (model.client?.risk_profile || '—')}`,
         `${L === 'pt-BR' ? 'Assessor' : 'Advisor'} ${model.advisor?.name || ''}${model.advisor?.code ? ` (${model.advisor.code})` : ''}`,
       ].join(' · ');
       doc.text(meta, X, y - 12, { font: 'light', size: 6.8, color: INK3 });
@@ -448,18 +459,37 @@ function buildAnnexBlocks(doc, model, b) {
 
   // ── the portfolio ───────────────────────────────────────────────────────
   {
-    const rows = (model.allocation || []).slice(0, b.maxAllocationRows);
+    // The cap trims the tail of the table, and the tail is sorted by weight, so
+    // a class the carteira holds nothing in sits at the very end — exactly where
+    // a breach of the floor would be cut off for being small. Any class outside
+    // its band is kept whatever the cap says; the rows that give way are the
+    // compliant ones.
+    const rows = allocationRowsToDraw(model.allocation || [], b.maxAllocationRows);
+    // A red weight in the table says a class is outside its band; this says
+    // which side and by how much. Without it the client sees the colour and has
+    // to work out the rule for themselves.
+    const breaches = (model.policy_flags || []).map((f) => f.message).filter(Boolean);
+    const breachText = breaches.length ? breaches.join(' ') : null;
+    const breachOpts = { font: 'light', size: SZ.small, leading: SZ.small * 1.35, maxWidth: W };
     blocks.push({
       // 18 title + 22 bar + 12 gap + (16 band + 4) + 15 a row, less the 5 the
       // table hands back. Guessed high, this block missed its floor by two
       // points and cost the annex three rungs of the ladder.
-      key: 'portfolio', height: 18 + 22 + 12 + 20 + rows.length * 15 - 5, gap: b.blockGap,
+      key: 'portfolio',
+      height: 18 + 22 + 12 + 20 + rows.length * 15 - 5
+        + (breachText ? doc.paragraphHeight(breachText, breachOpts) + 6 : 0),
+      gap: b.blockGap,
       draw: (y) => {
         let cy = sectionTitle(doc, y, L === 'pt-BR' ? 'Sua carteira hoje' : 'Your portfolio today',
           model.policy_version ? `${L === 'pt-BR' ? 'Política versão' : 'Policy version'} ${model.policy_version}` : null);
         cy = drawAllocationBar(doc, model, X, cy, W);
         cy -= 12;
-        return drawAllocationTable(doc, model, rows, X, cy, W);
+        cy = drawAllocationTable(doc, model, rows, X, cy, W);
+        if (breachText) {
+          cy -= 6;
+          cy = doc.paragraph(breachText, X, cy, { ...breachOpts, color: CAUTION });
+        }
+        return cy;
       },
     });
   }
@@ -469,7 +499,26 @@ function buildAnnexBlocks(doc, model, b) {
     const lines = b.compactSources
       ? [...new Set((model.sources || []).map((x) => x.provider).filter(Boolean))]
       : (model.source_lines || []);
-    const text = `${L === 'pt-BR' ? 'Fontes' : 'Sources'}: ${lines.join(' · ')}`;
+    /**
+     * The date the figures are struck at, kept even when the line is compressed.
+     *
+     * Compression drops the per-provider detail — the series codes, the tickers,
+     * the instrument lists — and that is a fair trade for the page. It was also
+     * dropping the as-of date, which is not: a letter whose claim is that every
+     * figure has a checkable origin cannot leave the reader unable to tell
+     * whether the figures are a day old or a quarter.
+     *
+     * The month's close, not the latest observation in the ledger. Every value,
+     * weight and return on this page is priced at the close; the one input that
+     * is newer is the TradingView reading, and it carries its own date in the
+     * caption above the recommendation table. Taking the newest date across all
+     * providers would have printed today beside a table of month-end prices.
+     */
+    const asOf = model.period?.end;
+    const asOfText = b.compactSources && asOf
+      ? `; ${L === 'pt-BR' ? `preços de fechamento em ${asOf.slice(8, 10)}/${asOf.slice(5, 7)}/${asOf.slice(0, 4)}` : `closing prices at ${shortDate(asOf)}`}`
+      : '';
+    const text = `${L === 'pt-BR' ? 'Fontes' : 'Sources'}: ${lines.join(' · ')}${asOfText}`;
     const unav = (model.unavailable || []).length
       ? `${L === 'pt-BR' ? 'Sem dado disponível' : 'Data unavailable'}: ${model.unavailable.map((u) => `${u.item} — ${u.reason}`).join('; ')}`
       : null;
@@ -488,6 +537,23 @@ function buildAnnexBlocks(doc, model, b) {
   }
 
   return blocks;
+}
+
+/**
+ * The allocation rows that fit, with the breaches held back from the cut.
+ *
+ * Keeps document order so the table still reads from the heaviest class down;
+ * only the choice of which rows survive the cap is changed.
+ */
+function allocationRowsToDraw(all, max) {
+  if (all.length <= max) return all;
+  const keep = new Set();
+  for (const [i, r] of all.entries()) if (r.inside_band === false) keep.add(i);
+  for (const [i] of all.entries()) {
+    if (keep.size >= max) break;
+    keep.add(i);
+  }
+  return all.filter((_, i) => keep.has(i)).slice(0, max);
 }
 
 // ── the positioning chart ──────────────────────────────────────────────────
@@ -580,7 +646,20 @@ function drawStance(doc, model, rows, x, y, w, b) {
     drawChange(doc, r.change, g.mudCx, mid_);
     doc.line(g.scaleX0, mid_, g.scaleX1, mid_, { color: RULE, width: 2 });
     const step = Math.max(-2, Math.min(2, r.step ?? 0));
-    dot(doc, g.at(step + 2), mid_, 4.1, step < 0 ? POSITION.underweight : step > 0 ? POSITION.overweight : POSITION.neutral);
+    /**
+     * The dot is coloured by compliance, and by nothing else.
+     *
+     * It used to be red under the target and green over it, which told the
+     * client that overweight is good and underweight is bad. The chart does not
+     * know that and neither does the policy: Albert's renda variável Brasil is
+     * the deviation most worth discussing in his carteira, eight points over
+     * target and close to its ceiling, and it was drawn in the reassuring
+     * colour. Position on the scale already says which side the class sits on;
+     * the colour is left to say the one thing that is actually a judgement —
+     * inside the agreed range, or outside it — and it says it in the same
+     * colour the annex table uses for the same fact.
+     */
+    dot(doc, g.at(step + 2), mid_, 4.1, Math.abs(step) === 2 ? CAUTION : POSITION.neutral);
   }
   // The rule that separates the names from the scale, the length of the rows.
   doc.line(g.ruleX, top, g.ruleX, cy - 1, { color: INK, width: 1 });
@@ -593,7 +672,17 @@ function drawStance(doc, model, rows, x, y, w, b) {
   return cy;
 }
 
-/** ▲ up, ▼ down, — unchanged; nothing at all when there is no earlier portrait to compare with. */
+/**
+ * ▲ up, ▼ down, — unchanged; nothing at all when there is no earlier portrait to
+ * compare with.
+ *
+ * Drawn in one neutral ink. A class whose weight rose is not thereby healthier
+ * than one whose weight fell — it usually rose because it went up in price, or
+ * because something else fell — and colouring the direction put a second red
+ * and green on the row, a hand's width from a red and green that meant
+ * something different. One meaning per colour; the arrow's own shape is the
+ * direction.
+ */
 function drawChange(doc, change, cx, cy) {
   if (!change) return;
   if (change === 'flat') { doc.line(cx - 4.4, cy, cx + 4.4, cy, { color: POSITION.unchanged, width: 2.2 }); return; }
@@ -603,7 +692,7 @@ function drawChange(doc, change, cx, cy) {
   const d = up
     ? `${(cx - s).toFixed(2)} ${(cy - h / 2).toFixed(2)} m ${(cx + s).toFixed(2)} ${(cy - h / 2).toFixed(2)} l ${cx.toFixed(2)} ${(cy + h / 2).toFixed(2)} l h`
     : `${(cx - s).toFixed(2)} ${(cy + h / 2).toFixed(2)} m ${(cx + s).toFixed(2)} ${(cy + h / 2).toFixed(2)} l ${cx.toFixed(2)} ${(cy - h / 2).toFixed(2)} l h`;
-  doc.path(d, { fill: up ? POSITION.up : POSITION.down, stroke: null });
+  doc.path(d, { fill: POSITION.unchanged, stroke: null });
 }
 
 /** A filled circle, in four Béziers. */
@@ -788,7 +877,12 @@ function drawRecommendationTable(doc, model, recs, x, y, w, b = { showRationale:
 
   for (const r of recs) {
     const nameW = cols[0].w * w - 8;
-    let label = r.ticker || r.name;
+    // The name a person uses, not the one on the prospectus. A fund's legal
+    // name never fits this column, so it arrived cut mid-word — "Riza Lotus
+    // Plus Advisory FIC FIRF…" — which is how the client learns the document
+    // ran out of room rather than what they own. The ellipsis stays as the last
+    // resort for a short name that still overruns.
+    let label = r.ticker || r.short_name || r.name;
     if (doc.measure('sans5', label, SZ.data) > nameW) {
       while (label.length > 4 && doc.measure('sans5', `${label}…`, SZ.data) > nameW) label = label.slice(0, -1);
       label = `${label.trimEnd()}…`;
@@ -828,9 +922,13 @@ function drawRecommendationTable(doc, model, recs, x, y, w, b = { showRationale:
 
 /**
  * The composition, as proportion alone. The weight of each class is written in
- * the Peso column of the table right under the bar, in the same order and the
- * same colours; printing it inside the segment as well only sets two roundings
- * of one number a centimetre apart.
+ * the Peso column of the table right under the bar, in the same order, and each
+ * row carries its segment's colour as a swatch beside the class name; printing
+ * the figure inside the segment as well only sets two roundings of one number a
+ * centimetre apart.
+ *
+ * The swatch on the row is the key, rather than a legend strip of its own under
+ * the bar: the names are already listed, in the same order, four points below.
  */
 function drawAllocationBar(doc, model, x, y, w) {
   const items = model.charts?.allocation?.items || [];
@@ -851,6 +949,10 @@ function drawAllocationBar(doc, model, x, y, w) {
  * than spread to the right edge, and the permitted range is drawn instead of
  * written: the band between its two extremes, the extremes named quietly at its
  * ends, and a line where the class actually stands today.
+ *
+ * The colour square in front of each name is what names the segments of the bar
+ * above. A class the policy carries at zero weight has no segment and so has no
+ * colour — it keeps the indent, so the names stay in one column.
  */
 function drawAllocationTable(doc, model, rows, x, y, w) {
   const L = model.locale;
@@ -860,9 +962,12 @@ function drawAllocationTable(doc, model, rows, x, y, w) {
   const rights = [null, x + w * 0.37, x + w * 0.485, x + w * 0.565];
   const bandX = x + w * 0.655;
   const bandW = x + w - bandX - 4;
+  const keyX = x + 4;          // the swatch, against the left edge of the table
+  const keySize = 6.5;
+  const nameX = keyX + keySize + 4;
 
   let cy = drawHeaderBand(doc, x, y, w, [
-    { label: heads[0], x: x + 4 },
+    { label: heads[0], x: nameX },
     { label: heads[1], x: rights[1], align: 'right' },
     { label: heads[2], x: rights[2], align: 'right' },
     { label: heads[3], x: rights[3], align: 'right' },
@@ -870,7 +975,10 @@ function drawAllocationTable(doc, model, rows, x, y, w) {
   ]);
   cy -= 4;
   for (const r of rows) {
-    doc.text(r.asset_class, x + 4, cy, { font: 'sans', size: SZ.data, color: INK });
+    // Centred on the same line the range bar is centred on, so the swatch, the
+    // name and the mark on the right all sit on one axis across the row.
+    if (r.color) doc.rect(keyX, cy + 3 - keySize / 2, keySize, keySize, { fill: r.color });
+    doc.text(r.asset_class, nameX, cy, { font: 'sans', size: SZ.data, color: INK });
     doc.textRight(r.value_label, rights[1], cy, { font: 'light', size: SZ.data, color: INK });
     doc.textRight(r.weight_label, rights[2], cy, { font: 'sans5', size: SZ.data, color: r.inside_band ? INK : CAUTION });
     doc.textRight(r.target_label, rights[3], cy, { font: 'light', size: SZ.data, color: INK3 });

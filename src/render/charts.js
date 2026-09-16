@@ -62,6 +62,10 @@ export function prepareAllocation(report, { classLabel = (k) => k } = {}) {
   return {
     kind: 'allocation',
     items: rows.map((r, i) => ({
+      // The key travels with the colour so the table under the bar can pick up
+      // its own class's swatch: a class the policy carries at zero weight is
+      // dropped from the bar above and would shift every colour after it.
+      key: r.asset_class,
       label: classLabel(r.asset_class),
       weight: r.weight,
       target: r.target,

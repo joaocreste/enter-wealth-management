@@ -193,6 +193,7 @@ export async function assembleLetter(env, state, { force = false, reportId = nul
       return { ...i, summary: src.summary, summary_pt: src.summary_pt ?? null, category: src.category, importance: src.importance, direction: src.direction, date: i.date ?? src.date };
     }),
     narrative: state.narrative, exposures: state.exposures,
+    portfolioFlags: state.portfolio_flags,
     locale: env.REPORT_LOCALE || 'pt-BR', reportId: finalId, graphRunId,
     promptVersion,
   });
@@ -330,7 +331,20 @@ export function narrativeFacts(state) {
       target_price: r.target_price, implied_upside: r.implied_upside, current_weight: r.current_weight,
       factors: r.factors, flags: r.flags, advisor_status: r.advisor_status,
     })),
-    allocation: Object.entries(state.exposures || {}).map(([k, v]) => ({ asset_class: k, weight: v, target: state.ctx.policy?.target_allocation?.[k] ?? null, range: state.ctx.policy?.permitted_ranges?.[k] ?? null })),
+    // One row per class the policy governs, not one per class the client holds,
+    // so a class sitting under its floor is a fact the letter can see. Read off
+    // the holdings, a class at zero had no row and the model could not have
+    // written about it even if asked.
+    allocation: P.allocationRows({ exposures: state.exposures, policy: state.ctx.policy })
+      .map(({ asset_class, weight, target, range }) => ({ asset_class, weight, target, range })),
+    /**
+     * Breaches that belong to the carteira rather than to a position. The
+     * recommendation rows carry their own; these have nowhere else to live, and
+     * the letter is told to name every one of them.
+     */
+    policy_breaches: (state.portfolio_flags || [])
+      .filter((f) => f.breach)
+      .map((f) => ({ code: f.code, asset_class: f.asset_class ?? null, statement_pt: f.message_pt || f.message })),
     /**
      * The house view. Without this the letter has no opinion in it, and an
      * opinion is the one thing a client cannot get from their own statement.
@@ -363,6 +377,13 @@ export function narrativeFacts(state) {
       excess_abs: bench.available && bench.value != null && perf.monthly_return != null ? pp(Math.abs(perf.monthly_return - bench.value), { locale: 'pt-BR', signed: false }) : null,
       ending_value: perf.ending_market_value == null ? null : money(perf.ending_market_value, { currency: state.ctx.client.base_currency || 'BRL', locale: 'pt-BR' }),
       next_meeting: state.next_meeting ? dateLong(state.next_meeting, 'pt-BR') : null,
+      // The size of the month's largest detractor. The letter opens by naming
+      // it as the explanation of the month, and a cause named without its size
+      // is half an explanation — the reader is left to turn the page to learn
+      // whether "pesou" meant a tenth of a point or two points.
+      worst_contribution: perf.attribution?.worst_contributor?.contribution == null
+        ? null
+        : pp(perf.attribution.worst_contributor.contribution, { locale: 'pt-BR' }),
     },
   };
 }

@@ -8,7 +8,7 @@
  *
  * Nothing here computes finance. It formats what the pipeline already computed.
  */
-import { money, percent, pp, weight as fmtWeight, monthLabel, dateLong, shortDate, arrow, toneOf, MINUS } from '../core/format.js';
+import { money, percent, pp, weight as fmtWeight, monthLabel, dateLong, shortDate, shortAssetName, arrow, toneOf, MINUS } from '../core/format.js';
 import { SourceLedger } from '../core/sources.js';
 import { withinPolicy, policyFitLabel } from '../core/suitability.js';
 import { prepareContribution, preparePortfolioVsBenchmark, prepareAllocation, prepareContributors } from './charts.js';
@@ -290,10 +290,14 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
   const grouped = { ADD: [], HOLD: [], REDUCE: [], EXIT: [], DISCUSS: [] };
   for (const r of selected) (grouped[r.final_action] ||= []).push(r);
 
-  const recommendations = selected.map((r) => ({
+  const recommendations = selected.map((r) => {
+    const flags = (r.flags || []).map((f) => ({ ...f, message: (L === 'pt-BR' ? f.message_pt : f.message) || f.message }));
+    const marketRationale = (L === 'pt-BR' ? r.rationale_pt : r.rationale) || r.rationale_pt || r.rationale || null;
+    return {
     asset_id: r.asset_id,
     ticker: r.ticker,
     name: r.name,
+    short_name: shortAssetName(r.name),
     asset_class: L === 'pt-BR' ? ASSET_CLASS_PT[r.asset_class] || r.asset_class : r.asset_class,
     action: r.final_action,
     action_label: (L === 'pt-BR' ? ACTION_PT : ACTION_EN)[r.final_action] || r.final_action,
@@ -309,16 +313,33 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
     suitability_label: policyFitLabel(r, L),
     market_signal_line: r.statement?.market_signal ?? null,
     suitability_line: r.statement?.client_suitability ?? null,
-    rationale: (L === 'pt-BR' ? r.rationale_pt : r.rationale) || r.rationale_pt || r.rationale || null,
-    flags: (r.flags || []).map((f) => ({ ...f, message: (L === 'pt-BR' ? f.message_pt : f.message) || f.message })),
+    /**
+     * One line under the row, and the row gets only one. Where the position is
+     * out of the client's policy, that line is the rule it breaks.
+     *
+     * The market rationale is the better read when there is a choice to make —
+     * but there is no choice to make about a breach, and a client told "Fora da
+     * política · Manter" and then given a paragraph about analysts disagreeing
+     * has been told everything except which rule is broken. The engine already
+     * writes the rule out in the flag; the row simply printed the wrong one of
+     * the two. Where nothing is breached, the market rationale stands.
+     */
+    rationale: (withinPolicy(r) ? null : flags.find((f) => f.breach)?.message) || marketRationale,
+    flags,
     target_price: r.target_price,
     implied_upside: r.implied_upside,
-  }));
+    };
+  });
 
   // ── allocation ────────────────────────────────────────────────────────────
+  // The stacked bar is prepared before the table so each row can carry the
+  // colour of its own segment. Without it the bar is five colours nobody named.
+  const allocationChart = prepareAllocation(report, { classLabel });
+  const allocationColor = new Map(allocationChart.items.map((i) => [i.key, i.color]));
   const allocation = (report.approved_portfolio?.allocation || []).map((a) => ({
     asset_class: L === 'pt-BR' ? ASSET_CLASS_PT[a.asset_class] || a.asset_class : a.asset_class,
     asset_class_key: a.asset_class,
+    color: allocationColor.get(a.asset_class) ?? null,
     weight: a.weight,
     weight_label: fmtWeight(a.weight, { locale: L, decimals: 1 }),
     value: a.value,
@@ -421,6 +442,19 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
       : null,
     allocation,
     stance,
+    /**
+     * Breaches that belong to the carteira rather than to a position: a class
+     * under its floor or over its ceiling. They have no recommendation row to
+     * ride on, so without this the letter could show a class outside its band in
+     * the chart and never say so in words.
+     */
+    policy_flags: (report.approved_portfolio?.policy_flags || [])
+      .filter((f) => f.breach)
+      .map((f) => ({
+        code: f.code,
+        asset_class: f.asset_class ? (L === 'pt-BR' ? ASSET_CLASS_PT[f.asset_class] || f.asset_class : f.asset_class) : null,
+        message: (L === 'pt-BR' ? f.message_pt : f.message) || f.message,
+      })),
     impact,
     metrics: report.portfolio_metrics,
     policy_version: report.approved_portfolio?.policy_version ?? null,
@@ -429,7 +463,7 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
     charts: {
       contribution: prepareContribution(report, { classLabel }),
       vs_benchmark: preparePortfolioVsBenchmark(report),
-      allocation: prepareAllocation(report, { classLabel }),
+      allocation: allocationChart,
       contributors: prepareContributors(report),
     },
     sources: report.sources || [],
@@ -453,15 +487,22 @@ export function buildLetterModel(report, { locale = 'pt-BR', maxLetterRecommenda
  *
  * Without a target or a range there is nothing to be over or under, and the
  * class sits at the centre rather than being placed by a number nobody agreed.
+ *
+ * The outermost steps are read off the band itself, not off the ratio. The
+ * caption promises that −− and ++ mean outside the permitted range, and a class
+ * sitting exactly on its floor is inside it: measured by ratio alone, a class
+ * with a 3 % target and a 0–8 % range scored −− at 0 %, calling a compliant
+ * weight a breach. Inside the band the ratio still does the work, capped at one
+ * step in.
  */
 export function stanceStep(weight, target, range) {
   if (weight == null || target == null || !range || range.min == null || range.max == null) return 0;
+  if (weight < range.min - 1e-9) return -2;
+  if (weight > range.max + 1e-9) return 2;
   const d = weight - target;
   const room = d >= 0 ? range.max - target : target - range.min;
-  if (!(room > 0)) return d > 0 ? 2 : d < 0 ? -2 : 0;
+  if (!(room > 0)) return d > 0 ? 1 : d < 0 ? -1 : 0;
   const r = d / room;
-  if (r >= 1) return 2;
-  if (r <= -1) return -2;
   if (r >= 1 / 3) return 1;
   if (r <= -1 / 3) return -1;
   return 0;

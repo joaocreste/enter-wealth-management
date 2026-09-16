@@ -273,6 +273,7 @@ export async function evaluateTriggers(env, indicators, advisorId = null) {
     comparator: r.comparator, threshold: r.threshold, unit: r.unit,
     approach_ratio: r.approach_ratio, persistence_days: r.persistence_days,
     asset_classes: json(r.asset_classes_json, []), action: r.action, action_pt: r.action_pt,
+    rationale: r.rationale, source: r.source,
   }));
 
   return triggers.map((t) => {

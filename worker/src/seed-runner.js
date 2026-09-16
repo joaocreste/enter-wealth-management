@@ -197,10 +197,11 @@ export async function seedDatabase(env) {
 
   // ── triggers and curated events ────────────────────────────────────────
   await db.batch(TRIGGERS.map((t) => db.prepare(
-    `INSERT INTO market_triggers (id, label, indicator_key, field, comparator, threshold, unit, approach_ratio, persistence_days, asset_classes_json, action, action_pt, enabled)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+    `INSERT INTO market_triggers (id, label, indicator_key, field, comparator, threshold, unit, approach_ratio, persistence_days, asset_classes_json, action, action_pt, rationale, source, enabled)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
   ).bind(t.id, t.label, t.indicator_key, t.field || 'price', t.comparator, t.threshold, t.unit ?? null,
-    t.approach_ratio ?? 0.95, t.persistence_days ?? 1, JSON.stringify(t.asset_classes || []), t.action ?? null, t.action_pt ?? null)));
+    t.approach_ratio ?? 0.95, t.persistence_days ?? 1, JSON.stringify(t.asset_classes || []), t.action ?? null, t.action_pt ?? null,
+    t.rationale ?? null, t.source ?? null)));
 
   await db.batch(CURATED_EVENTS.map((e) => db.prepare(
     `INSERT INTO market_events (id, date, title, category, summary, title_pt, summary_pt, impact_note_pt, discussion_prompt_pt, direction, move_label, indicator_key, asset_classes_json, instruments_json, impact_note, discussion_prompt, importance, source_id)

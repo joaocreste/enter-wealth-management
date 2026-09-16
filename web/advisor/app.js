@@ -123,13 +123,26 @@ async function viewOverview() {
     h('section.section', {},
       h('div.section-h', {}, h('h2', { text: 'Gatilhos de mercado' }),
         h('span.meta', { text: `${breached} ${breached === 1 ? 'gatilho acionado' : 'gatilhos acionados'} de ${o.triggers.length} limiares monitorados · a barra mede a distância até o limiar; a marca é o limiar` })),
+      o.triggers.some((t) => t.unsourced) ? h('p.note', { style: { margin: '-8px 0 16px' } },
+        'O valor observado vem de provedor identificado; o limiar, não. ',
+        `${o.triggers.filter((t) => t.unsourced).length} de ${o.triggers.length} são convenção de mesa, sem documento que os autorize — os que estão acionados ou próximos disso trazem a marca, e o cursor sobre qualquer limiar mostra por que aquele nível. `,
+        h('a', { href: '#/triggers', text: 'Ver a procedência de cada um.' })) : null,
       h('div.card.bars-wide', {},
         h('div', {}, o.triggers.slice().sort(triggerOrder).map((t) => h('div.trg.bars', {},
           h('span', { class: `dot ${t.status}` }),
           h('div', {},
             h('div.lab', {}, t.label,
               t.status === 'BREACHED' ? h('span.chip.warn', { text: 'acionado · ação devida' })
-                : t.status === 'APPROACHING' ? h('span.chip', { text: 'aproximando' }) : null),
+                : t.status === 'APPROACHING' ? h('span.chip', { text: 'aproximando' }) : null,
+              // The level is an opinion, and the mark says whose. It goes where
+              // the opinion is being acted on: a fired or nearly fired trigger
+              // is recommending something off an unsigned number, and that must
+              // not read as a house call (§29). On a trigger sitting far from
+              // its level the section note and the threshold's own tooltip say
+              // it, and a chip on every row would only wear the warning out.
+              t.unsourced && (t.status === 'BREACHED' || t.status === 'APPROACHING')
+                ? h('span.chip.unsigned', { title: `${t.rationale || 'Nenhuma justificativa declarada.'}\n\nNenhum documento autoriza este limiar — convenção de mesa até que alguém a assine.`, text: 'limiar sem documento' })
+                : null),
             t.status === 'BREACHED'
               ? h('div.det.due', {}, h('b', { text: 'Ação: ' }), t.action_pt || t.action || '',
                 t.affected_clients?.length ? h('span.muted', { text: ` — ${t.affected_clients.length} cliente(s) expostos: ${t.affected_clients.slice(0, 3).map((c) => c.client_name.split(' ')[0]).join(', ')}${t.affected_clients.length > 3 ? ` +${t.affected_clients.length - 3}` : ''}` }) : null)
@@ -138,7 +151,10 @@ async function viewOverview() {
             t.status === 'NO_DATA' ? h('div.bullet', {}, h('div.track')) : bulletBar({ proximity: t.proximity, status: t.status }),
             h('span.vals', {},
               h('span', { class: t.status === 'BREACHED' ? 'caution' : '', text: t.observed == null ? 'sem leitura' : fmtLevel(t.observed, t.unit) }),
-              h('span', { text: `limiar ${fmtLevel(t.threshold, t.unit)}` })))))))),
+              h('span', {
+                title: [t.rationale, t.source ? `Origem: ${t.source}` : 'Sem documento de origem: convenção de mesa.'].filter(Boolean).join('\n\n'),
+                text: `limiar ${fmtLevel(t.threshold, t.unit)}`,
+              })))))))),
 
     // ── allocation drift, per client ────────────────────────────────────
     h('section.section', {},
@@ -520,20 +536,36 @@ async function viewSignals() {
 }
 
 // ═══ triggers configuration ════════════════════════════════════════════════
+// The observed value on this page names its provider. The threshold is an
+// opinion about a number, so it says who formed it: the rationale next to the
+// level, and the document that authorises it — or, plainly, that none does.
+const sourceChip = (t) => (t.unsourced
+  ? h('span.chip.unsigned', { title: 'Nenhum documento autoriza este limiar. Convenção de mesa até que alguém a assine.', text: 'sem documento' })
+  : h('span.chip.approved', { title: t.source, text: 'documentado' }));
+
 async function viewTriggers() {
   const d = await api('/api/advisor/triggers');
+  const unsourced = d.unsourced ?? d.triggers.filter((t) => t.unsourced).length;
   return frag(
     head('Gatilhos', 'Limiares configuráveis. Alterar um limite é uma mudança de dado, não de código.', null,
-      [h('b', { text: 'Configuração' }), sep(), `${d.triggers.length} limiares`]),
-    table(['Gatilho', 'Indicador', 'Condição', { label: 'Limite', num: true }, 'Classes afetadas', 'Ação sugerida'],
+      [h('b', { text: 'Configuração' }), sep(), `${d.triggers.length} limiares`, unsourced ? sep() : null, unsourced ? `${unsourced} sem documento` : null]),
+    unsourced ? h('div.hint', { style: { marginBottom: '20px' } },
+      h('b', { text: 'Procedência dos limiares: ' }),
+      `${unsourced} ${unsourced === 1 ? 'destes limiares não tem' : 'destes limiares não têm'} documento de origem. `,
+      'São convenções de mesa escritas na configuração do produto, não uma visão publicada da XP. ',
+      'O valor observado ao lado de cada um vem de provedor identificado — Yahoo Finance, Banco Central, CoinGecko — mas o número que define o limiar não foi assinado por ninguém. ',
+      'Enquanto estiver assim, o portal os marca, e não devem ser apresentados a um cliente como posição da casa.') : null,
+    table(['Gatilho', 'Indicador', 'Condição', { label: 'Limite', num: true }, 'Por que este nível', 'Origem', 'Classes afetadas', 'Ação sugerida'],
       d.triggers.map((t) => h('tr', {},
         h('td', {}, h('span.name', { text: t.label })),
         h('td.mono', { style: { fontSize: '11px' }, text: t.indicator_key }),
         h('td.mono', { style: { fontSize: '11px' }, text: t.comparator }),
         h('td.num', { text: `${num(t.threshold, 2)} ${t.unit || ''}` }),
+        h('td', { style: { maxWidth: '300px' } }, t.rationale || h('span.muted', { text: 'não declarado' })),
+        h('td', {}, sourceChip(t), t.source ? h('span.sub', { text: t.source }) : null),
         h('td', { text: (t.asset_classes || []).join(', ') || '—' }),
-        h('td', { style: { maxWidth: '320px' }, text: t.action_pt || t.action || '—' })))),
-    h('p.note', { style: { marginTop: '14px' }, text: 'Persistência, razão de aproximação e classes afetadas são colunas da tabela market_triggers. Um novo gatilho é uma linha, não um deploy.' }),
+        h('td', { style: { maxWidth: '280px' }, text: t.action_pt || t.action || '—' })))),
+    h('p.note', { style: { marginTop: '14px' }, text: 'Persistência, razão de aproximação e classes afetadas são colunas da tabela market_triggers. Um novo gatilho é uma linha, não um deploy — mas a linha precisa dizer por que aquele nível, e de onde ele veio.' }),
   );
 }
 

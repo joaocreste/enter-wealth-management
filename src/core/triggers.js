@@ -25,8 +25,25 @@ const COMPARATORS = {
 export const TRIGGER_STATUS = { ARMED: 'ARMED', APPROACHING: 'APPROACHING', BREACHED: 'BREACHED', NO_DATA: 'NO_DATA' };
 
 /**
+ * Where a threshold came from, carried onto every evaluation (§29).
+ *
+ * `source_id` on the result is the provider of the observed value. It says
+ * nothing about the threshold, which is an opinion about a number rather than
+ * a number anyone retrieved. `rationale` is why that level, `source` is the
+ * document or decision that set it, and `unsourced` is true when no document
+ * has — so the portal can print the threshold without letting it pass as a
+ * house view nobody signed.
+ */
+const provenance = (t) => ({
+  rationale: t.rationale ?? null,
+  source: t.source ?? null,
+  unsourced: !t.source,
+});
+
+/**
  * @param {object} trigger  { id, label, indicator_key, field, comparator, threshold, unit,
- *                            approach_ratio, persistence_days, asset_classes, action }
+ *                            approach_ratio, persistence_days, asset_classes, action,
+ *                            rationale, source }
  * @param {object} reading  { value, asOf, history?: [{date, value}] }
  */
 export function evaluateTrigger(trigger, reading) {
@@ -41,6 +58,7 @@ export function evaluateTrigger(trigger, reading) {
       asset_classes: trigger.asset_classes || [],
       action: trigger.action,
       action_pt: trigger.action_pt ?? null,
+      ...provenance(trigger),
       reason: reading?.reason || 'indicator unavailable',
       source_id: null,
     };
@@ -86,6 +104,7 @@ export function evaluateTrigger(trigger, reading) {
     asset_classes: trigger.asset_classes || [],
     action: trigger.action,
     action_pt: trigger.action_pt ?? null,
+    ...provenance(trigger),
     source_id: reading.source?.id ?? null,
   };
 }

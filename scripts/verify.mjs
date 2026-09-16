@@ -11,6 +11,7 @@ import { monthlyProfitability, modifiedDietz, timeWeightedReturn, historicalMetr
 import { proposeForAsset, bandPosition, ACTIONS } from '../src/core/recommendations.js';
 import { checkSuitability, SUITABILITY, withinPolicy, policyFitLabel } from '../src/core/suitability.js';
 import { evaluateTrigger, driftTriggers, triggerProximity, TRIGGER_STATUS } from '../src/core/triggers.js';
+import { TRIGGERS as SEEDED_TRIGGERS } from '../seed/market.mjs';
 import { validateReport, emptyReport, standardDisclosures } from '../src/core/report-schema.js';
 import { money, percent, pp, previousMonth, monthBounds, MINUS } from '../src/core/format.js';
 import { TrueTypeFont } from '../src/render/pdf/ttf.js';
@@ -245,6 +246,30 @@ t('no risk-free rate means no Sharpe ratio, never a Sharpe against zero', () => 
   eq(roll[0].sharpe, null);
   eq(roll[0].risk_free_return, null);
   ok(roll[0].volatility > 0);
+});
+
+t('a threshold carries where it came from, and says plainly when nowhere', () => {
+  const t = { id: 'trg_x', label: 'Brent acima de US$ 90/bbl', comparator: 'gt', threshold: 90, unit: 'USD/bbl', rationale: 'repasse às margens do consumo' };
+  const e = evaluateTrigger(t, { value: 108, asOf: '2026-09-15', source: { id: 'src_yahoo_1' } });
+  eq(e.rationale, 'repasse às margens do consumo');
+  ok(e.unsourced, 'no document behind the level means unsourced');
+  eq(e.source_id, 'src_yahoo_1', 'source_id is the provider of the observed value, not of the threshold');
+  const signed = evaluateTrigger({ ...t, source: 'Comitê de Investimentos, ata de 12/03/2026' }, { value: 108, source: { id: 'src_yahoo_1' } });
+  ok(!signed.unsourced);
+  eq(signed.source, 'Comitê de Investimentos, ata de 12/03/2026');
+});
+t('a threshold with no reading still says where the level came from', () => {
+  const e = evaluateTrigger({ id: 'trg_y', label: 'x', threshold: 10, rationale: 'porque sim' }, { unavailable: true, reason: 'sem provedor' });
+  eq(e.status, TRIGGER_STATUS.NO_DATA);
+  eq(e.rationale, 'porque sim');
+  ok(e.unsourced);
+});
+t('every shipped threshold declares why that level, and none claims a document', () => {
+  const TRIGGERS = SEEDED_TRIGGERS;
+  const mute = TRIGGERS.filter((t) => !t.rationale || t.rationale.length < 12);
+  eq(mute.length, 0, `every trigger needs a rationale; missing on ${mute.map((t) => t.id).join(', ')}`);
+  const claiming = TRIGGERS.filter((t) => t.source);
+  eq(claiming.length, 0, 'the seeded thresholds are desk conventions; none may claim a document it does not have');
 });
 
 console.log('\n  Recommendations and the guardrail');

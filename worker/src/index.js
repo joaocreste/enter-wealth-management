@@ -325,9 +325,13 @@ async function route(request, env, url, ctx) {
 
   if (path === '/api/advisor/triggers') {
     if (session.role === 'client') return bad(403, 'advisor surface');
-    if (method === 'POST') return ok(await upsertTrigger(env, session, body));
+    if (method === 'POST') {
+      const saved = await upsertTrigger(env, session, body);
+      return saved.error ? bad(400, saved.error) : ok(saved);
+    }
     const rows = await all(db, 'SELECT * FROM market_triggers ORDER BY indicator_key, threshold');
-    return ok({ triggers: rows.map((r) => ({ ...r, asset_classes: json(r.asset_classes_json, []) })) });
+    const triggers = rows.map((r) => ({ ...r, asset_classes: json(r.asset_classes_json, []), unsourced: !r.source }));
+    return ok({ triggers, unsourced: triggers.filter((t) => t.unsourced).length });
   }
 
   if (path === '/api/advisor/correlations') {
@@ -419,7 +423,36 @@ async function advisorOverview(env, ctx, session) {
   const result = json(last.result_json, {});
   // A run stored before the table was split by region gets its rows classified on the way out.
   const whatMatters = (result.what_matters || []).map((r) => ({ ...r, region: eventRegion(r) }));
-  return { ...result, what_matters: whatMatters, run: A.runView(last), active_run: active && active.status === 'running' ? active : null };
+  return {
+    ...result,
+    what_matters: whatMatters,
+    triggers: await withThresholdProvenance(db, result.triggers),
+    run: A.runView(last),
+    active_run: active && active.status === 'running' ? active : null,
+  };
+}
+
+/**
+ * Where each threshold came from, read at page time rather than off the run.
+ *
+ * The observed value is a fact about the morning and belongs to the run that
+ * retrieved it. The threshold is an opinion about a number, and whose opinion
+ * it is can change between runs — a desk convention that gets signed, or a
+ * rationale someone rewrites, should show the moment it is saved rather than
+ * at the next cron. Runs stored before the columns existed are enriched the
+ * same way, so nothing has to be re-run for a threshold to say where it came
+ * from (§29).
+ */
+async function withThresholdProvenance(db, triggers) {
+  if (!triggers?.length) return triggers || [];
+  const rows = await all(db, 'SELECT id, rationale, source FROM market_triggers');
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return triggers.map((t) => {
+    const row = byId.get(t.trigger_id);
+    // a trigger deleted since the run keeps whatever the run recorded
+    if (!row) return { ...t, unsourced: t.unsourced ?? !t.source };
+    return { ...t, rationale: row.rationale, source: row.source, unsourced: !row.source };
+  });
 }
 
 /**
@@ -592,18 +625,32 @@ async function saveWorldView(env, session, body) {
   return { ...updated, briefing: json(updated.briefing_json, {}), stance: json(updated.stance_json, {}) };
 }
 
+/**
+ * A threshold is an opinion about a number, printed beside an observed price
+ * that names its provider. Whoever sets one says why (§29): `rationale` is
+ * required, `source` — the minute, note or policy that authorises it — is not,
+ * because a desk convention nobody has signed is a legitimate thing to monitor.
+ * It is not a legitimate thing to print as a house view, so an unsourced
+ * threshold is marked as unsigned everywhere it appears rather than refused.
+ */
 async function upsertTrigger(env, session, body) {
   const db = env.DB;
+  const rationale = String(body.rationale ?? '').trim();
+  if (rationale.length < 12) {
+    return { error: 'a threshold needs a rationale: one sentence on why this level and not another' };
+  }
   const advisor = await advisorFor(env, session);
   const tid = body.id || id('trg');
-  await run(db, `INSERT INTO market_triggers (id, label, indicator_key, field, comparator, threshold, unit, approach_ratio, persistence_days, asset_classes_json, action, enabled, advisor_id, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  await run(db, `INSERT INTO market_triggers (id, label, indicator_key, field, comparator, threshold, unit, approach_ratio, persistence_days, asset_classes_json, action, rationale, source, enabled, advisor_id, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET label=excluded.label, indicator_key=excluded.indicator_key, comparator=excluded.comparator,
       threshold=excluded.threshold, unit=excluded.unit, persistence_days=excluded.persistence_days,
-      asset_classes_json=excluded.asset_classes_json, action=excluded.action, enabled=excluded.enabled, updated_at=excluded.updated_at`,
+      asset_classes_json=excluded.asset_classes_json, action=excluded.action, rationale=excluded.rationale,
+      source=excluded.source, enabled=excluded.enabled, updated_at=excluded.updated_at`,
     tid, body.label, body.indicator_key, body.field || 'price', body.comparator || 'gt', Number(body.threshold),
     body.unit || null, body.approach_ratio ?? 0.95, body.persistence_days ?? 1,
-    JSON.stringify(body.asset_classes || []), body.action || null, body.enabled === false ? 0 : 1, advisor.id, nowIso());
+    JSON.stringify(body.asset_classes || []), body.action || null, rationale, String(body.source ?? '').trim() || null,
+    body.enabled === false ? 0 : 1, advisor.id, nowIso());
   await audit(db, { entity: 'market_trigger', entity_id: tid, action: body.id ? 'updated' : 'created', actor_id: session.user_id, detail: body });
   return { id: tid, ok: true };
 }

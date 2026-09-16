@@ -377,7 +377,11 @@ table.d td .split{flex-wrap:nowrap}
 .chip.reduce,.chip.exit{color:var(--loss-text);background:var(--loss-fill)}
 .chip.discuss,.chip.warn{color:var(--caution);background:var(--caution-wash)}
 .chip.hold{color:var(--ink-700)}
-.chip.mock{color:var(--caution);border-color:var(--caution);background:transparent;font-family:var(--mono);font-size:10px;letter-spacing:.08em}
+/* MOCK DATA and an unsigned threshold are the same kind of warning: what is
+   shown is not quite what it looks like. Same quiet outline, never a fill —
+   it qualifies a figure, it is not an alert about the market. */
+.chip.mock,.chip.unsigned{color:var(--caution);border-color:var(--caution);background:transparent;font-family:var(--mono);font-size:10px;letter-spacing:.08em}
+.chip.unsigned{cursor:help;white-space:normal}
 .chip.live{color:var(--structure);border-color:var(--structure);background:transparent;font-family:var(--mono);font-size:10px;letter-spacing:.08em}
 .chip.approved{color:var(--gain-text);border-color:var(--g-200);background:transparent}
 .chip.rejected{color:var(--loss-text);border-color:var(--r-200);background:transparent}

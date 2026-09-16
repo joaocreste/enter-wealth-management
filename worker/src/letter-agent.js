@@ -43,6 +43,7 @@ import { artefactLinks } from './links.js';
 import { previousMonth, monthLabel } from '../../src/core/format.js';
 import { INDICATORS } from '../../seed/market.mjs';
 import { PROMPT_VERSION } from '../../src/llm/prompts.js';
+import { withinPolicy } from '../../src/core/suitability.js';
 
 export const LETTER_AGENTS = [
   { step: 1, key: 'dados', title: 'Carta · Dados', what: 'a carteira aprovada, a política, os preços do mês e o câmbio' },
@@ -269,7 +270,13 @@ async function agentAnalise(env, runId, s1) {
     state.exposures = built.exposures;
 
     await saveState(state);
-    const outside = built.recommendations.filter((r) => r.suitability_result && r.suitability_result !== 'within_policy').length;
+    // withinPolicy, not a string comparison against a value suitability_result
+    // never takes. The field holds PASS, DISCUSS_ONLY, DO_NOT_ADD,
+    // REDUCE_REQUIRED or BLOCKED; "within_policy" is the name of the question,
+    // not one of the answers, so every evaluated position failed the test and
+    // the advisor watched the card announce that all fourteen of Albert's
+    // positions were out of policy while the letter named two.
+    const outside = built.recommendations.filter((r) => !withinPolicy(r)).length;
     await report(2, 58, `Carta · Análise — ${built.recommendations.length} ${built.recommendations.length === 1 ? 'posição avaliada' : 'posições avaliadas'}${outside ? `, ${outside} fora da política` : ', todas dentro da política'}${carried ? `; ${carried} ${carried === 1 ? 'decisão sua foi mantida' : 'decisões suas foram mantidas'}` : ''}`);
     return state;
   } catch (err) {
@@ -287,7 +294,21 @@ async function agentRedacao(env, runId, s2) {
     const narrative = await LP.buildNarrative(env, s2);
     const state = { ...s2, narrative };
     await saveState(state);
-    await report(3, 74, `Carta · Redação — carta pronta em ${narrative.letter.paragraphs.length} ${narrative.letter.paragraphs.length === 1 ? 'parágrafo' : 'parágrafos'} (${narrative.mode === 'model' ? narrative.model : 'sem modelo de linguagem: texto determinístico a partir dos mesmos fatos'})`);
+    /**
+     * When the model was tried and refused, the card says so and says why.
+     *
+     * "Sem modelo de linguagem" covers two different events: no key configured,
+     * and a key that answered with something the guardrail would not publish.
+     * The advisor needs to tell them apart — the first is how the product is
+     * meant to run offline, the second is a fault someone has to look at — and
+     * the reason was being computed, returned and thrown away.
+     */
+    const how = narrative.mode === 'model'
+      ? narrative.model
+      : narrative.mode === 'deterministic_template'
+        ? 'sem modelo de linguagem: texto determinístico a partir dos mesmos fatos'
+        : `texto determinístico: o modelo foi consultado e a resposta foi recusada — ${narrative.fallback_reason || 'motivo não registrado'}`;
+    await report(3, 74, `Carta · Redação — carta pronta em ${narrative.letter.paragraphs.length} ${narrative.letter.paragraphs.length === 1 ? 'parágrafo' : 'parágrafos'} (${how})`);
     return state;
   } catch (err) {
     await fail(err);
